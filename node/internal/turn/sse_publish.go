@@ -133,7 +133,7 @@ func (o *Orchestrator) publishTurnFinished(sessionID, finishReason string, noWor
 
 // PublishBudgetExhausted emits the terminal SSE after the lifecycle projection
 // has recorded a budget-exhausted Turn. budgetReason identifies the actual
-// limit that prevented further work (for example max_steps or max_input_tokens).
+// max_tool_calls limit that prevented further tool execution.
 func (o *Orchestrator) PublishBudgetExhausted(sessionID, turnID string, generation uint64, budgetReason string) {
 	o.publishTurnFinishedWithDetails(sessionID, "budget_exhausted", map[string]any{
 		"budget_reason":   budgetReason,

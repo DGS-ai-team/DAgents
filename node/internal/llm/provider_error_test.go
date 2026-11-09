@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"net/http"
 	"testing"
 )
 
@@ -48,6 +49,48 @@ func TestProviderErrorCodeClassifiesTimeoutSeparatelyFromEOF(t *testing.T) {
 		{name: "context deadline", err: context.DeadlineExceeded, want: "provider_timeout"},
 		{name: "network timeout", err: providerTestNetworkError{timeout: true}, want: "provider_timeout"},
 		{name: "ordinary EOF", err: io.EOF, want: "provider_network_error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ProviderErrorCode(tt.err); got != tt.want {
+				t.Fatalf("ProviderErrorCode(%v) = %q, want %q", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProviderErrorCodePrefersStructuredProviderCode(t *testing.T) {
+	tests := []struct {
+		name string
+		err  *ProviderHTTPError
+		want string
+	}{
+		{
+			name: "403 insufficient quota",
+			err:  &ProviderHTTPError{StatusCode: http.StatusForbidden, Body: `{"error":{"message":"free quota exhausted","type":"insufficient_quota","code":"insufficient_quota"}}`},
+			want: "provider_quota",
+		},
+		{
+			name: "structured auth code",
+			err:  &ProviderHTTPError{StatusCode: http.StatusForbidden, Body: `{"error":{"type":"authentication_error","code":"invalid_api_key"}}`},
+			want: "provider_authentication",
+		},
+		{
+			name: "quota in root envelope",
+			err:  &ProviderHTTPError{StatusCode: http.StatusBadRequest, Body: `{"type":"quota_exceeded"}`},
+			want: "provider_quota",
+		},
+		{
+			name: "unknown 403 falls back to configuration",
+			err:  &ProviderHTTPError{StatusCode: http.StatusForbidden, Body: `{"error":{"message":"permission denied","code":"model_access_denied"}}`},
+			want: "provider_configuration",
+		},
+		{
+			name: "unstructured body does not alter fallback",
+			err:  &ProviderHTTPError{StatusCode: http.StatusForbidden, Body: `insufficient_quota`},
+			want: "provider_configuration",
+		},
 	}
 
 	for _, tt := range tests {

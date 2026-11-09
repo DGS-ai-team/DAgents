@@ -209,8 +209,8 @@ func ProductNodeSettingsSeed() *config.Config {
 			BashOutputEncoding: "utf-8",
 			BashCompress: config.BashCompressConfig{
 				Enabled:              &bashCompress,
-				MaxOutputChars:       12000,
-				MaxOutputCharsStderr: 16000,
+				MaxOutputChars:       config.DefaultBashCompressMaxOutputChars,
+				MaxOutputCharsStderr: config.DefaultBashCompressMaxOutputCharsStderr,
 			},
 		},
 		Hooks: config.HooksConfig{
@@ -221,10 +221,7 @@ func ProductNodeSettingsSeed() *config.Config {
 			ToolResult: config.ToolResultHookConfig{
 				Enabled:              &toolResult,
 				SpillThresholdTokens: 12000,
-				Tools: []string{
-					"bash_run", "read_file", "grep_file", "grep_files",
-					"search_replace", "glob_files",
-				},
+				Tools:                config.DefaultToolResultHookTools(),
 			},
 		},
 	}

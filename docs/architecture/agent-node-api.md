@@ -91,7 +91,7 @@ Content-Type: application/json
 
 {
   "display_name": "助手",
-  "defaults": { "llm": { "active": "deepseek", "max_steps": 32 } }
+  "defaults": { "llm": { "active": "deepseek", "max_tool_calls": 64 } }
 }
 ```
 

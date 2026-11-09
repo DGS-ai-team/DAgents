@@ -36,6 +36,20 @@ const (
 	MessageFormToolResult   MessageSourceForm = "tool_result"
 )
 
+const (
+	turnCancellationProducer  = "turn_runtime"
+	turnCancellationOperation = "cancelled_turn_context"
+	turnFailureOperation      = "failed_turn_context"
+)
+
+// TurnIncompleteSystemInstruction is injected while an incomplete request is
+// still unresolved by a later completed assistant response. It covers both
+// cancellation and terminal model failure without removing canonical history.
+const TurnIncompleteSystemInstruction = "运行时状态：对话中有用户请求在完成前结束，相关请求已在原消息旁明确标记。优先响应最新用户消息；只有当最新用户消息明确要求恢复某一条未完成请求时，才继续该请求。"
+
+const turnCancellationUserPrefix = "[运行时标记：此用户请求在完成前已取消。除非最新用户消息明确要求恢复，否则不要继续执行此请求。]\n\n"
+const turnFailureUserPrefix = "[运行时标记：此用户请求未成功完成。不要因后续新消息而隐式重放；只有用户明确要求恢复时才继续。]\n\n"
+
 // MessageSource is durable, model-independent provenance about a message.
 // It is persisted in internal history but is intentionally excluded from
 // provider payloads; providers continue to receive the normal role/content
@@ -70,6 +84,73 @@ func UserMessageWithSource(content, name string, source MessageSource, provenanc
 		m.Provenance = &p
 	}
 	return m
+}
+
+// TurnCancellationContextMessage is a durable, transcript-hidden system note
+// that prevents an unanswered cancelled request from being mistaken for the
+// latest user intent in a later model call.
+func TurnCancellationContextMessage(turnID string) Message {
+	return turnIncompleteContextMessage(turnID, turnCancellationOperation)
+}
+
+// TurnFailureContextMessage marks a request that ended with a terminal model
+// failure. The marker remains in canonical history; provider projection uses
+// it to avoid implicitly retrying that old request after a later user message.
+func TurnFailureContextMessage(turnID string) Message {
+	return turnIncompleteContextMessage(turnID, turnFailureOperation)
+}
+
+func turnIncompleteContextMessage(turnID, operation string) Message {
+	return Message{
+		Role:    "system",
+		Content: TurnIncompleteSystemInstruction,
+		Source:  &MessageSource{Kind: MessageSourceRuntime, Form: MessageFormNotice},
+		Provenance: &MessageProvenance{
+			Producer:  turnCancellationProducer,
+			Operation: operation,
+			Reference: strings.TrimSpace(turnID),
+		},
+	}
+}
+
+// IsTurnIncompleteContextMessage identifies internal durable markers for turns
+// that ended before completion.
+func IsTurnIncompleteContextMessage(message Message) bool {
+	return strings.TrimSpace(message.Role) == "system" &&
+		message.Source != nil && message.Source.Kind == MessageSourceRuntime && message.Source.Form == MessageFormNotice &&
+		message.Provenance != nil &&
+		strings.EqualFold(strings.TrimSpace(message.Provenance.Producer), turnCancellationProducer) &&
+		(strings.EqualFold(strings.TrimSpace(message.Provenance.Operation), turnCancellationOperation) ||
+			strings.EqualFold(strings.TrimSpace(message.Provenance.Operation), turnFailureOperation))
+}
+
+// IsTurnCancellationContextMessage identifies the cancellation-specific form.
+func IsTurnCancellationContextMessage(message Message) bool {
+	return IsTurnIncompleteContextMessage(message) && strings.EqualFold(strings.TrimSpace(message.Provenance.Operation), turnCancellationOperation)
+}
+
+func markIncompleteUserMessage(message Message, prefix string) Message {
+	if strings.TrimSpace(message.Role) != "user" {
+		return message
+	}
+	if len(message.ContentParts) == 0 {
+		if !strings.HasPrefix(message.Content, prefix) {
+			message.Content = prefix + message.Content
+		}
+		return message
+	}
+	message.ContentParts = append([]ContentPart(nil), message.ContentParts...)
+	for index, part := range message.ContentParts {
+		if part.Type != "text" {
+			continue
+		}
+		if !strings.HasPrefix(part.Text, prefix) {
+			message.ContentParts[index].Text = prefix + part.Text
+		}
+		return message
+	}
+	message.ContentParts = append([]ContentPart{{Type: "text", Text: prefix}}, message.ContentParts...)
+	return message
 }
 
 // MessageSourceForUserName maps the user-message name vocabulary to structured

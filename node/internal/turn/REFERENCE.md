@@ -7,7 +7,7 @@
 | `State` | turn 生命周期：`idle` / `model_streaming` / `awaiting_tool` |
 | `SkillAccess` | orchestrator 读写 session `loaded_skills`（Catalog + Get/Set） |
 | `Orchestrator` | LLM + 工具循环 + SSE |
-| `NewOrchestrator` | 构造；`policy` 默认加载，Turn 步数上限由 `TurnBudget.MaxSteps` 提供 |
+| `NewOrchestrator` | 构造；`policy` 默认加载；每轮工具调用上限由 Agent `defaults.llm.max_tool_calls` 提供 |
 | `SetChildAgentManager` | 父 session 注入临时 Agent 管理器 |
 | `SetChildSession` | 子 session 标记；禁止管理类工具与 `ask_user` |
 | `RunHumanMessageTurn` | 追加 user（含结构化 `source/provenance`）+ 单步 |
@@ -72,7 +72,6 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 |------|------|
 | `staticSystemPrompt` | 固定 system 前缀（未导出常量） |
 | `SystemPromptInput` | `BuildSystemPrompt` 入参 |
-| `DefaultMaxSteps` | Agent 每个 Turn 的工具步数默认上限（32） |
 | `BuildSystemPrompt` | 拼接完整 system prompt |
 | `formatWorkspaceSubdirsSection` | 工作区与 Node runtime 路径作用域约定；`includeHistoryJournal` 为 true 时含 `.dagents/<agent_id>/history/YYYYMMDD/` JSONL 说明 |
 

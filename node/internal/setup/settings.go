@@ -66,15 +66,31 @@ type ManageSettingsPatch struct {
 
 // FeatureSettings 功能开关（安装向导原批次 3）。
 type FeatureSettings struct {
-	SkillsEnabled            bool `json:"skills_enabled"`
-	TriggersEnabled          bool `json:"triggers_enabled"`
-	ChildAgentsEnabled       bool `json:"child_agents_enabled"`
-	BrowserEnabled           bool `json:"browser_enabled"`
-	WeComEnabled             bool `json:"wecom_enabled"`
-	MultimodalEnabled        bool `json:"multimodal_enabled"`
-	SkillsMaxInPrompt        int  `json:"skills_max_in_prompt"`
-	TriggersPollSeconds      int  `json:"triggers_poll_seconds"`
-	RawMessageHistoryEnabled bool `json:"raw_message_history_enabled"`
+	SkillsEnabled            bool   `json:"skills_enabled"`
+	TriggersEnabled          bool   `json:"triggers_enabled"`
+	ChildAgentsEnabled       bool   `json:"child_agents_enabled"`
+	BrowserEnabled           bool   `json:"browser_enabled"`
+	WeComEnabled             bool   `json:"wecom_enabled"`
+	MultimodalEnabled        bool   `json:"multimodal_enabled"`
+	SkillsMaxInPrompt        int    `json:"skills_max_in_prompt"`
+	TriggersPollSeconds      int    `json:"triggers_poll_seconds"`
+	RawMessageHistoryEnabled bool   `json:"raw_message_history_enabled"`
+	RawMessageHistorySource  string `json:"raw_message_history_source"`
+}
+
+// FeatureSettingsPatch merges the explicitly supplied process-level feature
+// controls. Setup panels may omit controls they do not own without changing
+// their current values.
+type FeatureSettingsPatch struct {
+	SkillsEnabled            *bool `json:"skills_enabled,omitempty"`
+	TriggersEnabled          *bool `json:"triggers_enabled,omitempty"`
+	ChildAgentsEnabled       *bool `json:"child_agents_enabled,omitempty"`
+	BrowserEnabled           *bool `json:"browser_enabled,omitempty"`
+	WeComEnabled             *bool `json:"wecom_enabled,omitempty"`
+	MultimodalEnabled        *bool `json:"multimodal_enabled,omitempty"`
+	SkillsMaxInPrompt        *int  `json:"skills_max_in_prompt,omitempty"`
+	TriggersPollSeconds      *int  `json:"triggers_poll_seconds,omitempty"`
+	RawMessageHistoryEnabled *bool `json:"raw_message_history_enabled,omitempty"`
 }
 
 // CompressionSettings 上下文压缩阈值（config compression 块）。
@@ -127,8 +143,6 @@ type OnboardingSettings struct {
 type ChildAgentsLimits struct {
 	DefaultTTLSeconds  int `json:"default_ttl_seconds"`
 	MaxTTLSeconds      int `json:"max_ttl_seconds"`
-	DefaultMaxTurns    int `json:"default_max_turns"`
-	MaxMaxTurns        int `json:"max_max_turns"`
 	MaxActivePerParent int `json:"max_active_per_parent"`
 }
 
@@ -157,14 +171,29 @@ type WeComSettings struct {
 
 // ToolsSettings 内置工具编码与 bash 压缩。
 type ToolsSettings struct {
-	BashOutputEncoding          string `json:"bash_output_encoding"`
-	FileEncoding                string `json:"file_encoding"`
-	BashCompressEnabled         bool   `json:"bash_compress_enabled"`
-	BashCompressMaxOutputChars  int    `json:"bash_compress_max_output_chars"`
-	BashCompressMaxStderrChars  int    `json:"bash_compress_max_stderr_chars"`
-	BashCompressOutputMode      string `json:"bash_compress_output_mode"`
-	BashCompressTailChars       int    `json:"bash_compress_tail_chars"`
-	BashCompressTailStderrChars int    `json:"bash_compress_tail_stderr_chars"`
+	BashOutputEncoding                string `json:"bash_output_encoding"`
+	FileEncoding                      string `json:"file_encoding"`
+	BashCompressEnabled               bool   `json:"bash_compress_enabled"`
+	BashCompressMaxOutputChars        int    `json:"bash_compress_max_output_chars"`
+	BashCompressMaxStderrChars        int    `json:"bash_compress_max_stderr_chars"`
+	BashCompressDefaultMaxOutputChars int    `json:"bash_compress_default_max_output_chars"`
+	BashCompressDefaultMaxStderrChars int    `json:"bash_compress_default_max_stderr_chars"`
+	BashCompressOutputMode            string `json:"bash_compress_output_mode"`
+	BashCompressTailChars             int    `json:"bash_compress_tail_chars"`
+	BashCompressTailStderrChars       int    `json:"bash_compress_tail_stderr_chars"`
+}
+
+// ToolsSettingsPatch preserves omitted settings and rejects invalid explicit limits.
+type ToolsSettingsPatch struct {
+	BashOutputEncoding          *string `json:"bash_output_encoding,omitempty"`
+	FileEncoding                *string `json:"file_encoding,omitempty"`
+	BashCompressEnabled         *bool   `json:"bash_compress_enabled,omitempty"`
+	BashCompressMaxOutputChars  *int    `json:"bash_compress_max_output_chars,omitempty"`
+	BashCompressMaxStderrChars  *int    `json:"bash_compress_max_stderr_chars,omitempty"`
+	BashCompressOutputMode      *string `json:"bash_compress_output_mode,omitempty"`
+	BashCompressTailChars       *int    `json:"bash_compress_tail_chars,omitempty"`
+	BashCompressTailStderrChars *int    `json:"bash_compress_tail_stderr_chars,omitempty"`
+	ResetBashCompressLimits     bool    `json:"reset_bash_compress_limits,omitempty"`
 }
 
 // HooksSettings 常用 Hook 开关（不含 plugin 列表）。
@@ -202,20 +231,20 @@ type SettingsView struct {
 
 // SettingsPatch PATCH /v1/settings 请求体（字段均可选）。
 type SettingsPatch struct {
-	LLM         *LLMSettings         `json:"llm,omitempty"`
-	Manage      *ManageSettingsPatch `json:"manage,omitempty"`
-	Features    *FeatureSettings     `json:"features,omitempty"`
-	Compression *CompressionSettings `json:"compression,omitempty"`
-	Memory      *MemorySettings      `json:"memory,omitempty"`
-	Runtime     *RuntimeSettings     `json:"runtime,omitempty"`
-	Agent       *AgentSettings       `json:"agent,omitempty"`
-	User        *UserSettings        `json:"user,omitempty"`
-	Onboarding  *OnboardingSettings  `json:"onboarding,omitempty"`
-	ChildAgents *ChildAgentsLimits   `json:"child_agents,omitempty"`
-	Browser     *BrowserSettings     `json:"browser,omitempty"`
-	WeCom       *WeComSettings       `json:"wecom,omitempty"`
-	Tools       *ToolsSettings       `json:"tools,omitempty"`
-	Hooks       *HooksSettings       `json:"hooks,omitempty"`
+	LLM         *LLMSettings          `json:"llm,omitempty"`
+	Manage      *ManageSettingsPatch  `json:"manage,omitempty"`
+	Features    *FeatureSettingsPatch `json:"features,omitempty"`
+	Compression *CompressionSettings  `json:"compression,omitempty"`
+	Memory      *MemorySettings       `json:"memory,omitempty"`
+	Runtime     *RuntimeSettings      `json:"runtime,omitempty"`
+	Agent       *AgentSettings        `json:"agent,omitempty"`
+	User        *UserSettings         `json:"user,omitempty"`
+	Onboarding  *OnboardingSettings   `json:"onboarding,omitempty"`
+	ChildAgents *ChildAgentsLimits    `json:"child_agents,omitempty"`
+	Browser     *BrowserSettings      `json:"browser,omitempty"`
+	WeCom       *WeComSettings        `json:"wecom,omitempty"`
+	Tools       *ToolsSettingsPatch   `json:"tools,omitempty"`
+	Hooks       *HooksSettings        `json:"hooks,omitempty"`
 }
 
 // ViewFromConfig 从当前 Node 配置构造设置视图。
@@ -253,6 +282,7 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			SkillsMaxInPrompt:        cfg.Skills.MaxInPrompt,
 			TriggersPollSeconds:      cfg.Triggers.PollSeconds,
 			RawMessageHistoryEnabled: cfg.RawMessageHistoryEnabled(),
+			RawMessageHistorySource:  cfg.RawMessageHistorySource(),
 		},
 		Compression: CompressionSettings{
 			SilentTriggerTokens:        cfg.Compression.SilentTriggerTokens,
@@ -283,8 +313,6 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 		ChildAgents: ChildAgentsLimits{
 			DefaultTTLSeconds:  cfg.ChildAgents.DefaultTTLSeconds,
 			MaxTTLSeconds:      cfg.ChildAgents.MaxTTLSeconds,
-			DefaultMaxTurns:    cfg.ChildAgents.DefaultMaxTurns,
-			MaxMaxTurns:        cfg.ChildAgents.MaxMaxTurns,
 			MaxActivePerParent: cfg.ChildAgents.MaxActivePerParent,
 		},
 		Browser: BrowserSettings{
@@ -297,14 +325,16 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 		},
 		WeCom: weComSettingsFromConfig(cfg),
 		Tools: ToolsSettings{
-			BashOutputEncoding:          cfg.Tools.BashOutputEncoding,
-			FileEncoding:                cfg.Tools.FileEncoding,
-			BashCompressEnabled:         cfg.Tools.BashCompress.Enabled == nil || *cfg.Tools.BashCompress.Enabled,
-			BashCompressMaxOutputChars:  cfg.Tools.BashCompress.MaxOutputChars,
-			BashCompressMaxStderrChars:  cfg.Tools.BashCompress.MaxOutputCharsStderr,
-			BashCompressOutputMode:      cfg.Tools.BashCompress.OutputMode,
-			BashCompressTailChars:       cfg.Tools.BashCompress.TailOutputChars,
-			BashCompressTailStderrChars: cfg.Tools.BashCompress.TailOutputCharsStderr,
+			BashOutputEncoding:                cfg.Tools.BashOutputEncoding,
+			FileEncoding:                      cfg.Tools.FileEncoding,
+			BashCompressEnabled:               cfg.Tools.BashCompress.Enabled == nil || *cfg.Tools.BashCompress.Enabled,
+			BashCompressMaxOutputChars:        cfg.Tools.BashCompress.MaxOutputChars,
+			BashCompressMaxStderrChars:        cfg.Tools.BashCompress.MaxOutputCharsStderr,
+			BashCompressDefaultMaxOutputChars: config.DefaultBashCompressMaxOutputChars,
+			BashCompressDefaultMaxStderrChars: config.DefaultBashCompressMaxOutputCharsStderr,
+			BashCompressOutputMode:            cfg.Tools.BashCompress.OutputMode,
+			BashCompressTailChars:             cfg.Tools.BashCompress.TailOutputChars,
+			BashCompressTailStderrChars:       cfg.Tools.BashCompress.TailOutputCharsStderr,
 		},
 		Hooks: HooksSettings{
 			DuplicateToolCallEnabled:       cfg.DuplicateToolCallHookEnabled(),
@@ -323,6 +353,17 @@ func ApplyPatch(cfg *config.Config, patch SettingsPatch) (*config.Config, error)
 		return nil, fmt.Errorf("config unavailable")
 	}
 	out := *cfg
+	// LLM profiles are the only map nested in Config. Feature patches may
+	// synchronize multimodal settings into the active profile, and defaults
+	// normalization rewrites profile values, so isolate this map before applying
+	// any patch. A shallow Config copy would otherwise mutate the live config
+	// even when a later validation or persistence step fails.
+	if cfg.LLM.Profiles != nil {
+		out.LLM.Profiles = make(map[string]config.LLMProfileConfig, len(cfg.LLM.Profiles))
+		for id, profile := range cfg.LLM.Profiles {
+			out.LLM.Profiles[id] = profile
+		}
+	}
 	if patch.LLM != nil {
 		if err := applyLLMPatch(&out, *patch.LLM); err != nil {
 			return nil, err
@@ -334,9 +375,9 @@ func ApplyPatch(cfg *config.Config, patch SettingsPatch) (*config.Config, error)
 		}
 	}
 	if patch.Features != nil {
-		applyFeaturesPatch(&out, *patch.Features)
-		// 功能开关里的 multimodal 写回当前 LLM 档案。
-		out.SyncActiveProfileMultimodalFromFlat()
+		if err := applyFeaturesPatch(&out, *patch.Features); err != nil {
+			return nil, err
+		}
 	}
 	if patch.Compression != nil {
 		if err := applyCompressionPatch(&out, *patch.Compression); err != nil {
@@ -559,20 +600,42 @@ func applyManagePatch(cfg *config.Config, p ManageSettingsPatch) error {
 	return nil
 }
 
-func applyFeaturesPatch(cfg *config.Config, p FeatureSettings) {
-	cfg.Skills.Enabled = p.SkillsEnabled
-	cfg.Triggers.Enabled = p.TriggersEnabled
-	cfg.ChildAgents.Enabled = p.ChildAgentsEnabled
-	cfg.Multimodal.Enabled = boolPtr(p.MultimodalEnabled)
-	cfg.Browser.Enabled = boolPtr(p.BrowserEnabled)
-	cfg.WeCom.Enabled = boolPtr(p.WeComEnabled)
-	if p.SkillsMaxInPrompt > 0 {
-		cfg.Skills.MaxInPrompt = p.SkillsMaxInPrompt
+func applyFeaturesPatch(cfg *config.Config, p FeatureSettingsPatch) error {
+	if p.SkillsEnabled != nil {
+		cfg.Skills.Enabled = *p.SkillsEnabled
 	}
-	if p.TriggersPollSeconds > 0 {
-		cfg.Triggers.PollSeconds = p.TriggersPollSeconds
+	if p.TriggersEnabled != nil {
+		cfg.Triggers.Enabled = *p.TriggersEnabled
 	}
-	cfg.RawMessageHistory.Enabled = boolPtr(p.RawMessageHistoryEnabled)
+	if p.ChildAgentsEnabled != nil {
+		cfg.ChildAgents.Enabled = *p.ChildAgentsEnabled
+	}
+	if p.BrowserEnabled != nil {
+		cfg.Browser.Enabled = boolPtr(*p.BrowserEnabled)
+	}
+	if p.WeComEnabled != nil {
+		cfg.WeCom.Enabled = boolPtr(*p.WeComEnabled)
+	}
+	if p.MultimodalEnabled != nil {
+		cfg.Multimodal.Enabled = boolPtr(*p.MultimodalEnabled)
+		cfg.SyncActiveProfileMultimodalFromFlat()
+	}
+	if p.SkillsMaxInPrompt != nil {
+		if *p.SkillsMaxInPrompt <= 0 {
+			return fmt.Errorf("features.skills_max_in_prompt must be > 0")
+		}
+		cfg.Skills.MaxInPrompt = *p.SkillsMaxInPrompt
+	}
+	if p.TriggersPollSeconds != nil {
+		if *p.TriggersPollSeconds <= 0 {
+			return fmt.Errorf("features.triggers_poll_seconds must be > 0")
+		}
+		cfg.Triggers.PollSeconds = *p.TriggersPollSeconds
+	}
+	if p.RawMessageHistoryEnabled != nil {
+		cfg.RawMessageHistory.Enabled = boolPtr(*p.RawMessageHistoryEnabled)
+	}
+	return nil
 }
 
 func applyCompressionPatch(cfg *config.Config, p CompressionSettings) error {
@@ -656,8 +719,7 @@ func applyOnboardingPatch(cfg *config.Config, p OnboardingSettings) error {
 }
 
 func applyChildAgentsPatch(cfg *config.Config, p ChildAgentsLimits) error {
-	if p.DefaultTTLSeconds < 0 || p.MaxTTLSeconds < 0 || p.DefaultMaxTurns < 0 ||
-		p.MaxMaxTurns < 0 || p.MaxActivePerParent < 0 {
+	if p.DefaultTTLSeconds < 0 || p.MaxTTLSeconds < 0 || p.MaxActivePerParent < 0 {
 		return fmt.Errorf("child_agents limits must be >= 0")
 	}
 	if p.DefaultTTLSeconds > 0 {
@@ -665,12 +727,6 @@ func applyChildAgentsPatch(cfg *config.Config, p ChildAgentsLimits) error {
 	}
 	if p.MaxTTLSeconds > 0 {
 		cfg.ChildAgents.MaxTTLSeconds = p.MaxTTLSeconds
-	}
-	if p.DefaultMaxTurns > 0 {
-		cfg.ChildAgents.DefaultMaxTurns = p.DefaultMaxTurns
-	}
-	if p.MaxMaxTurns > 0 {
-		cfg.ChildAgents.MaxMaxTurns = p.MaxMaxTurns
 	}
 	if p.MaxActivePerParent > 0 {
 		cfg.ChildAgents.MaxActivePerParent = p.MaxActivePerParent
@@ -765,22 +821,50 @@ func applyWeComPatch(cfg *config.Config, p WeComSettings) error {
 	return nil
 }
 
-func applyToolsPatch(cfg *config.Config, p ToolsSettings) error {
-	cfg.Tools.BashOutputEncoding = strings.TrimSpace(p.BashOutputEncoding)
-	cfg.Tools.FileEncoding = strings.TrimSpace(p.FileEncoding)
-	cfg.Tools.BashCompress.Enabled = boolPtr(p.BashCompressEnabled)
-	if p.BashCompressMaxOutputChars > 0 {
-		cfg.Tools.BashCompress.MaxOutputChars = p.BashCompressMaxOutputChars
+func applyToolsPatch(cfg *config.Config, p ToolsSettingsPatch) error {
+	bash := &cfg.Tools.BashCompress
+	if p.ResetBashCompressLimits {
+		if p.BashCompressMaxOutputChars != nil || p.BashCompressMaxStderrChars != nil {
+			return fmt.Errorf("tools.reset_bash_compress_limits cannot be combined with explicit limits")
+		}
+		bash.MaxOutputChars = config.DefaultBashCompressMaxOutputChars
+		bash.MaxOutputCharsStderr = config.DefaultBashCompressMaxOutputCharsStderr
 	}
-	if p.BashCompressMaxStderrChars > 0 {
-		cfg.Tools.BashCompress.MaxOutputCharsStderr = p.BashCompressMaxStderrChars
+	if p.BashCompressMaxOutputChars != nil {
+		if *p.BashCompressMaxOutputChars <= 0 {
+			return fmt.Errorf("tools.bash_compress_max_output_chars must be > 0")
+		}
+		bash.MaxOutputChars = *p.BashCompressMaxOutputChars
 	}
-	cfg.Tools.BashCompress.OutputMode = strings.TrimSpace(p.BashCompressOutputMode)
-	if p.BashCompressTailChars > 0 {
-		cfg.Tools.BashCompress.TailOutputChars = p.BashCompressTailChars
+	if p.BashCompressMaxStderrChars != nil {
+		if *p.BashCompressMaxStderrChars <= 0 {
+			return fmt.Errorf("tools.bash_compress_max_stderr_chars must be > 0")
+		}
+		bash.MaxOutputCharsStderr = *p.BashCompressMaxStderrChars
 	}
-	if p.BashCompressTailStderrChars > 0 {
-		cfg.Tools.BashCompress.TailOutputCharsStderr = p.BashCompressTailStderrChars
+	if p.BashOutputEncoding != nil {
+		cfg.Tools.BashOutputEncoding = strings.TrimSpace(*p.BashOutputEncoding)
+	}
+	if p.FileEncoding != nil {
+		cfg.Tools.FileEncoding = strings.TrimSpace(*p.FileEncoding)
+	}
+	if p.BashCompressEnabled != nil {
+		bash.Enabled = boolPtr(*p.BashCompressEnabled)
+	}
+	if p.BashCompressOutputMode != nil {
+		bash.OutputMode = strings.TrimSpace(*p.BashCompressOutputMode)
+	}
+	if p.BashCompressTailChars != nil {
+		if *p.BashCompressTailChars <= 0 {
+			return fmt.Errorf("tools.bash_compress_tail_chars must be > 0")
+		}
+		bash.TailOutputChars = *p.BashCompressTailChars
+	}
+	if p.BashCompressTailStderrChars != nil {
+		if *p.BashCompressTailStderrChars <= 0 {
+			return fmt.Errorf("tools.bash_compress_tail_stderr_chars must be > 0")
+		}
+		bash.TailOutputCharsStderr = *p.BashCompressTailStderrChars
 	}
 	return nil
 }

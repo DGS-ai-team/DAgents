@@ -61,7 +61,7 @@ func TestDreamingSchedulerWaitingAttemptDoesNotStartAnotherTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-wait", MaxToolRounds: 2, DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
+	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-wait", DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	agents, err := store.OpenAgents(filepath.Join(root, "agents.db"))
@@ -137,7 +137,7 @@ func TestDreamingSchedulerASKResumeFinalizesAndAcksAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-resume", MaxToolRounds: 2, DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
+	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-resume", DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	agents, err := store.OpenAgents(filepath.Join(root, "agents.db"))
@@ -220,7 +220,7 @@ func TestDreamingStatusIsIndependentOfWakeFrequencyAndPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 9, 9, 4, 0, 0, 0, time.UTC)
-	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-1", WakeIntervalSeconds: 0, MaxToolRounds: 2, DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
+	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-1", WakeIntervalSeconds: 0, DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	d := NewDreamingScheduler(a, nil, nil, nil)
@@ -246,13 +246,13 @@ func TestDreamingStatusIsIndependentOfWakeFrequencyAndPersists(t *testing.T) {
 	if next := d.CurrentStatus("auto-1", nextDay); next.State != "waiting" || !next.LastSuccess.Equal(wantSuccess) {
 		t.Fatalf("next-day status lost prior success: %+v", next)
 	}
-	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-1", WakeIntervalSeconds: 0, MaxToolRounds: 2, DreamingEnabled: false, DreamingTime: "03:00", Timezone: "UTC"}, 1); err != nil {
+	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-1", WakeIntervalSeconds: 0, DreamingEnabled: false, DreamingTime: "03:00", Timezone: "UTC"}, 1); err != nil {
 		t.Fatal(err)
 	}
 	if status := d.CurrentStatus("auto-1", now); status.State != "disabled" || status.LastSuccess.IsZero() {
 		t.Fatalf("disabled dreaming status=%+v", status)
 	}
-	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-1", WakeIntervalSeconds: 0, MaxToolRounds: 2, DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 2); err != nil {
+	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-1", WakeIntervalSeconds: 0, DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 2); err != nil {
 		t.Fatal(err)
 	}
 	d3 := NewDreamingScheduler(a, nil, nil, nil)
@@ -280,7 +280,7 @@ func TestDreamingSchedulerRunsRealSessionWhenWakeIsOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-real", WakeIntervalSeconds: 0, MaxToolRounds: 2, DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
+	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-real", WakeIntervalSeconds: 0, DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	agents, err := store.OpenAgents(filepath.Join(root, "agents.db"))
@@ -354,7 +354,7 @@ func TestDreamingSchedulerRecoversBusyPendingEvenWhenDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-pending", MaxToolRounds: 2, DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
+	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-pending", DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	agents, err := store.OpenAgents(filepath.Join(root, "agents.db"))
@@ -405,7 +405,7 @@ func TestDreamingSchedulerRecoversBusyPendingEvenWhenDisabled(t *testing.T) {
 		t.Fatalf("busy pending invoked model: %d", client.calls)
 	}
 	release()
-	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-pending", MaxToolRounds: 2, DreamingEnabled: false, DreamingTime: "03:00", Timezone: "UTC"}, 1); err != nil {
+	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-pending", DreamingEnabled: false, DreamingTime: "03:00", Timezone: "UTC"}, 1); err != nil {
 		t.Fatal(err)
 	}
 	mgr.Stop()
@@ -469,7 +469,7 @@ func TestDreamingSchedulerFailureBackoffThenRetries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-retry", MaxToolRounds: 2, DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
+	if err := a.PutProfile(autonomy.Profile{AgentID: "auto-retry", DreamingEnabled: true, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	agents, err := store.OpenAgents(filepath.Join(root, "agents.db"))

@@ -141,15 +141,14 @@ type runtime struct {
 	// runtimeMultimodalEnabled is the user-selected multimodal setting captured
 	// when this Agent runtime was built. It lets the API detect a stale runtime
 	// even when the persisted Agent revision did not change.
-	runtimeMultimodalEnabled bool
-	turnBudget               turn.TurnBudget
-	triggerMaxToolRounds     int
-	triggerToolRoundProvider func(context.Context, string, string, string) (int, bool, error)
-	conditionValidator       func(context.Context, turn.ConditionApprovalMetadata) error
-	autoAgent                bool
-	budgetResolver           func() (turn.TurnBudget, error)
-	conditionCompletion      func(triggers.ConditionRequest, triggers.ConditionResult) error
-	dreamingAttempt          *DreamingAttempt
+	runtimeMultimodalEnabled  bool
+	turnBudget                turn.TurnBudget
+	triggerActivationProvider func(context.Context, string, string, string) (bool, error)
+	conditionValidator        func(context.Context, turn.ConditionApprovalMetadata) error
+	autoAgent                 bool
+	budgetResolver            func() (turn.TurnBudget, error)
+	conditionCompletion       func(triggers.ConditionRequest, triggers.ConditionResult) error
+	dreamingAttempt           *DreamingAttempt
 }
 
 // newRuntime 创建新的 session runtime
@@ -268,17 +267,13 @@ func newRuntimeWithPublisher(
 		llmProfileDigest:                          strings.TrimSpace(turnOpts.LLMProfileDigest),
 		runtimeMultimodalEnabled:                  turnOpts.MultimodalEnabled,
 		turnBudget:                                turnOpts.Budget,
-		// A trigger cap is activation-scoped and can only be granted by the
-		// trusted provider below. Never carry a static option into arbitrary
-		// trigger envelopes.
-		triggerMaxToolRounds:     0,
-		triggerToolRoundProvider: turnOpts.TriggerToolRoundProvider,
-		conditionValidator:       turnOpts.ConditionValidator,
-		conditionCompletion:      turnOpts.ConditionCompletion,
-		autoAgent:                turnOpts.AutoAgent,
-		budgetResolver:           turnOpts.BudgetResolver,
-		onLifecycle:              turnOpts.OnLifecycle,
-		memoryService:            turnOpts.MemoryService,
+		triggerActivationProvider:                 turnOpts.TriggerActivationProvider,
+		conditionValidator:                        turnOpts.ConditionValidator,
+		conditionCompletion:                       turnOpts.ConditionCompletion,
+		autoAgent:                                 turnOpts.AutoAgent,
+		budgetResolver:                            turnOpts.BudgetResolver,
+		onLifecycle:                               turnOpts.OnLifecycle,
+		memoryService:                             turnOpts.MemoryService,
 	}
 	if len(turnOpts.initialDreamingAttempt) > 0 {
 		var attempt DreamingAttempt
@@ -432,25 +427,11 @@ func newRuntimeWithPublisher(
 		}
 		return rt.turnCoordinator.ToolExecutionStatusForCall(toolCallID)
 	})
-	rt.orch.SetToolBudgetCheck(func(sessionID string) (bool, string) {
+	rt.orch.SetToolBudgetCheck(func(sessionID, toolCallID string) (bool, string) {
 		if sessionID != rt.session.ID || rt.turnCoordinator == nil {
 			return true, ""
 		}
-		decision := rt.turnCoordinator.BudgetDecisionFor(turn.CommandToolCallRecorded)
-		return decision.Allowed, decision.Reason
-	})
-	rt.orch.SetToolRetryCheck(func(sessionID string) (bool, string) {
-		if sessionID != rt.session.ID || rt.turnCoordinator == nil {
-			return true, ""
-		}
-		decision := rt.turnCoordinator.BudgetDecisionFor(turn.CommandToolExecutionRetrying)
-		return decision.Allowed, decision.Reason
-	})
-	rt.orch.SetModelRetryCheck(func(sessionID string) (bool, string) {
-		if sessionID != rt.session.ID || rt.turnCoordinator == nil {
-			return true, ""
-		}
-		decision := rt.turnCoordinator.BudgetDecisionFor(turn.CommandModelRequestStarted)
+		decision := rt.turnCoordinator.BudgetDecisionForToolCall(toolCallID)
 		return decision.Allowed, decision.Reason
 	})
 	if len(initialHookStore) > 0 {
@@ -758,31 +739,22 @@ func (r *runtime) dispatchInput(ctx context.Context, record InputRecord) bool {
 	} else if record.Kind == InputKindChildAgent {
 		source = turn.TurnSourceChildAgent
 	}
-	baseBudget := r.turnBudget
-	r.triggerMaxToolRounds = 0
-	if isTrigger && r.triggerToolRoundProvider != nil {
-		if limit, trusted, err := r.triggerToolRoundProvider(ctx, r.agentID, strings.TrimSpace(env.TriggerID), strings.TrimSpace(env.DeliveryID)); err != nil {
+	if isTrigger && r.triggerActivationProvider != nil {
+		if trusted, err := r.triggerActivationProvider(ctx, r.agentID, strings.TrimSpace(env.TriggerID), strings.TrimSpace(env.DeliveryID)); err != nil {
 			if r.logger != nil {
-				r.logger.Warn("trusted trigger tool-round profile unavailable; activation dropped", "session_id", r.session.ID, "trigger_id", env.TriggerID, "error", err)
+				r.logger.Warn("trusted trigger activation profile unavailable; activation dropped", "session_id", r.session.ID, "trigger_id", env.TriggerID, "error", err)
 			}
 			return true
-		} else if trusted && limit > 0 {
+		} else if trusted {
 			if record.Kind == InputKindSystemAuto {
 				ctx = tools.WithTrustedAutoIdleActivation(ctx, r.agentID, strings.TrimSpace(env.TriggerID), strings.TrimSpace(env.DeliveryID))
 				if r.orch != nil {
 					r.orch.BeginTrustedAutoIdleActivation(r.session.ID)
 				}
 			}
-			r.triggerMaxToolRounds = limit
-			// A capped trigger is still allowed one no-tool final summary after
-			// its last tool batch. Keep this activation-only flag out of the
-			// runtime's base budget; dispatch restores the snapshot below.
-			r.turnBudget.ReserveFinalSummary = true
 		}
 	}
 	consumed := r.handleInputMessage(ctx, env, source)
-	r.turnBudget = baseBudget
-	r.triggerMaxToolRounds = 0
 	return consumed
 }
 
@@ -1554,7 +1526,13 @@ func (r *runtime) cancelTurn() bool {
 
 func (r *runtime) cancelTurnWithReason(interruptMessage string, metadata map[string]any) bool {
 	defer r.signalInputBox()
-	lifecycleWasActive := r.turnCoordinator != nil && r.turnCoordinator.Snapshot().HasActiveTurn
+	lifecycleWasActive := false
+	turnID := ""
+	if r.turnCoordinator != nil {
+		state := r.turnCoordinator.Snapshot()
+		lifecycleWasActive = state.HasActiveTurn
+		turnID = state.TurnID
+	}
 	stateBefore := r.turnState()
 	pending := r.pendingSnapshot()
 	if err := r.lifecycleCancel(); err != nil && r.logger != nil {
@@ -1582,6 +1560,10 @@ func (r *runtime) cancelTurnWithReason(interruptMessage string, metadata map[str
 			interruptMessage,
 			metadata,
 		)
+		historyChanged = true
+	}
+	if lifecycleActive {
+		r.orch.RecordTurnCancellationContext(r.session.ID, &r.messages, turnID)
 		historyChanged = true
 	}
 	if active {

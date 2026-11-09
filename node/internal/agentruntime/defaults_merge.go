@@ -21,5 +21,6 @@ func MergeDefaults(base, override map[string]any) map[string]any {
 		}
 		out[k] = MergeDefaults(bv, ov)
 	}
+	SanitizeDefaults(out)
 	return out
 }

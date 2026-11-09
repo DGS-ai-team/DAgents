@@ -62,7 +62,7 @@ func TestOrchestratorForgetSessionReleasesRuntimeState(t *testing.T) {
 func TestToolBudgetOverflowClosesWholeBatchForContinuation(t *testing.T) {
 	hub := stream.NewHub(16, logx.Discard())
 	orch := NewOrchestrator("agent", t.TempDir(), hub, &llm.MockClient{}, nil, nil, SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
-	orch.SetToolBudgetCheck(func(string) (bool, string) { return false, "max_tool_calls" })
+	orch.SetToolBudgetCheck(func(string, string) (bool, string) { return false, "max_tool_calls" })
 	calls := []llm.ToolCall{
 		{ID: "call-1", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"one"}`}},
 		{ID: "call-2", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"two"}`}},
@@ -242,7 +242,7 @@ func TestOrchestratorExecutionFenceBlocksProviderRequest(t *testing.T) {
 	if client.calls != 0 {
 		t.Fatalf("provider calls = %d, want 0", client.calls)
 	}
-	if len(history) != 1 || history[0].Role != "user" {
+	if len(history) != 2 || history[0].Role != "user" || !llm.IsTurnCancellationContextMessage(history[1]) {
 		t.Fatalf("cancelled preflight history = %#v", history)
 	}
 }
@@ -263,7 +263,7 @@ func TestOrchestratorExecutionFenceDropsResponseBeforeAssistantCommit(t *testing
 	if client.calls != 1 {
 		t.Fatalf("provider calls = %d, want 1", client.calls)
 	}
-	if len(history) != 1 || history[0].Role != "user" {
+	if len(history) != 2 || history[0].Role != "user" || !llm.IsTurnCancellationContextMessage(history[1]) {
 		t.Fatalf("cancelled response history = %#v", history)
 	}
 }
@@ -939,16 +939,54 @@ func TestRunMessageTurnCancelledDropsPartialAssistant(t *testing.T) {
 	var history []llm.Message
 	go func() {
 		defer close(done)
-		_, _, _ = runMessageTurnInline(t, orch, ctx, "sess-1", &history, "hi", nil)
+		stepCtx := WithExecutionContext(ctx, TurnExecutionContext{SessionID: "sess-1", TurnID: "turn-cancelled-partial", StepID: "step-1", Generation: 1, StepIndex: 1})
+		_ = orch.RunHumanMessageTurn(stepCtx, "sess-1", &history, llm.UserMessage("hi", llm.UserNameHuman))
 	}()
 	time.Sleep(20 * time.Millisecond)
 	cancel()
 	<-done
-	if len(history) != 1 {
-		t.Fatalf("history = %+v", history)
+	if len(history) != 2 {
+		t.Fatalf("history = %+v, want user plus cancellation marker", history)
 	}
 	if history[0].Role != "user" || history[0].Content != "hi" {
 		t.Fatalf("history user = %+v", history[0])
+	}
+	if history[0].Provenance == nil || history[0].Provenance.Reference != "turn-cancelled-partial" {
+		t.Fatalf("cancelled user is missing its turn reference: %#v", history[0].Provenance)
+	}
+	if !llm.IsTurnCancellationContextMessage(history[1]) || history[1].Provenance.Reference != "turn-cancelled-partial" {
+		t.Fatalf("durable cancellation marker = %#v", history[1])
+	}
+	prepared := llm.MessagesWithSystem("base system", append(append([]llm.Message(nil), history...), llm.UserMessage("latest user request", llm.UserNameHuman)))
+	if len(prepared) != 3 || prepared[0].Role != "system" || !strings.Contains(prepared[0].Content, llm.TurnIncompleteSystemInstruction) {
+		t.Fatalf("next model context does not mark the cancelled request: %#v", prepared)
+	}
+	if prepared[1].Role != "user" || !strings.HasSuffix(prepared[1].Content, "hi") || prepared[2].Role != "user" || prepared[2].Content != "latest user request" {
+		t.Fatalf("next model context changed user message order: %#v", prepared)
+	}
+}
+
+func TestRunMessageTurnProviderFailureRecordsIncompleteRequestBoundary(t *testing.T) {
+	const turnID = "turn-provider-failed"
+	orch := testOrchestrator(t, stream.NewHub(16, logx.Discard()), &errMock{msg: "provider unavailable"})
+	history := []llm.Message{}
+	ctx := WithExecutionContext(context.Background(), TurnExecutionContext{
+		SessionID: "session-provider-failed", TurnID: turnID, StepID: "step-1", Generation: 1, StepIndex: 1,
+	})
+	outcome := orch.RunHumanMessageTurn(ctx, "session-provider-failed", &history, llm.UserMessage("only answer the quota probe", llm.UserNameHuman))
+	if outcome.Err == nil {
+		t.Fatal("expected provider failure")
+	}
+	if len(history) != 2 || history[0].Role != "user" || llm.EffectiveMessageProvenance(history[0]).Reference != turnID || !llm.IsTurnIncompleteContextMessage(history[1]) || history[1].Provenance.Reference != turnID {
+		t.Fatalf("provider failure history lacks exact incomplete-turn marker: %#v", history)
+	}
+
+	providerHistory := llm.MessagesWithSystem("base", append(append([]llm.Message(nil), history...), llm.UserMessage("answer the latest unrelated question", llm.UserNameHuman)))
+	if !strings.HasPrefix(providerHistory[1].Content, "[运行时标记：此用户请求未成功完成") || providerHistory[len(providerHistory)-1].Content != "answer the latest unrelated question" {
+		t.Fatalf("provider projection does not distinguish old failed request from latest intent: %#v", providerHistory)
+	}
+	if err := llm.ValidateToolProtocol(providerHistory); err != nil {
+		t.Fatalf("failed-turn provider history has invalid protocol: %v", err)
 	}
 }
 
@@ -968,12 +1006,13 @@ func TestRunMessageTurnCancelledDropsPartialToolCallAndContent(t *testing.T) {
 	var history []llm.Message
 	go func() {
 		defer close(done)
-		_, _, _ = runMessageTurnInline(t, orch, ctx, "sess-1", &history, "run", nil)
+		stepCtx := WithExecutionContext(ctx, TurnExecutionContext{SessionID: "sess-1", TurnID: "turn-cancelled-tool", StepID: "step-1", Generation: 1, StepIndex: 1})
+		_ = orch.RunHumanMessageTurn(stepCtx, "sess-1", &history, llm.UserMessage("run", llm.UserNameHuman))
 	}()
 	time.Sleep(20 * time.Millisecond)
 	cancel()
 	<-done
-	if len(history) != 1 || history[0].Role != "user" || history[0].Content != "run" {
+	if len(history) != 2 || history[0].Role != "user" || history[0].Content != "run" || !llm.IsTurnCancellationContextMessage(history[1]) {
 		t.Fatalf("history with partial tool call = %+v", history)
 	}
 }

@@ -20,7 +20,7 @@ func TestDreamingWaitingApprovalSurvivesRuntimeRestart(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("lease: ok=%v err=%v", ok, err)
 	}
-	if _, err := mgr.RunDreaming(leaseCtx, sessionID, "重启后继续整理", 5); err == nil {
+	if _, err := mgr.RunDreaming(leaseCtx, sessionID, "重启后继续整理"); err == nil {
 		t.Fatal("dreaming unexpectedly completed")
 	}
 	release()
@@ -81,7 +81,7 @@ func TestDreamingOrphanedAttemptIsFailedOnRestore(t *testing.T) {
 	client := &dreamingResumeClient{}
 	mgr, reg, st, dbPath, sessionID, _ := dreamingResumeFixture(t, client, policy.ModeAlways)
 	rt := mgr.getRuntime(sessionID)
-	rt.dreamingAttempt = &DreamingAttempt{AgentID: "agent-1", SessionID: sessionID, TurnID: "missing-turn", MaxToolRounds: 2, State: DreamingAttemptWaiting, Boundary: "orphan", StartedAt: time.Now().UTC()}
+	rt.dreamingAttempt = &DreamingAttempt{AgentID: "agent-1", SessionID: sessionID, TurnID: "missing-turn", State: DreamingAttemptWaiting, Boundary: "orphan", StartedAt: time.Now().UTC()}
 	if err := rt.persist(context.Background()); err != nil {
 		t.Fatal(err)
 	}

@@ -54,7 +54,7 @@ func TestMessagesToTranscriptEntries_userFileReferences(t *testing.T) {
 	messages := []llm.Message{{
 		Role:           "user",
 		Content:        "请读取",
-		FileReferences: []llm.FileReference{{Path: `D:\work\README.md`, Name: "README.md"}},
+		FileReferences: []llm.FileReference{{Path: `D:\work\README.md`, Name: "README.md", Revision: "rev-2", Anchor: &llm.FileReferenceAnchor{Type: "text-range", Label: "第 4 行", Quote: "原文摘录", Location: map[string]any{"startLine": 4}}}},
 	}}
 	entries := MessagesToTranscriptEntries(messages)
 	if len(entries) != 1 {
@@ -66,6 +66,9 @@ func TestMessagesToTranscriptEntries_userFileReferences(t *testing.T) {
 	refs, ok := entries[0]["file_refs"].([]llm.FileReference)
 	if !ok || len(refs) != 1 || refs[0].Path != `D:\work\README.md` {
 		t.Fatalf("file_refs = %#v", entries[0]["file_refs"])
+	}
+	if refs[0].Revision != "rev-2" || refs[0].Anchor == nil || refs[0].Anchor.Label != "第 4 行" || refs[0].Anchor.Quote != "原文摘录" || refs[0].Anchor.Location["startLine"] != 4 {
+		t.Fatalf("transcript omitted reference metadata: %#v", refs[0])
 	}
 }
 

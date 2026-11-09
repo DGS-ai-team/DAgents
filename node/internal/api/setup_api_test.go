@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -63,6 +64,9 @@ func TestHandleSetupConfigGetPatch(t *testing.T) {
 	if len(got.LLM.Profiles) == 0 || got.LLM.Profiles[0].Model != "deepseek-chat" {
 		t.Fatalf("llm = %+v", got.LLM)
 	}
+	if got.Features.RawMessageHistorySource != "settings" {
+		t.Fatalf("raw history source = %q", got.Features.RawMessageHistorySource)
+	}
 
 	patchBody := []byte(`{"llm":{"profiles":[{"id":"default","provider":"mock","model":"mock","mock":true}]}}`)
 	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/settings", bytes.NewReader(patchBody))
@@ -82,7 +86,7 @@ func TestHandleSetupConfigGetPatch(t *testing.T) {
 	if err := json.NewDecoder(patchResp.Body).Decode(&patched); err != nil {
 		t.Fatal(err)
 	}
-	if !patched.RestartRequired || len(patched.LLM.Profiles) == 0 || patched.LLM.Profiles[0].Provider != "mock" {
+	if patched.RestartRequired || len(patched.LLM.Profiles) == 0 || patched.LLM.Profiles[0].Provider != "mock" {
 		t.Fatalf("patched = %+v", patched)
 	}
 
@@ -114,6 +118,164 @@ func TestHandleSetupConfigGetPatch(t *testing.T) {
 	}
 	if reloaded2.Compression.SilentTriggerTokens != 60000 || reloaded2.Compression.BlockingTriggerTokens != 90000 {
 		t.Fatalf("stored compression = %+v", reloaded2.Compression)
+	}
+
+	zeroToolsReq := httptest.NewRequest(http.MethodPatch, "/v1/settings", strings.NewReader(`{"tools":{"bash_compress_max_output_chars":0}}`))
+	zeroToolsRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(zeroToolsRec, zeroToolsReq)
+	if zeroToolsRec.Code != http.StatusBadRequest {
+		t.Fatalf("zero output limit status = %d body=%s", zeroToolsRec.Code, zeroToolsRec.Body.String())
+	}
+
+	resetReq := httptest.NewRequest(http.MethodPatch, "/v1/settings", strings.NewReader(`{"tools":{"reset_bash_compress_limits":true}}`))
+	resetRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(resetRec, resetReq)
+	if resetRec.Code != http.StatusOK {
+		t.Fatalf("reset limits status = %d body=%s", resetRec.Code, resetRec.Body.String())
+	}
+	var resetView setup.SettingsView
+	if err := json.NewDecoder(resetRec.Body).Decode(&resetView); err != nil {
+		t.Fatal(err)
+	}
+	if resetView.Tools.BashCompressMaxOutputChars != config.DefaultBashCompressMaxOutputChars || resetView.Tools.BashCompressMaxStderrChars != config.DefaultBashCompressMaxOutputCharsStderr {
+		t.Fatalf("reset limits = %+v", resetView.Tools)
+	}
+}
+
+func TestHandleSetupFeaturePatchPreservesOmittedGatesAndAppliesExplicitFalse(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	cfg := testConfig(t)
+	cfg.Skills.Enabled = true
+	cfg.Triggers.Enabled = true
+	cfg.ChildAgents.Enabled = true
+	multimodal := true
+	cfg.Multimodal.Enabled = &multimodal
+	cfg.SyncActiveProfileMultimodalFromFlat()
+	if err := config.SaveFile(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	nodeSettings, llmConfigs := openSetupStores(t, dir, cfg)
+	srv := NewServer(cfg, nil, WithSkipStore(), WithConfigPath(configPath), WithNodeSettings(nodeSettings))
+	srv.llmConfigs = llmConfigs
+	t.Cleanup(func() { srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	patch := func(body string) setup.SettingsView {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/settings", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("patch status=%d body=%s", resp.StatusCode, raw)
+		}
+		var view setup.SettingsView
+		if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
+			t.Fatal(err)
+		}
+		return view
+	}
+
+	omitted := patch(`{"features":{"skills_max_in_prompt":12}}`)
+	if !omitted.Features.SkillsEnabled || !omitted.Features.TriggersEnabled || !omitted.Features.ChildAgentsEnabled || !omitted.Features.MultimodalEnabled {
+		t.Fatalf("omitted gates changed: %+v", omitted.Features)
+	}
+
+	explicitFalse := patch(`{"features":{"skills_enabled":false,"triggers_enabled":false,"child_agents_enabled":false,"multimodal_enabled":false}}`)
+	if explicitFalse.Features.SkillsEnabled || explicitFalse.Features.TriggersEnabled || explicitFalse.Features.ChildAgentsEnabled || explicitFalse.Features.MultimodalEnabled {
+		t.Fatalf("explicit false gates not returned: %+v", explicitFalse.Features)
+	}
+	stored, err := nodeSettings.Load(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored == nil || stored.Skills.Enabled || stored.Triggers.Enabled || stored.ChildAgents.Enabled || stored.MultimodalEnabled() {
+		t.Fatalf("explicit false gates not persisted: %+v", stored)
+	}
+	profile, err := llmConfigs.Get(t.Context(), cfg.LLM.ActiveProfileID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.MultimodalEnabled {
+		t.Fatalf("explicit false multimodal setting not persisted to active profile: %+v", profile)
+	}
+}
+
+func TestHandleSetupRawHistoryEnvironmentOverrideRejectsPatchAtomically(t *testing.T) {
+	tests := []struct {
+		name          string
+		envValue      string
+		expectedValue bool
+		patchValue    bool
+	}{
+		{name: "environment true", envValue: "true", expectedValue: true, patchValue: false},
+		{name: "environment false", envValue: "false", expectedValue: false, patchValue: true},
+		{name: "invalid value defaults true but remains controlled", envValue: "not-a-bool", expectedValue: true, patchValue: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(config.EnvRawMessageHistoryEnabled, tt.envValue)
+			dir := t.TempDir()
+			cfg := testConfig(t)
+			configuredRawHistory := false
+			cfg.RawMessageHistory.Enabled = &configuredRawHistory
+			if err := config.SaveFile(filepath.Join(dir, "config.yaml"), cfg); err != nil {
+				t.Fatal(err)
+			}
+			nodeSettings, llmConfigs := openSetupStores(t, dir, cfg)
+			srv := NewServer(cfg, nil, WithSkipStore(), WithNodeSettings(nodeSettings))
+			srv.llmConfigs = llmConfigs
+			t.Cleanup(func() { srv.Close() })
+			recorder := httptest.NewRecorder()
+			body := fmt.Sprintf(`{"features":{"raw_message_history_enabled":%t,"skills_max_in_prompt":77},"tools":{"bash_output_encoding":"should-not-save"}}`, tt.patchValue)
+			req := httptest.NewRequest(http.MethodPatch, "/v1/settings", strings.NewReader(body))
+			srv.Handler().ServeHTTP(recorder, req)
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("controlled raw-history PATCH status = %d, want %d: %s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+			}
+			var apiErr struct {
+				Error struct {
+					Code    string         `json:"code"`
+					Message string         `json:"message"`
+					Details map[string]any `json:"details"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &apiErr); err != nil {
+				t.Fatal(err)
+			}
+			if apiErr.Error.Code != "setting_controlled_by_environment" || !strings.Contains(apiErr.Error.Message, config.EnvRawMessageHistoryEnabled) || apiErr.Error.Details["source"] != "environment" {
+				t.Fatalf("controlled setting error = %+v", apiErr)
+			}
+
+			getRec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(getRec, httptest.NewRequest(http.MethodGet, "/v1/settings", nil))
+			var view setup.SettingsView
+			if err := json.Unmarshal(getRec.Body.Bytes(), &view); err != nil {
+				t.Fatal(err)
+			}
+			if view.Features.RawMessageHistoryEnabled != tt.expectedValue || view.Features.RawMessageHistorySource != "environment" {
+				t.Fatalf("effective raw-history view = %+v, want enabled=%v source=environment", view.Features, tt.expectedValue)
+			}
+			if view.Features.SkillsMaxInPrompt != cfg.Skills.MaxInPrompt || view.Tools.BashOutputEncoding != cfg.Tools.BashOutputEncoding {
+				t.Fatalf("failed PATCH partially changed settings: skills max=%d, output encoding=%q", view.Features.SkillsMaxInPrompt, view.Tools.BashOutputEncoding)
+			}
+			stored, err := nodeSettings.Load(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored == nil || stored.Skills.MaxInPrompt != cfg.Skills.MaxInPrompt || stored.Tools.BashOutputEncoding != cfg.Tools.BashOutputEncoding || stored.RawMessageHistory.Enabled == nil || *stored.RawMessageHistory.Enabled {
+				t.Fatalf("failed PATCH changed persisted settings: %+v", stored)
+			}
+		})
 	}
 }
 
@@ -276,6 +438,13 @@ func TestHandlePatchSetupConfigBrowserRuntimeLifecycle(t *testing.T) {
 		raw, _ := io.ReadAll(resp.Body)
 		t.Fatalf("enable status=%d body=%s", resp.StatusCode, raw)
 	}
+	var enabledView setup.SettingsView
+	if err := json.NewDecoder(resp.Body).Decode(&enabledView); err != nil {
+		t.Fatal(err)
+	}
+	if enabledView.RestartRequired {
+		t.Fatal("successfully applied browser change should not require restart")
+	}
 	if srv.browserManager() == nil || !srv.browserManager().Enabled() {
 		t.Fatal("browser manager was not installed")
 	}
@@ -304,6 +473,13 @@ func TestHandlePatchSetupConfigBrowserRuntimeLifecycle(t *testing.T) {
 		raw, _ := io.ReadAll(disableResp.Body)
 		t.Fatalf("disable status=%d body=%s", disableResp.StatusCode, raw)
 	}
+	var disabledView setup.SettingsView
+	if err := json.NewDecoder(disableResp.Body).Decode(&disabledView); err != nil {
+		t.Fatal(err)
+	}
+	if disabledView.RestartRequired {
+		t.Fatal("successfully applied browser disable should not require restart")
+	}
 	if srv.browserManager() != nil {
 		t.Fatal("browser manager remained installed after disable")
 	}
@@ -320,6 +496,9 @@ func TestHandlePatchSetupConfigBrowserFailsBeforePersisting(t *testing.T) {
 	configPath := filepath.Join(dir, "config.yaml")
 	cfg := testConfig(t)
 	cfg.Browser.ServiceURL = "http://127.0.0.1:1"
+	multimodalEnabled := true
+	cfg.Multimodal.Enabled = &multimodalEnabled
+	cfg.SyncActiveProfileMultimodalFromFlat()
 	if err := config.SaveFile(configPath, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +509,7 @@ func TestHandlePatchSetupConfigBrowserFailsBeforePersisting(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	patch := []byte(`{"features":{"browser_enabled":true}}`)
+	patch := []byte(`{"features":{"browser_enabled":true,"multimodal_enabled":false}}`)
 	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/settings", bytes.NewReader(patch))
 	if err != nil {
 		t.Fatal(err)
@@ -348,12 +527,70 @@ func TestHandlePatchSetupConfigBrowserFailsBeforePersisting(t *testing.T) {
 	if cfg.BrowserEnabled() {
 		t.Fatal("browser config was enabled after failed service preflight")
 	}
+	profile, ok := cfg.LLM.GetProfile(cfg.LLM.ActiveProfileID())
+	if !ok || !config.ProfileMultimodalEnabled(profile) {
+		t.Fatalf("failed browser preflight mutated source profile: %+v", profile)
+	}
 	reloaded, err := config.LoadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if reloaded.BrowserEnabled() {
 		t.Fatal("persisted browser config after failed service preflight")
+	}
+}
+
+func TestSetupRestartRequiredIncludesNodeIdentity(t *testing.T) {
+	before := testConfig(t)
+	after := *before
+	after.NodeID = before.NodeID + "-changed"
+	if !setupRestartRequired(before, &after, true, true) {
+		t.Fatal("changing NodeID must require restart because startup-bound clients retain the prior identity")
+	}
+	if setupRestartRequired(before, before, true, true) {
+		t.Fatal("unchanged config should not require restart")
+	}
+}
+
+func TestSetupRestartRequiredUsesEffectiveRawHistoryValue(t *testing.T) {
+	envTrue, envFalse, envInvalid := "true", "false", "invalid"
+	tests := []struct {
+		name     string
+		envValue *string
+		want     bool
+	}{
+		{name: "environment true masks stored difference", envValue: &envTrue, want: false},
+		{name: "environment false masks stored difference", envValue: &envFalse, want: false},
+		{name: "invalid environment defaults true and masks stored difference", envValue: &envInvalid, want: false},
+		{name: "settings source uses stored effective difference", envValue: nil, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envValue == nil {
+				previous, existed := os.LookupEnv(config.EnvRawMessageHistoryEnabled)
+				if err := os.Unsetenv(config.EnvRawMessageHistoryEnabled); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if existed {
+						_ = os.Setenv(config.EnvRawMessageHistoryEnabled, previous)
+					} else {
+						_ = os.Unsetenv(config.EnvRawMessageHistoryEnabled)
+					}
+				})
+			} else {
+				t.Setenv(config.EnvRawMessageHistoryEnabled, *tt.envValue)
+			}
+			before := testConfig(t)
+			storedOff, storedOn := false, true
+			before.RawMessageHistory.Enabled = &storedOff
+			after := *before
+			after.RawMessageHistory.Enabled = &storedOn
+			got := setupRestartRequired(before, &after, true, true)
+			if got != tt.want {
+				t.Fatalf("restart required = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

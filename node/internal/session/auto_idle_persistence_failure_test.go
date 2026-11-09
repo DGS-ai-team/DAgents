@@ -60,8 +60,8 @@ func TestTrustedAutoIdlePersistenceFailureDoesNotPublishSuccess(t *testing.T) {
 		policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"auto_idle": policy.ModeNever}}),
 		st, TurnOptions{
 			AutoAgent: true,
-			TriggerToolRoundProvider: func(context.Context, string, string, string) (int, bool, error) {
-				return 1, true, nil
+			TriggerActivationProvider: func(context.Context, string, string, string) (bool, error) {
+				return true, nil
 			},
 		}, logx.Discard())
 	sess, _, err := mgr.Create("")

@@ -27,7 +27,7 @@ func simplifiedOverview(t *testing.T, s *Server, query string) autoOverviewRespo
 }
 
 func simplifiedProfile(id string, interval int64) autonomy.Profile {
-	return autonomy.Profile{AgentID: id, WakeIntervalSeconds: interval, MaxToolRounds: 32, Timezone: "UTC"}
+	return autonomy.Profile{AgentID: id, WakeIntervalSeconds: interval, Timezone: "UTC"}
 }
 
 func TestAutoOverviewSimplifiedProjectionUsesAutonomyStateAndFilters(t *testing.T) {

@@ -9,13 +9,14 @@
 | `Config` | `struct` | 根配置：node_id、listen、local、llm、runtime_root、manage 等 |
 | `ListenConfig` | `struct` | HTTP 监听 host/port |
 | `LocalConfig` | `struct` | Client 用 endpoint 与可选 agent_id 校验 |
-| `LLMConfig` | `struct` | LLM 配置；`mock=true` 时用 MockClient；工具步数上限见 Agent snapshot `max_steps` |
+| `LLMConfig` | `struct` | LLM 启动/迁移字段；运行时连接档案与凭据由 `.runtime/llm_configs.db` 持有。`api_key_env` 仅用于 legacy 凭据导入。每轮工具调用额度由 Agent snapshot `defaults.llm.max_tool_calls` 控制 |
 | `SkillsConfig` | `struct` | skills 开关、`max_in_prompt` |
 | `CompressionConfig` | `struct` | `silent_trigger_tokens`、`blocking_trigger_tokens`（`<=0` 关闭对应档位）；`idle_new_conversation_seconds`（普通 Agent 空闲后下一条用户输入开启新上下文，`0` 关闭） |
 | `MemoryConfig` | `struct` | `auto_extract`（默认 false）；`candidate_queue_size`（默认 16）；`max_candidates`（默认 8）；`core_budget_tokens`（默认 2000）；仅控制压缩后的可选后台候选整理 |
 | `TriggersConfig` | `struct` | `enabled`、`poll_seconds` |
 | `RawMessageHistoryConfig` | `struct` | 原始消息 JSONL 开关（`enabled` 指针，缺省 true） |
 | `EnvRawMessageHistoryEnabled` | `const string` | 环境变量 `AGENT_RAW_MESSAGE_HISTORY_ENABLED` |
+| `DefaultBashCompressMaxOutputChars` / `DefaultBashCompressMaxOutputCharsStderr` | `const int` | Bash 压缩字符默认上限（12000 / 16000） |
 | `LogConfig` | `struct` | Node stderr 日志级别（`level`，默认 `info`） |
 | `ToolsConfig` | `struct` | `bash_output_encoding`；`file_encoding`；`bash_compress`（工具组由 Agent 快照配置） |
 | `AllBuiltinToolGroupNames` | `func() []string` | 可配置工具组名字典序全集 |
@@ -27,7 +28,7 @@
 | `ManageConfig` | `struct` | Manage 开关、URL、node_token、`registration`、`update`、`workgroup` |
 | `AgentConfig` | `struct` | `name`、`description`、`capabilities`、`metadata` |
 | `ManageRegistrationConfig` | `struct` | `base_url`、`interval_seconds`（默认 30）、`ttl_seconds`（默认 60）、`team` |
-| `LoadFile` | `func(path string) (*Config, error)` | 读 YAML、展开 env、默认值、校验 |
+| `LoadFile` | `func(path string) (*Config, error)` | 读 Node bootstrap YAML、展开 env、默认值并校验监听/本机连接字段 |
 | `(c *Config) ApplyDefaults` | `method` | 填充 listen/local/manage 缺省 |
 | `(c *Config) Validate` | `method` | 校验 node_id、端口、endpoint；manage.enabled 时要求 url |
 | `(c *Config) DiscoveryGroups` | `method` | YAML `groups` 字段（**不**发往 Manage） |
@@ -43,6 +44,7 @@
 | `(c *Config) MemoryDir` | `method` | 默认 `.runtime/memory`，Node 控制面目录，不是 Agent workspace 状态 |
 | `(c *Config) SessionDBPath` | `method` | 默认 `{runtime}/memory/sessions.db`，按 `agent_id` 隔离的控制面快照 |
 | `(c *Config) RawMessageHistoryEnabled` | `method` | 是否写 JSONL；env 优先，默认 true |
+| `(c *Config) RawMessageHistorySource` | `method` | 返回有效控制来源 `environment` 或 `settings` |
 | `(c *Config) RawMessageHistoryDir` | `method` | 未绑定 Agent 时默认 `.runtime/history`；正常 Agent runtime 改用 workspace 下 `.dagents/<agent_id>/history/` |
 | `(c *Config) TriggersStorePath` | `method` | 默认 `{runtime_root}/triggers/triggers.json` |
 | `(c *Config) Capabilities` | `method` | 能力列表（含可选 triggers） |

@@ -79,6 +79,32 @@ func TestBootstrapNodeSettings_seedsProductDefaults(t *testing.T) {
 	}
 }
 
+func TestProductSeedToolResultHookToolsMatchSharedDefaultsAndCustomListPersists(t *testing.T) {
+	seed := ProductNodeSettingsSeed()
+	want := config.DefaultToolResultHookTools()
+	if strings.Join(seed.Hooks.ToolResult.Tools, ",") != strings.Join(want, ",") {
+		t.Fatalf("seed tools = %v, shared defaults = %v", seed.Hooks.ToolResult.Tools, want)
+	}
+	dir := t.TempDir()
+	settings, err := OpenNodeSettings(filepath.Join(dir, "node_settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer settings.Close()
+	custom := *seed
+	custom.Hooks.ToolResult.Tools = []string{"read_file", "custom_tool"}
+	if err := settings.Save(context.Background(), &custom); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := settings.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(loaded.Hooks.ToolResult.Tools, ",") != "read_file,custom_tool" {
+		t.Fatalf("custom hook list overwritten: %v", loaded.Hooks.ToolResult.Tools)
+	}
+}
+
 func TestBootstrapNodeSettingsValidatesAfterDatabaseOverlay(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

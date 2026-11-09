@@ -1466,6 +1466,47 @@ func (c *TurnCoordinator) BudgetDecisionFor(command CommandType) BudgetDecision 
 	return c.BudgetDecisionForCommand(TurnCommand{Type: command})
 }
 
+// BudgetDecisionForToolCall evaluates one proposed call against its stable
+// position in the current batch. The full batch is recorded before execution,
+// so a batch-level usage check would incorrectly deny every call when any
+// later item overflows the remaining quota.
+func (c *TurnCoordinator) BudgetDecisionForToolCall(toolCallID string) BudgetDecision {
+	if c == nil {
+		return BudgetDecision{Allowed: false, Reason: "turn coordinator is nil"}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	decision := BudgetDecision{Allowed: true}
+	if c.turn == nil {
+		return decision
+	}
+	decision.Budget = c.turn.Budget
+	decision.Usage = c.turn.Usage
+	limit := c.turn.Budget.MaxToolCalls
+	if limit <= 0 {
+		return decision
+	}
+	if c.batch == nil {
+		decision.Allowed = false
+		decision.Reason = "unknown_tool_call"
+		return decision
+	}
+	priorCalls := c.turn.Usage.ToolCalls - len(c.batch.ToolCallIDs)
+	for index, id := range c.batch.ToolCallIDs {
+		if id != toolCallID {
+			continue
+		}
+		if priorCalls+index+1 > limit {
+			decision.Allowed = false
+			decision.Reason = "max_tool_calls"
+		}
+		return decision
+	}
+	decision.Allowed = false
+	decision.Reason = "unknown_tool_call"
+	return decision
+}
+
 // BudgetDecisionForCommand is the contextual form used by the final summary
 // path. Ordinary callers can keep using BudgetDecisionFor; a summary is a
 // separate, explicitly reserved Step and never silently bypasses a budget.
@@ -1481,31 +1522,6 @@ func (c *TurnCoordinator) BudgetDecisionForCommand(command TurnCommand) BudgetDe
 	}
 	decision.Budget = c.turn.Budget
 	decision.Usage = c.turn.Usage
-	if c.turn.Budget.MaxWallTime > 0 && !c.turn.StartedAt.IsZero() && time.Since(c.turn.StartedAt) >= c.turn.Budget.MaxWallTime {
-		decision.Allowed = false
-		decision.Reason = "max_wall_time"
-		return decision
-	}
-	if c.turn.Budget.MaxInputTokens > 0 && c.turn.Usage.InputTokens >= c.turn.Budget.MaxInputTokens {
-		decision.Allowed = false
-		decision.Reason = "max_input_tokens"
-		return decision
-	}
-	if c.turn.Budget.MaxOutputTokens > 0 && c.turn.Usage.OutputTokens >= c.turn.Budget.MaxOutputTokens {
-		decision.Allowed = false
-		decision.Reason = "max_output_tokens"
-		return decision
-	}
-	if c.turn.Budget.MaxTotalTokens > 0 && c.turn.Usage.TotalTokens >= c.turn.Budget.MaxTotalTokens {
-		decision.Allowed = false
-		decision.Reason = "max_total_tokens"
-		return decision
-	}
-	if c.turn.Budget.MaxCost > 0 && c.turn.Usage.Cost >= c.turn.Budget.MaxCost {
-		decision.Allowed = false
-		decision.Reason = "max_cost"
-		return decision
-	}
 	switch command.Type {
 	case CommandStartStep:
 		if command.FinalSummary {
@@ -1513,31 +1529,9 @@ func (c *TurnCoordinator) BudgetDecisionForCommand(command TurnCommand) BudgetDe
 				decision.Allowed = false
 				decision.Reason = "max_summary_steps"
 			}
-		} else if c.turn.Budget.MaxSteps > 0 && c.turn.Usage.Steps >= c.turn.Budget.MaxSteps {
-			decision.Allowed = false
-			decision.Reason = "max_steps"
 		} else if c.turn.Budget.MaxToolCalls > 0 && c.turn.Usage.ToolCalls >= c.turn.Budget.MaxToolCalls {
 			decision.Allowed = false
 			decision.Reason = "max_tool_calls"
-		} else if c.turn.Budget.MaxToolRounds > 0 && c.turn.Usage.ToolRounds >= c.turn.Budget.MaxToolRounds && !command.FinalSummary {
-			decision.Allowed = false
-			decision.Reason = "max_tool_rounds"
-		}
-	case CommandToolCallRecorded:
-		// ToolCall facts are emitted before this preflight reaches the actual
-		// execution edge, so exactly MaxToolCalls is still an allowed batch.
-		if c.turn.Budget.MaxToolCalls > 0 && c.turn.Usage.ToolCalls > c.turn.Budget.MaxToolCalls {
-			decision.Allowed = false
-			decision.Reason = "max_tool_calls"
-		}
-		if c.turn.Budget.MaxToolRounds > 0 && c.turn.Usage.ToolRounds > c.turn.Budget.MaxToolRounds {
-			decision.Allowed = false
-			decision.Reason = "max_tool_rounds"
-		}
-	case CommandToolExecutionRetrying:
-		if c.turn.Budget.MaxToolRetries > 0 && c.turn.Usage.ToolRetries >= c.turn.Budget.MaxToolRetries {
-			decision.Allowed = false
-			decision.Reason = "max_tool_retries"
 		}
 	}
 	return decision

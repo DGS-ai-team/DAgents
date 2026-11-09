@@ -86,8 +86,8 @@ func TestRuntimeIdleUserInputPrecedesQueuedSystemAuto(t *testing.T) {
 	client := &inputPriorityCaptureClient{started: make(chan struct{}), release: make(chan struct{})}
 	mgr := NewManager("agent-1", stream.NewHub(16, logx.Discard()), client, reg, policy.NewDefaultEngine(), nil, TurnOptions{
 		WorkspaceRoot: root,
-		TriggerToolRoundProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
-			return 1, agentID == "agent-1" && triggerID == "auto-default:agent-1" && deliveryID == "auto-delivery", nil
+		TriggerActivationProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (bool, error) {
+			return agentID == "agent-1" && triggerID == "auto-default:agent-1" && deliveryID == "auto-delivery", nil
 		},
 	}, logx.Discard())
 	defer mgr.Stop()
@@ -170,7 +170,7 @@ func (c *triggerRoundCaptureClient) StreamChat(_ context.Context, req llm.ChatRe
 	return llm.ChatResult{Content: "done", FinishReason: "stop"}, nil
 }
 
-func TestTrustedTriggerRoundBudgetReplacesLegacyAutoLimits(t *testing.T) {
+func TestTrustedTriggerUsesSharedToolCallBudget(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "probe.txt"), []byte("probe"), 0644); err != nil {
 		t.Fatal(err)
@@ -183,9 +183,9 @@ func TestTrustedTriggerRoundBudgetReplacesLegacyAutoLimits(t *testing.T) {
 	mgr := NewManager("agent-1", stream.NewHub(16, logx.Discard()), client, reg,
 		policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"read_file": policy.ModeNever}}), nil, TurnOptions{
 			WorkspaceRoot: root,
-			Budget:        turn.TurnBudget{MaxSteps: 1, MaxToolCalls: 1, MaxTotalTokens: 1},
-			TriggerToolRoundProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
-				return 2, agentID == "agent-1" && triggerID == "trusted-default" && deliveryID == "delivery-old-limits", nil
+			Budget:        turn.TurnBudget{MaxToolCalls: 64},
+			TriggerActivationProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (bool, error) {
+				return agentID == "agent-1" && triggerID == "trusted-default" && deliveryID == "delivery-old-limits", nil
 			},
 		}, logx.Discard())
 	defer mgr.Stop()
@@ -208,8 +208,8 @@ func TestTrustedTriggerRoundBudgetReplacesLegacyAutoLimits(t *testing.T) {
 	if len(client.requests) != 3 {
 		t.Fatalf("trusted trigger stopped under legacy budget: %d model requests", len(client.requests))
 	}
-	if len(client.requests[2].Tools) != 0 {
-		t.Fatal("final summary unexpectedly exposed tools")
+	if len(client.requests[2].Tools) == 0 {
+		t.Fatal("shared tool-call budget unexpectedly acted as an Auto round cap")
 	}
 }
 func (*triggerRoundCaptureClient) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
@@ -257,7 +257,7 @@ func TestAgentPromptProviderFailureSkipsModel(t *testing.T) {
 	}
 }
 
-func TestTrustedTriggerToolRoundLimitLeavesSummaryAndDoesNotAffectChat(t *testing.T) {
+func TestTrustedTriggerAndChatShareToolCallBudget(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "probe.txt"), []byte("probe"), 0644); err != nil {
 		t.Fatal(err)
@@ -268,25 +268,11 @@ func TestTrustedTriggerToolRoundLimitLeavesSummaryAndDoesNotAffectChat(t *testin
 	}
 	pol := policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"read_file": policy.ModeNever}})
 	client := &triggerRoundCaptureClient{seen: make(chan int, 8)}
-	var providerMu sync.Mutex
-	triggerLimit := 1
-	providerLimits := make([]int, 0, 2)
 	mgr := NewManager("agent-1", stream.NewHub(16, logx.Discard()), client, reg, pol, nil, TurnOptions{
 		WorkspaceRoot: root,
-		TriggerToolRoundProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
-			if agentID == "agent-1" && triggerID == "trusted-default" && deliveryID == "delivery-1" {
-				providerMu.Lock()
-				defer providerMu.Unlock()
-				providerLimits = append(providerLimits, triggerLimit)
-				return triggerLimit, true, nil
-			}
-			if agentID == "agent-1" && triggerID == "trusted-default-2" && deliveryID == "delivery-2" {
-				providerMu.Lock()
-				defer providerMu.Unlock()
-				providerLimits = append(providerLimits, triggerLimit)
-				return triggerLimit, true, nil
-			}
-			return 0, false, nil
+		Budget:        turn.TurnBudget{MaxToolCalls: 1, ReserveFinalSummary: true},
+		TriggerActivationProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (bool, error) {
+			return agentID == "agent-1" && (triggerID == "trusted-default" && deliveryID == "delivery-1" || triggerID == "trusted-default-2" && deliveryID == "delivery-2"), nil
 		},
 	}, logx.Discard())
 	defer mgr.Stop()
@@ -338,11 +324,8 @@ func TestTrustedTriggerToolRoundLimitLeavesSummaryAndDoesNotAffectChat(t *testin
 	chatTools := len(client.requests[2].Tools)
 	client.mu.Unlock()
 	if chatTools == 0 {
-		t.Fatal("ordinary chat unexpectedly inherited trigger round cap")
+		t.Fatal("ordinary chat unexpectedly inherited Auto-specific call cap")
 	}
-	providerMu.Lock()
-	triggerLimit = 2
-	providerMu.Unlock()
 	if err := mgr.EnqueueTriggerMessage(s.ID, "trusted-default-2", "再次激活", "delivery-2"); err != nil {
 		t.Fatal(err)
 	}
@@ -351,15 +334,9 @@ func TestTrustedTriggerToolRoundLimitLeavesSummaryAndDoesNotAffectChat(t *testin
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for second trusted trigger request")
 	}
-	providerMu.Lock()
-	gotLimits := append([]int(nil), providerLimits...)
-	providerMu.Unlock()
-	if len(gotLimits) != 2 || gotLimits[0] != 1 || gotLimits[1] != 2 {
-		t.Fatalf("trigger profile was not refreshed per activation: %v", gotLimits)
-	}
 }
 
-func TestTrustedTriggerToolRoundProviderErrorSkipsModel(t *testing.T) {
+func TestTrustedTriggerActivationProviderErrorSkipsModel(t *testing.T) {
 	root := t.TempDir()
 	reg, err := tools.NewRegistry(root, 30)
 	if err != nil {
@@ -369,9 +346,9 @@ func TestTrustedTriggerToolRoundProviderErrorSkipsModel(t *testing.T) {
 	providerCalled := make(chan struct{}, 1)
 	mgr := NewManager("agent-1", stream.NewHub(8, logx.Discard()), client, reg, policy.NewDefaultEngine(), nil, TurnOptions{
 		WorkspaceRoot: root,
-		TriggerToolRoundProvider: func(context.Context, string, string, string) (int, bool, error) {
+		TriggerActivationProvider: func(context.Context, string, string, string) (bool, error) {
 			providerCalled <- struct{}{}
-			return 0, false, errors.New("profile unavailable")
+			return false, errors.New("profile unavailable")
 		},
 	}, logx.Discard())
 	defer mgr.Stop()
@@ -385,7 +362,7 @@ func TestTrustedTriggerToolRoundProviderErrorSkipsModel(t *testing.T) {
 	select {
 	case <-providerCalled:
 	case <-time.After(3 * time.Second):
-		t.Fatal("trigger round provider was not called")
+		t.Fatal("trigger activation validator was not called")
 	}
 	select {
 	case n := <-client.seen:

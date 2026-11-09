@@ -155,12 +155,43 @@ func TestHydrateIncludesActiveChildProgressAndParentToolCall(t *testing.T) {
 	if child.ToolCallID != "call-parent-child-1" || child.Purpose != "hydrate test" {
 		t.Fatalf("hydrate child = %+v", child)
 	}
-	if child.Progress.Status != childagent.StatusActive || child.Progress.MaxTurns <= 0 {
+	if child.Progress.Status != childagent.StatusActive {
 		t.Fatalf("hydrate progress = %+v", child.Progress)
 	}
 	if err := <-created; err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestChildRuntimeInheritsParentToolCallBudget(t *testing.T) {
+	hub := stream.NewHub(16, logx.Discard())
+	registry, err := tools.NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager("agent-1", hub, &llm.MockClient{}, registry, policy.NewDefaultEngine(), nil,
+		TurnOptions{Budget: turn.TurnBudget{MaxToolCalls: 7, ReserveFinalSummary: true}}, logx.Discard())
+	t.Cleanup(manager.Stop)
+	children := childagent.NewManager(childagent.Config{Enabled: true}, hub, "agent-1", nil)
+	manager.SetChildAgentManager(children)
+	parent, _, err := manager.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SpawnChild(childagent.SpawnSpec{
+		ChildAgentID: "child-budget-test", ParentAgentID: parent.ID,
+		AllowedTools: []string{"read_file"}, Purpose: "budget inheritance",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	child := manager.getRuntime("child-budget-test")
+	if child == nil {
+		t.Fatal("child runtime was not created")
+	}
+	if child.turnBudget.MaxToolCalls != 7 || !child.turnBudget.ReserveFinalSummary {
+		t.Fatalf("child budget = %+v, want the parent's max_tool_calls=7", child.turnBudget)
+	}
+	manager.StopChild("child-budget-test")
 }
 
 type delayedEchoMock struct {

@@ -16,7 +16,7 @@ func TestRunDreamingWaitingCancelPersistsCancelledAttempt(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("maintenance lease: ok=%v err=%v", ok, err)
 	}
-	_, runErr := mgr.RunDreaming(leaseCtx, sessionID, "取消等待", 3)
+	_, runErr := mgr.RunDreaming(leaseCtx, sessionID, "取消等待")
 	release()
 	if runErr == nil {
 		t.Fatal("dreaming unexpectedly completed")

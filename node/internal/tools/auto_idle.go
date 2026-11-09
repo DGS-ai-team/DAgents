@@ -16,7 +16,7 @@ type autoIdleActivationKey struct{}
 
 // WithTrustedAutoIdleActivation marks one provider-validated system-auto
 // activation. The marker is created only by the session ingress after the
-// TriggerToolRoundProvider has accepted the agent/trigger/delivery tuple.
+// TriggerActivationProvider has accepted the agent/trigger/delivery tuple.
 func WithTrustedAutoIdleActivation(ctx context.Context, agentID, triggerID, deliveryID string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()

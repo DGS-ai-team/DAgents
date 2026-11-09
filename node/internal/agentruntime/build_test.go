@@ -31,9 +31,6 @@ func TestBuild_usesAgentWorkspaceAndToolGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = built.Close() })
-	if built.TurnOptions.Budget.MaxSteps != DefaultMaxSteps {
-		t.Fatalf("MaxSteps=%d want %d (from agent default, not BaseTurn)", built.TurnOptions.Budget.MaxSteps, DefaultMaxSteps)
-	}
 	if built.TurnOptions.Budget.MaxToolCalls != DefaultMaxToolCalls {
 		t.Fatalf("MaxToolCalls=%d want %d", built.TurnOptions.Budget.MaxToolCalls, DefaultMaxToolCalls)
 	}

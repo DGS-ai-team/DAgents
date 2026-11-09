@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -55,8 +56,19 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusBadRequest, "invalid_patch", "至少提供一个配置块", nil)
 		return
 	}
+	if patch.Features != nil && patch.Features.RawMessageHistoryEnabled != nil {
+		if _, controlledByEnv := os.LookupEnv(config.EnvRawMessageHistoryEnabled); controlledByEnv {
+			writeAPIError(w, http.StatusBadRequest, "setting_controlled_by_environment", "原始消息记录当前由环境变量 AGENT_RAW_MESSAGE_HISTORY_ENABLED 控制，不能通过设置 API 修改", map[string]any{
+				"setting": "raw_message_history_enabled",
+				"source":  "environment",
+				"env_var": config.EnvRawMessageHistoryEnabled,
+			})
+			return
+		}
+	}
 	s.llmRefMu.Lock()
 	defer s.llmRefMu.Unlock()
+	before := *s.cfg
 	if patch.LLM != nil {
 		for i := range patch.LLM.Profiles {
 			profile := &patch.LLM.Profiles[i]
@@ -86,7 +98,7 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	// value. Prepare and ping the replacement before persisting browser enable
 	// or endpoint changes; otherwise the UI can report an enabled browser while
 	// the Agent registry still has no executable browser tools.
-	browserRuntimeChange := patch.Features != nil || patch.Browser != nil
+	browserRuntimeChange := !browserRuntimeSettingsEqual(&before, updated)
 	var preparedBrowserManager *browser.Manager
 	var preparedBrowserService *browser.ServiceProcess
 	if browserRuntimeChange && updated.BrowserEnabled() && !config.BrowserPlatformSupported() {
@@ -110,8 +122,17 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		}()
 	}
 
-	needsLLMPersist := patch.LLM != nil && len(patch.LLM.Profiles) > 0 && s.llmConfigs != nil
-	needsLLMReferenceCheck := patch.LLM != nil && len(patch.LLM.Profiles) > 0
+	llmProfilesToPersist := []setup.LLMProfileSettings(nil)
+	if patch.LLM != nil && len(patch.LLM.Profiles) > 0 {
+		llmProfilesToPersist = patch.LLM.Profiles
+	} else if patch.Features != nil && patch.Features.MultimodalEnabled != nil {
+		// Multimodal capability is profile-owned in llm_configs.db. Preserve
+		// the legacy feature PATCH by syncing the active profile and persisting
+		// the complete non-secret profile list without changing its credentials.
+		llmProfilesToPersist = setup.ViewFromConfig(updated).LLM.Profiles
+	}
+	needsLLMPersist := len(llmProfilesToPersist) > 0 && s.llmConfigs != nil
+	needsLLMReferenceCheck := len(llmProfilesToPersist) > 0
 	var llmSnapshot []store.LLMConfigRecord
 	var settingsSnapshot *config.Config
 	if needsLLMPersist {
@@ -127,7 +148,7 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		if !needsLLMPersist {
 			records = llmProfileRecordsFromConfig(s.cfg)
 		}
-		if err := s.validateLLMProfileReferences(r.Context(), records, patch.LLM.Profiles); err != nil {
+		if err := s.validateLLMProfileReferences(r.Context(), records, llmProfilesToPersist); err != nil {
 			if inUse, ok := err.(*llmProfileInUseError); ok {
 				writeAPIError(w, http.StatusConflict, "llm_profile_in_use", inUse.Error(), map[string]any{
 					"profile_id": inUse.ProfileID,
@@ -164,7 +185,7 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if needsLLMPersist {
-		if err := s.persistLLMConfigs(r.Context(), patch.LLM.Profiles); err != nil {
+		if err := s.persistLLMConfigs(r.Context(), llmProfilesToPersist); err != nil {
 			if s.nodeSettings != nil && settingsSnapshot != nil {
 				_ = s.nodeSettings.Save(r.Context(), settingsSnapshot)
 			}
@@ -181,7 +202,7 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		s.installBrowserRuntime(preparedBrowserManager, preparedBrowserService, updated.Browser.ServiceURL)
 		browserManagerCommitted = true
 	}
-	s.syncLLMRuntimeFromStore(r.Context())
+	llmRuntimeApplied := s.syncLLMRuntimeFromStore(r.Context())
 	s.applyMultimodalRuntime(s.cfg.MultimodalEnabled())
 	s.attachNodeRuntimeDeps(s.tools, s.cfg.NodeID)
 	s.maybeStartManageSidecars()
@@ -189,10 +210,69 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	s.enrichLLMSettingsView(&view.LLM)
 	view.ConfigPath = s.configPath
 	view.ConfigWritable = s.setupWritable()
-	// Browser changes are applied to the live manager and loaded registries in
-	// this request. Other settings retain the existing restart signal.
-	view.RestartRequired = !browserRuntimeChange
+	view.RestartRequired = setupRestartRequired(&before, updated, browserRuntimeChange, llmRuntimeApplied)
 	writeJSON(w, http.StatusOK, view)
+}
+
+func browserRuntimeSettingsEqual(a, b *config.Config) bool {
+	return reflect.DeepEqual(a.Browser, b.Browser) && a.BrowserEnabled() == b.BrowserEnabled()
+}
+
+// setupRestartRequired is based on effective config differences. LLM and
+// browser changes are installed into live runtime services in this request;
+// Agent-bound LLM profile changes are picked up by ensureAgentRuntime on the
+// next request through the profile fingerprint. NodeID and persisted settings
+// outside those live paths require restart.
+func setupRestartRequired(a, b *config.Config, browserApplied, llmApplied bool) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if !browserApplied && !browserRuntimeSettingsEqual(a, b) {
+		return true
+	}
+	if !llmApplied && !reflect.DeepEqual(a.LLM, b.LLM) {
+		return true
+	}
+	return a.NodeID != b.NodeID ||
+		!reflect.DeepEqual(a.Manage, b.Manage) ||
+		!reflect.DeepEqual(a.Compression, b.Compression) ||
+		!reflect.DeepEqual(a.Memory, b.Memory) ||
+		!reflect.DeepEqual(a.Log, b.Log) ||
+		!reflect.DeepEqual(a.Agent, b.Agent) ||
+		!reflect.DeepEqual(a.User, b.User) ||
+		!reflect.DeepEqual(a.Onboarding, b.Onboarding) ||
+		!reflect.DeepEqual(a.ChildAgents, b.ChildAgents) ||
+		!reflect.DeepEqual(a.WeCom, b.WeCom) ||
+		!reflect.DeepEqual(a.Tools, b.Tools) ||
+		!reflect.DeepEqual(a.Hooks, b.Hooks) ||
+		!reflect.DeepEqual(a.Skills, b.Skills) ||
+		!reflect.DeepEqual(a.Triggers, b.Triggers) ||
+		a.RawMessageHistoryEnabled() != b.RawMessageHistoryEnabled()
+}
+
+func configPathWritable(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	if err == nil {
+		file, openErr := os.OpenFile(path, os.O_WRONLY, 0)
+		if openErr != nil {
+			return false
+		}
+		_ = file.Close()
+		return true
+	}
+	if !os.IsNotExist(err) {
+		return false
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		return false
+	}
+	_ = file.Close()
+	_ = os.Remove(path)
+	return true
 }
 
 func (s *Server) persistLLMConfigs(ctx context.Context, profiles []setup.LLMProfileSettings) error {
@@ -414,13 +494,13 @@ func (s *Server) enrichLLMSettingsView(llm *setup.LLMSettings) {
 	}
 }
 
-func (s *Server) syncLLMRuntimeFromStore(ctx context.Context) {
+func (s *Server) syncLLMRuntimeFromStore(ctx context.Context) bool {
 	if s.llmRuntime == nil {
-		return
+		return false
 	}
 	s.llmRuntime.SyncFromConfig(s.cfg)
 	if s.llmConfigs == nil {
-		return
+		return true
 	}
 	id := s.cfg.LLM.ActiveProfileID()
 	if id == "" {
@@ -428,15 +508,16 @@ func (s *Server) syncLLMRuntimeFromStore(ctx context.Context) {
 	}
 	if id == "" {
 		s.llmRuntime.SetAPIKey("")
-		return
+		return true
 	}
 	key, err := s.llmConfigs.ResolveAPIKey(ctx, id)
 	if err != nil {
 		s.logger.Warn("resolve llm api key failed", "id", id, "error", err)
 		s.llmRuntime.SetAPIKey("")
-		return
+		return false
 	}
 	s.llmRuntime.SetAPIKey(key)
+	return true
 }
 
 type probeLLMModelsRequest struct {
@@ -492,29 +573,4 @@ func (s *Server) handleProbeLLMModels(w http.ResponseWriter, r *http.Request) {
 		result.SuggestedProvider = string(provider)
 	}
 	writeJSON(w, http.StatusOK, result)
-}
-
-func configPathWritable(path string) bool {
-	if path == "" {
-		return false
-	}
-	_, err := os.Stat(path)
-	if err == nil {
-		file, openErr := os.OpenFile(path, os.O_WRONLY, 0)
-		if openErr != nil {
-			return false
-		}
-		_ = file.Close()
-		return true
-	}
-	if !os.IsNotExist(err) {
-		return false
-	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o644)
-	if err != nil {
-		return false
-	}
-	_ = file.Close()
-	_ = os.Remove(path)
-	return true
 }

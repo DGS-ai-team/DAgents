@@ -85,7 +85,7 @@ func TestAutoOriginBusyWakeupsUseProductionProviderAndDoNotReplayAfterDisable(t 
 	if err := agents.Save(context.Background(), store.AgentRecord{AgentID: "auto-origin", ConfigSnapshot: json.RawMessage(`{"agent_type":"auto"}`), RuntimeRevision: 1, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.autonomyStore.PutProfile(autonomy.Profile{AgentID: "auto-origin", WakeIntervalSeconds: 60, MaxToolRounds: 4, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
+	if err := s.autonomyStore.PutProfile(autonomy.Profile{AgentID: "auto-origin", WakeIntervalSeconds: 60, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	turnOpts := s.sessions.DefaultTurnOptions()
@@ -115,10 +115,10 @@ func TestAutoOriginBusyWakeupsUseProductionProviderAndDoNotReplayAfterDisable(t 
 	if !ok || claimed.PendingDeliveryID == nil {
 		t.Fatalf("auto delivery was not durably claimed while provider was blocked: %+v", claimed)
 	}
-	if limit, trusted, providerErr := s.triggerToolRoundProvider(context.Background(), "auto-origin", def.TriggerID, *claimed.PendingDeliveryID); providerErr != nil || !trusted || limit != 4 {
-		t.Fatalf("production provider valid delivery=(%d,%v,%v)", limit, trusted, providerErr)
+	if trusted, providerErr := s.triggerActivationProvider(context.Background(), "auto-origin", def.TriggerID, *claimed.PendingDeliveryID); providerErr != nil || !trusted {
+		t.Fatalf("production provider valid delivery=(%v,%v)", trusted, providerErr)
 	}
-	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-origin", def.TriggerID, "wrong"); err == nil && trusted {
+	if trusted, err := s.triggerActivationProvider(context.Background(), "auto-origin", def.TriggerID, "wrong"); err == nil && trusted {
 		t.Fatal("production provider accepted wrong delivery")
 	}
 	client.releaseProvider()

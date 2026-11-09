@@ -89,7 +89,6 @@ cancelled result；普通 human 输入仍只进入 InputBox 排队，不会打�
 | 字段 | 作用 |
 |------|------|
 | `WorkspaceRoot` | Agent 工具工作区根目录（相对路径参数的基准；不在 system prompt 中暴露绝对路径） |
-| `MaxSteps` | 单条 human message 内模型/工具步数上限（子 Agent 创建时用 `SpawnSpec.MaxTurns` 覆盖） |
 | `SkillsRoot` / `SkillsEnabled` / `SkillsMaxInPrompt` | skills 目录与同时启用数量上限 |
 | `RuntimeDir` | Node runtime root，供 `promptcontext.Reader` 使用 |
 | `CompressionSilent` / `CompressionBlocking` | 压缩阈值 |

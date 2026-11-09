@@ -108,7 +108,7 @@ func TestRunDreamingResumeApprovalPersistsCompletionAndHandbook(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("maintenance lease: ok=%v err=%v", ok, err)
 	}
-	result, runErr := mgr.RunDreaming(leaseCtx, sessionID, "整理并确认经验", 5)
+	result, runErr := mgr.RunDreaming(leaseCtx, sessionID, "整理并确认经验")
 	release()
 	if runErr == nil || result.Content != "" {
 		t.Fatalf("first dreaming turn should wait: result=%+v err=%v", result, runErr)
@@ -184,7 +184,7 @@ func TestRunDreamingResumeRejectsNonHandbookToolAndDoesNotComplete(t *testing.T)
 	if err != nil || !ok {
 		t.Fatalf("maintenance lease: ok=%v err=%v", ok, err)
 	}
-	result, runErr := mgr.RunDreaming(leaseCtx, sessionID, "尝试运行非手册工具", 1)
+	result, runErr := mgr.RunDreaming(leaseCtx, sessionID, "尝试运行非手册工具")
 	release()
 	if runErr == nil || result.Content != "" {
 		t.Fatalf("non-handbook tool unexpectedly completed: result=%+v err=%v", result, runErr)
@@ -223,7 +223,7 @@ func TestRunDreamingResumeRejectsHandbookWriteWithoutCompleting(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("maintenance lease: ok=%v err=%v", ok, err)
 	}
-	result, runErr := mgr.RunDreaming(leaseCtx, sessionID, "需要审批的手册写入", 2)
+	result, runErr := mgr.RunDreaming(leaseCtx, sessionID, "需要审批的手册写入")
 	release()
 	if runErr == nil || result.Content != "" {
 		t.Fatalf("write approval unexpectedly completed: result=%+v err=%v", result, runErr)

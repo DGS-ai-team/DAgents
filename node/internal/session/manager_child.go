@@ -40,7 +40,6 @@ func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 		return err
 	}
 	childOpts := m.turn
-	childOpts.Budget.MaxSteps = spec.MaxTurns
 	rt := newChildRuntime(
 		spec.ChildAgentID,
 		spec.ParentAgentID,
@@ -204,7 +203,6 @@ func (m *Manager) ListChildAgents(parentSessionID string) ([]ChildAgentView, err
 			ExpiresAt:    snapshot.ExpiresAt,
 			FinishedAt:   snapshot.FinishedAt,
 			TurnCount:    snapshot.TurnCount,
-			MaxTurns:     snapshot.MaxTurns,
 			Progress:     snapshot.Progress,
 		})
 	}
@@ -231,7 +229,6 @@ type ChildAgentView struct {
 	ExpiresAt    time.Time           `json:"expires_at"`
 	FinishedAt   time.Time           `json:"finished_at,omitempty"`
 	TurnCount    int                 `json:"turn_count"`
-	MaxTurns     int                 `json:"max_turns"`
 	Progress     childagent.Progress `json:"progress"`
 }
 

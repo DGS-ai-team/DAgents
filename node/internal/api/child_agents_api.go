@@ -25,7 +25,6 @@ type sessionChildAgentViewJSON struct {
 	ExpiresAt    string              `json:"expires_at"`
 	FinishedAt   string              `json:"finished_at,omitempty"`
 	TurnCount    int                 `json:"turn_count"`
-	MaxTurns     int                 `json:"max_turns"`
 	Progress     childagent.Progress `json:"progress"`
 }
 
@@ -66,7 +65,6 @@ func (s *Server) handleListChildAgents(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt:    it.ExpiresAt.Format(timeRFC3339),
 			FinishedAt:   formatOptionalTime(it.FinishedAt),
 			TurnCount:    it.TurnCount,
-			MaxTurns:     it.MaxTurns,
 			Progress:     it.Progress,
 		})
 	}

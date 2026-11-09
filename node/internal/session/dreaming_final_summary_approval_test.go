@@ -9,6 +9,7 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 )
 
 // dreamingApprovalSummaryClient forces the first tool round to wait for ASK,
@@ -45,11 +46,15 @@ func TestDreamingApprovalContinuationFinalSummaryPromptIsToolFree(t *testing.T) 
 	client := &dreamingApprovalSummaryClient{}
 	mgr, _, _, _, sessionID, cleanup := dreamingResumeFixture(t, client, policy.ModeAlways)
 	defer cleanup()
+	mgr.mu.RLock()
+	rt := mgr.sessions[sessionID]
+	mgr.mu.RUnlock()
+	rt.turnBudget = turn.TurnBudget{MaxToolCalls: 1, ReserveFinalSummary: true}
 	leaseCtx, release, ok, err := mgr.TryAcquireMaintenanceContext(context.Background(), "agent-1")
 	if err != nil || !ok {
 		t.Fatalf("maintenance lease: ok=%v err=%v", ok, err)
 	}
-	result, runErr := mgr.RunDreaming(leaseCtx, sessionID, "整理经验", 1)
+	result, runErr := mgr.RunDreaming(leaseCtx, sessionID, "整理经验")
 	release()
 	if runErr == nil || result.Content != "" {
 		t.Fatalf("first request should await ASK: result=%+v err=%v", result, runErr)
@@ -73,6 +78,9 @@ func TestDreamingApprovalContinuationFinalSummaryPromptIsToolFree(t *testing.T) 
 		requestCount := len(client.requests)
 		client.mu.Unlock()
 		t.Fatalf("approval continuation did not complete: found=%v err=%v attempt=%+v requests=%d", found, err, attempt, requestCount)
+	}
+	if usage := rt.turnCoordinator.Snapshot().Usage; usage.ToolCalls != 1 {
+		t.Fatalf("approval resume should not count the approved call twice: usage=%+v", usage)
 	}
 	client.clientRequests(t, mgr, sessionID)
 }
