@@ -42,8 +42,8 @@ function progressFrom(item, fallback = {}) {
   return {
     status: text(raw.status || fallback.status || "active") || "active",
     phase: text(raw.phase || fallback.phase),
-    turnCount: intVal(raw.turn_count ?? fallback.turnCount),
-    maxTurns: intVal(raw.max_turns ?? fallback.maxTurns),
+    // Node retains the historical JSON field name; the value is a step_index count.
+    stepCount: intVal(raw.turn_count ?? fallback.stepCount),
     currentTool: text(raw.current_tool || fallback.currentTool),
     currentToolCallId: text(raw.current_tool_call_id || fallback.currentToolCallId),
     currentToolStatus: text(raw.current_tool_status || fallback.currentToolStatus),

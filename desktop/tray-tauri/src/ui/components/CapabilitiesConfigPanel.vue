@@ -1,13 +1,23 @@
 <script setup>
-import { onMounted } from "vue";
+import { computed, onMounted } from "vue";
 import ConfigPanelShell from "./ConfigPanelShell.vue";
 import { useSetupConfig } from "../composables/useSetupConfig.js";
 
 const { loading, saving, error, statusMessage, dirty, configPath, configWritable, form, load, save } =
   useSetupConfig();
+const rawHistoryEnvControlled = computed(() => form.features.raw_message_history_source === "environment");
 
 async function saveCapabilities() {
-  // 工具组能力由各 Agent 决定；此处只保存进程级服务与配额。技能/子 Agent/定时任务总闸固定为开启。
+  // 仅提交此面板拥有的字段，隐藏的进程级总闸不应被表单默认值覆盖。
+  const features = {
+    browser_enabled: form.features.browser_enabled,
+    wecom_enabled: form.features.wecom_enabled,
+    skills_max_in_prompt: form.features.skills_max_in_prompt,
+    triggers_poll_seconds: form.features.triggers_poll_seconds,
+  };
+  if (!rawHistoryEnvControlled.value) {
+    features.raw_message_history_enabled = form.features.raw_message_history_enabled;
+  }
   const wecom = {
     webhook_url: form.wecom.webhook_url || "",
     api_base: form.wecom.api_base || "",
@@ -17,15 +27,14 @@ async function saveCapabilities() {
     wecom.webhook_key = form.wecom.webhook_key;
   }
   await save({
-    features: {
-      ...form.features,
-      skills_enabled: true,
-      triggers_enabled: true,
-      child_agents_enabled: true,
-    },
+    features,
     browser: { ...form.browser },
     wecom,
-    child_agents: { ...form.child_agents },
+    child_agents: {
+      default_ttl_seconds: form.child_agents.default_ttl_seconds,
+      max_ttl_seconds: form.child_agents.max_ttl_seconds,
+      max_active_per_parent: form.child_agents.max_active_per_parent,
+    },
   });
 }
 
@@ -168,9 +177,12 @@ onMounted(load);
       </summary>
       <p class="settings-section__desc">用于排查消息处理问题；记录可能包含对话内容，请按需开启。</p>
       <label class="settings-toggle">
-        <input v-model="form.features.raw_message_history_enabled" type="checkbox" />
+        <input v-model="form.features.raw_message_history_enabled" type="checkbox" :disabled="rawHistoryEnvControlled" />
         <span>保存原始消息记录</span>
       </label>
+      <p v-if="rawHistoryEnvControlled" class="settings-section__desc" role="note">
+        当前由环境变量 AGENT_RAW_MESSAGE_HISTORY_ENABLED 控制，设置页只显示有效状态，无法在此修改。
+      </p>
     </details>
 
     <details class="settings-section">
@@ -202,7 +214,7 @@ onMounted(load);
 
     <details class="settings-section">
       <summary class="settings-section__title">子智能体运行限制</summary>
-      <p class="settings-section__desc">设置当前应用中子智能体的存活时间、轮次和并发上限。</p>
+      <p class="settings-section__desc">设置当前应用中子智能体的存活时间与并发上限；工具调用数沿用所属智能体的每轮上限。</p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
           <span class="settings-field__label">默认存活时间（秒）</span>
@@ -217,24 +229,6 @@ onMounted(load);
           <span class="settings-field__label">最大存活时间（秒）</span>
           <input
             v-model.number="form.child_agents.max_ttl_seconds"
-            class="settings-field__input"
-            type="number"
-            min="1"
-          />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">默认轮次上限</span>
-          <input
-            v-model.number="form.child_agents.default_max_turns"
-            class="settings-field__input"
-            type="number"
-            min="1"
-          />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">最大轮次上限</span>
-          <input
-            v-model.number="form.child_agents.max_max_turns"
             class="settings-field__input"
             type="number"
             min="1"

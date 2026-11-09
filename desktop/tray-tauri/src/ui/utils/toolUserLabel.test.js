@@ -5,6 +5,7 @@ import {
   toolStepIsInProgress,
   toolStepIsPending,
   toolStepPurpose,
+  toolStepPurposeOrToolLabel,
   toolStepStatusText,
   toolStepToolLabel,
   toolStepToolLabelParts,
@@ -104,6 +105,29 @@ describe("toolStepPurpose", () => {
         },
       }),
     ).toBe("整理接口文档");
+  });
+
+  it("keeps call_purpose when a result entry has no arguments", () => {
+    expect(toolStepPurpose({
+      callEntry: { data: { tool_name: "bash_run", arguments: { call_purpose: "检查服务状态" } } },
+      resultEntry: { data: { tool_name: "bash_run", status: "succeeded", content: "ok" } },
+    })).toBe("检查服务状态");
+  });
+
+  it("ignores a whitespace-only call purpose and uses the result purpose", () => {
+    expect(toolStepPurpose({
+      callEntry: { data: { tool_name: "bash_run", arguments: { call_purpose: "   " } } },
+      resultEntry: { data: { tool_name: "bash_run", arguments: { call_purpose: "检查完成结果" }, status: "succeeded" } },
+    })).toBe("检查完成结果");
+  });
+
+  it("falls back to a friendly tool name when purpose is absent", () => {
+    expect(toolStepPurposeOrToolLabel({
+      callEntry: { data: { tool_name: "read_file", arguments: {} } },
+    })).toBe("读取文件");
+    expect(toolStepPurposeOrToolLabel({
+      callEntry: { data: { tool_name: "unknown_tool", arguments: {} } },
+    })).toBe("助手执行了一步操作");
   });
 });
 

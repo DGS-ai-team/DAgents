@@ -180,7 +180,7 @@ describe('Desktop workspace resource navigation', () => {
     })
     api.listWorkspace.mockImplementation(async (_agentId, path = '') => ({
       path,
-      entries: path ? [] : [{ name: 'guide.md', path: 'guide.md', file_ref: 'node-file-guide', is_dir: false, size: 8 }],
+      entries: path ? [] : [{ name: 'guide.md', path: 'guide.md', file_ref: 'C:/private/agent/guide.md', is_dir: false, size: 8 }],
     }))
     api.readWorkspaceFile.mockResolvedValueOnce(result('# Guide'))
     wrapper = mount(ChatHarness)
@@ -205,9 +205,9 @@ describe('Desktop workspace resource navigation', () => {
     expect(submit).toHaveBeenCalledTimes(2)
     expect(submit.mock.calls[1]).toMatchObject([
       agentId,
-      expect.stringContaining('文件：`guide.md`'),
+      '请结合我引用的工作区内容处理。',
       [],
-      [{ path: 'node-file-guide', name: 'guide.md' }],
+      [{ id: expect.any(String), path: 'C:/private/agent/guide.md', name: 'guide.md', revision: 'etag-1', draft: false, annotation: '', anchor: { type: 'file', label: '整个文件', quote: '', location: {} } }],
     ])
     expect(wrapper.text()).not.toContain('guide.md · 整个文件')
   })
@@ -619,6 +619,44 @@ describe('Desktop workspace resource navigation', () => {
     expect(wrapper.find('.workspace-files__chunked-text').text()).toContain('row500')
   })
 
+  it('right-aligns CSV numeric cells and keeps identifier strings intact', async () => {
+    api.readWorkspaceFile.mockImplementation(async (_agentId, path) => path === 'records.csv'
+      ? { bytes: bytes('name,amount,code\nAlpha,1200,00012345678901234567890'), contentType: 'text/csv', etag: 'csv-numeric' }
+      : result(path))
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
+    await flushPromises()
+    await wrapper.vm.openPath('records.csv')
+    const cells = wrapper.findAll('.workspace-files__sheet-scroll tbody td')
+    expect(cells.map(cell => cell.text())).toEqual(['name', 'amount', 'code', 'Alpha', '1200', '00012345678901234567890'])
+    expect(cells[3].classes()).not.toContain('is-numeric')
+    expect(cells[4].classes()).toContain('is-numeric')
+    expect(cells[5].classes()).toContain('is-numeric')
+    const workspaceSource = await readFile(resolve(process.cwd(), 'src/ui/components/WorkspaceFiles.vue'), 'utf8')
+    expect(workspaceSource).toMatch(/\.workspace-files__sheet-scroll td \{ overflow-wrap:normal; word-break:normal; \}/)
+    expect(workspaceSource).toContain('.workspace-files__image-stage{display:flex;flex:1;min-width:0;min-height:0;align-items:center;justify-content:center;overflow:auto;scroll-padding-bottom:var(--workspace-dock-bottom-space, 12px);padding:12px 12px calc(12px + var(--workspace-dock-bottom-space, 12px))}')
+  })
+
+  it('offers immediate create/import actions for an empty workspace and can collapse the file list', async () => {
+    api.listWorkspace.mockResolvedValue({ path: '', entries: [] })
+    wrapper = mount(WorkspaceFiles, { props: { agentId: 'empty-agent' } })
+    await flushPromises()
+    expect(wrapper.get('.workspace-files').attributes('style')).toContain('26px')
+    expect(wrapper.text()).toContain('此目录为空')
+    const emptyGroup = wrapper.get('.workspace-files__empty-workspace .workspace-files__empty-group')
+    expect(emptyGroup.element.children).toHaveLength(2)
+    expect(emptyGroup.element.children[0].textContent).toContain('此目录为空')
+    expect(emptyGroup.element.children[1].classList.contains('workspace-files__empty-actions')).toBe(true)
+    expect(wrapper.find('[aria-label="新建文件"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="导入本机文件"]').exists()).toBe(true)
+    const toggle = wrapper.get('.workspace-files__list-toggle')
+    await toggle.trigger('click')
+    expect(wrapper.find('.workspace-files__body').classes()).toContain('is-list-collapsed')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    await wrapper.find('[aria-label="新建文件"]').trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector('.workspace-files__create-dialog')).not.toBeNull()
+  })
+
   it('keeps refresh and save in the toolbar and moves secondary actions into the overflow menu', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a' } })
     await flushPromises()
@@ -634,6 +672,7 @@ describe('Desktop workspace resource navigation', () => {
   it('restores the floating message bar from its file toolbar icon', async () => {
     wrapper = mount(WorkspaceFiles, { props: { agentId: 'agent-a', dockCollapsed: true, dockStatus: 'generating', dockAgentName: '测试 Agent' } })
     await flushPromises()
+    expect(wrapper.get('.workspace-files').attributes('style')).toContain('12px')
 
     const restore = wrapper.find('.workspace-files__dock-toggle')
     expect(restore.attributes('title')).toContain('测试 Agent · 生成中')

@@ -3,7 +3,95 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { topSlotState } from './top-slot-state.js'
 import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
-import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, hasPersistedPartialMessage, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, switchDraft, tabForRoute, turnErrorSummary, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
+import { agentErrorFor, agentSelectionViewTransition, applyAgentNotificationProjection, canCancelTurnPhase, cancelledTurnSummary, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, handleAgentNotificationEvent, hasPersistedPartialMessage, isAgentBusy, mergeAgentNotificationSummaries, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, switchDraft, tabForRoute, turnErrorSummary, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
+
+test('notification_changed uses notify_seq, preserves integer counts, and ignores stale per-Agent events', () => {
+  const agents = [{ agent_id: 'agent-a', has_pending_hitl: true, pending_hitl_items: 2, notify_seq: 5 }]
+  const cleared = applyAgentNotificationProjection(agents, {
+    event_type: 'notification_changed',
+    agent_id: 'agent-a',
+    data: { notify_seq: 6, has_unread: true, pending_hitl_items: 3 },
+  })
+  assert.equal(cleared[0].has_pending_hitl, false)
+  assert.equal(cleared[0].has_unread, true)
+  assert.equal(cleared[0].pending_hitl_items, 3)
+  assert.equal(Number.isInteger(cleared[0].pending_hitl_items), true)
+  assert.equal(cleared[0].notify_seq, 6)
+  assert.equal('notification_seq' in cleared[0], false)
+
+  const stale = applyAgentNotificationProjection(cleared, {
+    event_type: 'notification_changed',
+    agent_id: 'agent-a',
+    data: { notify_seq: 5, has_pending_hitl: true, pending_hitl_items: 1 },
+  })
+  assert.equal(stale[0].has_pending_hitl, false)
+  assert.equal(applyAgentNotificationProjection(cleared, { event_type: 'turn_state', agent_id: 'agent-a' }), cleared)
+})
+
+test('notification handler keeps seq 20 monotonic across late seq 18 and GET seq 19', () => {
+  let agents = [{ agent_id: 'agent-a', display_name: 'Agent A', notify_seq: 0, has_pending_hitl: false, has_unread: false, pending_hitl_items: 0 }]
+  let projections = {}
+  let version = 0
+  const seq20 = { event_type: 'notification_changed', agent_id: 'agent-a', data: { notify_seq: 20, has_pending_hitl: true, has_unread: true, pending_hitl_items: 2 } }
+  let result = handleAgentNotificationEvent(agents, projections, seq20, version)
+  agents = result.agents
+  projections = result.projectionsByAgent
+  version = result.version
+  assert.equal(agents[0].notify_seq, 20)
+  assert.equal(agents[0].pending_hitl_items, 2)
+
+  const seq18 = { event_type: 'notification_changed', agent_id: 'agent-a', data: { notify_seq: 18, has_pending_hitl: false, has_unread: false, pending_hitl_items: 0 } }
+  result = handleAgentNotificationEvent(agents, projections, seq18, version)
+  assert.equal(result.accepted, false)
+  assert.equal(result.agents[0].notify_seq, 20)
+  assert.equal(result.projectionsByAgent['agent-a'].event.data.notify_seq, 20)
+  assert.equal(result.version, version)
+
+  const getStartedAt = version
+  const staleGet = [{ agent_id: 'agent-a', display_name: 'Agent A', notify_seq: 19, has_pending_hitl: false, has_unread: false, pending_hitl_items: 0 }]
+  const merged = mergeAgentNotificationSummaries(staleGet, result.projectionsByAgent, getStartedAt)
+  assert.equal(merged[0].notify_seq, 20)
+  assert.equal(merged[0].has_pending_hitl, true)
+  assert.equal(merged[0].pending_hitl_items, 2)
+})
+
+test('unknown notification is cached and schedules full membership refresh without fabricating a sidebar row', () => {
+  const event = { event_type: 'notification_changed', agent_id: 'agent-new', data: { notify_seq: 1, has_unread: true, pending_hitl_items: 2 } }
+  const handled = handleAgentNotificationEvent([], {}, event, 0)
+  assert.deepEqual(handled.agents, [])
+  assert.equal(handled.shouldRefreshSummaries, true)
+  assert.equal(handled.projectionsByAgent['agent-new'].event, event)
+  assert.equal(handled.projectionsByAgent['agent-new'].event.data.pending_hitl_items, 2)
+
+  const staleGetWithoutMember = mergeAgentNotificationSummaries([], handled.projectionsByAgent, 0)
+  assert.deepEqual(staleGetWithoutMember, [])
+  const fullGet = [{ agent_id: 'agent-new', display_name: 'Readable Agent', agent_type: 'auto', notify_seq: 0, pending_hitl_items: 0 }]
+  const mergedFullGet = mergeAgentNotificationSummaries(fullGet, handled.projectionsByAgent, 0)
+  assert.equal(mergedFullGet.length, 1)
+  assert.equal(mergedFullGet[0].display_name, 'Readable Agent')
+  assert.equal(mergedFullGet[0].agent_type, 'auto')
+  assert.equal(mergedFullGet[0].notify_seq, 1)
+  assert.equal(mergedFullGet[0].pending_hitl_items, 2)
+  assert.deepEqual(mergeAgentNotificationSummaries([], handled.projectionsByAgent, handled.version), [])
+})
+
+test('cancellation notice stays concise and only mentions completed file writes', () => {
+  assert.equal(cancelledTurnSummary({ phase: 'completed' }), '')
+  assert.equal(cancelledTurnSummary({ phase: 'cancelled' }), '已停止。')
+  assert.equal(cancelledTurnSummary({
+    phase: 'cancelled',
+    toolExecutions: [{ toolName: 'write_file', status: 'completed' }],
+  }), '已停止。已完成的文件写入仍保留。')
+})
+
+test('turn-level stop remains available while awaiting tool approval or user input', () => {
+  for (const phase of ['queued', 'model_generating', 'tool_executing', 'tool_waiting', 'waiting_user']) {
+    assert.equal(canCancelTurnPhase(phase), true, `${phase} should be cancellable`)
+  }
+  for (const phase of ['idle', 'completed', 'failed', 'cancelled']) {
+    assert.equal(canCancelTurnPhase(phase), false, `${phase} should be terminal or idle`)
+  }
+})
 
 test('Desktop menubar groups actions by user task and disables unavailable operations', () => {
   const menus = createDesktopMenuModel({ activeAgentId: 'agent-a', activeAgentName: 'autotest', activeTab: 'browser', online: true, generating: false, hasPendingApproval: true, nodeVersion: '0.11.0' })
@@ -152,9 +240,39 @@ test('DesktopApp renders composer status in the visible footer and follows Turn 
   assert.equal(desktopComposerStatus({ generating: false, streamingText: 'late text' }), '')
 })
 
+test('DesktopApp notification handler applies reducer output and refreshes unknown Agent membership', () => {
+  const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
+  const notificationHandler = source.indexOf("if (event.event_type === 'notification_changed')")
+  const activeAgentBranch = source.indexOf("if (event.agent_id !== activeId.value)")
+  assert.ok(notificationHandler >= 0)
+  assert.ok(activeAgentBranch > notificationHandler)
+  assert.match(source.slice(notificationHandler, activeAgentBranch), /handleAgentNotificationEvent\(/)
+  assert.match(source.slice(notificationHandler, activeAgentBranch), /agents\.value = projection\.agents/)
+  assert.match(source.slice(notificationHandler, activeAgentBranch), /agentNotificationProjections\.value = projection\.projectionsByAgent/)
+  assert.match(source.slice(notificationHandler, activeAgentBranch), /agentNotificationChangeVersion/)
+  assert.match(source.slice(notificationHandler, activeAgentBranch), /if \(projection\.shouldRefreshSummaries\)/)
+  assert.match(source.slice(notificationHandler, activeAgentBranch), /refreshAgentSummaries\(\)/)
+  assert.doesNotMatch(source.slice(notificationHandler, activeAgentBranch), /agentListRefreshSequence\s*\+=/)
+  assert.match(source, /mergeAgentNotificationSummaries\(Array\.isArray\(latest\) \? latest : \[\], agentNotificationProjections\.value, notificationVersionAtStart\)/)
+  assert.match(source.slice(notificationHandler, activeAgentBranch), /return/)
+})
+
+test('DesktopApp exposes one resource icon menu by the tabs and keeps error reasons visible', () => {
+  const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
+  assert.match(source, /class="menu-anchor resource-menu-anchor" data-menu-anchor="资源"/)
+  assert.match(source, /data-menubar-trigger="资源" aria-label="资源"/)
+  assert.match(source, /desktopMenuNames\.slice\(1\)\.filter\(item => item !== '资源'\)/)
+  assert.match(source, /const index = visibleTriggers\.indexOf\(trigger\)/)
+  assert.match(source, /visibleTriggers\.findIndex\(item => item\.dataset\.menubarTrigger === name\)/)
+  assert.match(source, /class="desktop-error-hint__message">\{\{ error \}\}/)
+  assert.doesNotMatch(source, /desktop-chat-error-detail|desktop-resource-error-detail/)
+  assert.doesNotMatch(source, /真实会话/)
+})
+
 test('turn error summaries use structured provider codes and keep unknown failures generic', () => {
   assert.equal(turnErrorSummary({ code: 'provider_unavailable', message: 'safe backend text' }, { retryCount: 2, partial: true }), '模型服务暂时不可用，已重试2次。请稍后重试或切换模型。 已保留本轮已生成的部分内容。')
-  assert.equal(turnErrorSummary({ code: 'provider_authentication', message: 'safe backend text' }), '模型鉴权失败，请到模型设置检查 API Key 和服务地址。')
+  assert.equal(turnErrorSummary({ code: 'provider_authentication', message: '鉴权凭据无效，请检查模型配置。' }), '鉴权凭据无效，请检查模型配置。')
+  assert.equal(turnErrorSummary({ code: 'provider_quota', message: '服务商账户额度不足，请检查余额。' }), '服务商账户额度不足，请检查余额。')
   assert.equal(turnErrorSummary({ code: 'provider_configuration', message: '模型请求或配置无效，请检查模型名称、接口地址和请求参数。' }), '模型请求或配置无效，请检查模型名称、接口地址和请求参数。')
   assert.equal(turnErrorSummary({ code: 'provider_http_error', message: '模型服务请求失败（HTTP 403）。' }), '模型服务请求失败（HTTP 403）。')
   assert.equal(turnErrorSummary({ code: 'unknown', message: '{"secret":"do not show"}' }), '本轮未能完成，请稍后重试或切换模型。')

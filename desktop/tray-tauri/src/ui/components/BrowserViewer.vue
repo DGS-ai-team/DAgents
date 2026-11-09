@@ -151,7 +151,7 @@ onUnmounted(() => { disposed = true; epoch++; clearTimer(); document.removeEvent
     </section>
     <section v-else class="browser-viewer__empty" :role="configurationNotice || loading ? 'status' : undefined">
       <div class="browser-viewer__empty-icon"><UiIcon name="browser" :size="28" /></div>
-      <template v-if="configurationNotice"><h1>启用浏览器，开始浏览</h1><p>在能力设置中启用浏览器后，就可以在这里打开网页。</p><button type="button" aria-label="前往浏览器能力设置" @click="emit('open-connection-settings')">打开设置</button></template>
+      <template v-if="configurationNotice"><h1>启用浏览器，开始浏览</h1><p>在“共享服务”设置中启用浏览器后，就可以在这里打开网页。</p><button type="button" aria-label="前往共享服务设置" @click="emit('open-connection-settings')">打开设置</button></template>
       <template v-else-if="loading && !initialized"><h1>正在连接浏览器…</h1></template>
       <template v-else><h1>打开一个网页</h1><p>在上方输入网址，或让智能体为你浏览。</p><small>你打开的页面会与当前智能体共享。</small><button type="button" :disabled="controlsDisabled" @click="addressInput?.focus()">输入网址</button></template>
     </section>

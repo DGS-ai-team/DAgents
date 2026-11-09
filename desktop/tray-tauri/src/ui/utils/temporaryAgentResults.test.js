@@ -27,7 +27,7 @@ describe("parseTemporaryAgentToolResult", () => {
     );
     expect(out.summary).toContain("临时 Agent 完成");
     expect(out.detail).toContain("summarize");
-    expect(out.detail).toContain("turn_count=3");
+    expect(out.detail).toContain("步骤数：3");
   });
 
   it("passes through ERROR prefix", () => {

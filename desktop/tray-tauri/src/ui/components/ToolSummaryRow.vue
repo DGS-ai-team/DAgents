@@ -1,13 +1,10 @@
 <script setup>
-import { computed, onUnmounted, ref, watch } from "vue";
-import { formatToolElapsed } from "../utils/format.js";
+import { computed, ref } from "vue";
 import {
   resolveToolStepPhase,
-  toolStepIsInProgress,
   toolStepStatusText,
-  toolStepToolLabel,
+  toolStepPurposeOrToolLabel,
 } from "../utils/toolUserLabel.js";
-import { entryMedia } from "../utils/showImage.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
 import { toolCallIdFromEntry, toolNameFromEntry } from "../stores/toolJobs.js";
 import { childProgressForTool } from "../stores/remoteWorkers.js";
@@ -22,37 +19,25 @@ const props = defineProps({
   resultEntry: { type: Object, default: null },
   /** buildStream 标注：active=并行执行中，pending=HITL 待批尚未开跑 */
   executionHint: { type: String, default: null },
+  /** turn_state.tool_executions 中的权威终态，优先于冲突的 transcript result status */
+  lifecycleStatus: { type: String, default: "" },
   verbose: { type: Boolean, default: false },
+  embedded: { type: Boolean, default: false },
 });
 
 const expanded = ref(false);
-const nowTick = ref(Date.now());
-let tickTimer = null;
+const everExpanded = ref(false);
 
 const stepArgs = computed(() => ({
   callEntry: props.callEntry,
   resultEntry: props.resultEntry,
   executionHint: props.executionHint,
+  lifecycleStatus: props.lifecycleStatus,
 }));
-const toolLabel = computed(() => toolStepToolLabel(stepArgs.value));
+const toolLabel = computed(() => toolStepPurposeOrToolLabel(stepArgs.value));
 const phase = computed(() => resolveToolStepPhase(stepArgs.value));
-const stepInProgress = computed(() => toolStepIsInProgress(stepArgs.value));
-const statusIcon = computed(() => {
-  if (phase.value === "completed") return "check";
-  if (["failed", "cancelled", "rejected", "interrupted"].includes(phase.value)) return "close";
-  if (phase.value === "idle") return "alert";
-  return "pending";
-});
-const statusTone = computed(() => {
-  if (phase.value === "completed") return "success";
-  if (["failed", "rejected"].includes(phase.value)) return "danger";
-  if (["cancelled", "interrupted"].includes(phase.value)) return "warning";
-  return "muted";
-});
-const inProgress = computed(() => stepInProgress.value);
 const detailEntry = computed(() => props.resultEntry || props.callEntry);
-const inlineMedia = computed(() => entryMedia(props.resultEntry));
-const visual = computed(() => resolveToolVisual(props.resultEntry || props.callEntry || {}));
+const visual = computed(() => resolveToolVisual(props.callEntry || props.resultEntry || {}));
 const toolCallId = computed(
   () => toolCallIdFromEntry(props.callEntry) || toolCallIdFromEntry(props.resultEntry),
 );
@@ -65,45 +50,17 @@ const childProgress = computed(() => {
   return childProgressForTool(toolCallId.value, childAgentIds.value);
 });
 const status = computed(() => {
-  void nowTick.value;
   if (phase.value === "running") return "执行中";
   const base = toolStepStatusText(stepArgs.value);
   if (phase.value === "idle") return "状态未知";
   if (phase.value === "pending") return "待批准";
-  if (phase.value !== "generating" || !props.callEntry?.startedAt) return base;
-  const elapsed = formatToolElapsed((Date.now() - props.callEntry.startedAt) / 1000);
-  if (!elapsed) return base || "生成中";
-  return `生成中${elapsed}`;
+  return base;
 });
-
-function stopTick() {
-  if (tickTimer) {
-    clearInterval(tickTimer);
-    tickTimer = null;
-  }
-}
-
-function ensureTick() {
-  if (tickTimer) return;
-  nowTick.value = Date.now();
-  tickTimer = setInterval(() => {
-    nowTick.value = Date.now();
-  }, 400);
-}
-
-watch(
-  inProgress,
-  (active) => {
-    if (active) ensureTick();
-    else stopTick();
-  },
-  { immediate: true },
-);
-
-onUnmounted(stopTick);
+const ariaLabel = computed(() => `${toolLabel.value}，${status.value || "工具操作"}，${expanded.value ? "收起详情" : "展开详情"}`);
 
 function toggle() {
   expanded.value = !expanded.value;
+  if (expanded.value) everExpanded.value = true;
 }
 
 </script>
@@ -111,57 +68,21 @@ function toggle() {
 <template>
   <div
     class="tool-summary-row"
-    :class="{
-      'tool-summary-row--expanded': expanded,
-      'tool-summary-row--progress': inProgress,
-      [`tool-summary-row--${visual.kind}`]: true,
-    }"
+    :class="{ 'tool-summary-row--expanded': expanded, 'tool-summary-row--embedded': embedded, [`tool-summary-row--${visual.kind}`]: true }"
   >
-    <div class="tool-summary-row__bar">
-      <button
-        type="button"
-        class="tool-summary-row__head"
-        :aria-expanded="expanded"
-        :aria-label="expanded ? '收起工具详情' : '展开工具详情'"
-        @click="toggle"
-      >
-        <span class="tool-summary-row__glyph" aria-hidden="true">
-          <span v-if="inProgress" class="tool-exec-spinner" />
-          <UiIcon
-            v-else
-            class="tool-summary-row__status-icon"
-            :class="`tool-summary-row__status-icon--${statusTone}`"
-            :name="statusIcon"
-            :size="14"
-          />
-        </span>
-        <span class="tool-summary-row__visual" :title="visual.label">
-          <ToolGroupIcon :name="visual.kind" />
-        </span>
-        <span class="tool-summary-row__text" :title="toolLabel">{{ toolLabel }}</span>
-        <span v-if="inlineMedia.length && !expanded" class="tool-summary-row__thumb-wrap">
-          <img
-            class="tool-summary-row__thumb"
-            :src="inlineMedia[0].url"
-            :alt="inlineMedia[0].label || '图片'"
-            loading="lazy"
-          />
-        </span>
-      </button>
-      <span v-if="status" class="tool-summary-row__status">
-        {{ status }}
-      </span>
-      <button
-        type="button"
-        class="tool-summary-row__chevron-btn"
-        :aria-expanded="expanded"
-        :aria-label="expanded ? '收起工具详情' : '展开工具详情'"
-        @click="toggle"
-      >
-        <UiIcon class="tool-summary-row__chevron" :name="expanded ? 'chevron-down' : 'chevron-right'" :size="14" />
-      </button>
-    </div>
-    <div v-if="expanded && detailEntry" class="tool-summary-row__detail">
+    <button
+      type="button"
+      class="tool-summary-row__head"
+      :aria-expanded="expanded"
+      :aria-label="ariaLabel"
+      @click="toggle"
+    >
+      <span class="tool-summary-row__visual" :title="visual.label" aria-hidden="true"><ToolGroupIcon :name="visual.kind" /></span>
+      <span class="tool-summary-row__text" :title="toolLabel">{{ toolLabel }}</span>
+      <span v-if="status" class="tool-summary-row__status">{{ status }}</span>
+      <UiIcon class="tool-summary-row__chevron" :name="expanded ? 'chevron-down' : 'chevron-right'" :size="14" aria-hidden="true" />
+    </button>
+    <div v-if="everExpanded && detailEntry" v-show="expanded" class="tool-summary-row__detail">
       <ToolExecBubble
         :entry="detailEntry"
         :call-entry="callEntry"
@@ -184,26 +105,15 @@ function toggle() {
   max-width: 100%;
 }
 
-.tool-summary-row:hover,
-.tool-summary-row--expanded {
-  background: var(--color-surface);
-  border-color: var(--color-border);
+.tool-summary-row--embedded {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
-.tool-summary-row--progress {
-  /* 白底 + 浅灰边框，不用主色深描边 */
-  background: var(--color-surface);
-  border-color: var(--color-border);
-}
-
-.tool-summary-row__bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-  padding: 5px 8px;
+.tool-summary-row--embedded + .tool-summary-row--embedded {
+  border-top: 1px solid var(--color-border);
 }
 
 .tool-summary-row__head {
@@ -211,9 +121,11 @@ function toggle() {
   align-items: center;
   gap: 8px;
   flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
-  padding: 0;
-  border: none;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: inherit;
   background: transparent;
   text-align: left;
   cursor: pointer;
@@ -221,33 +133,13 @@ function toggle() {
   color: var(--color-text-muted);
 }
 
-.tool-summary-row__glyph {
-  flex: 0 0 auto;
-  display: inline-flex;
-  width: 14px;
-  justify-content: center;
-  color: var(--color-success);
-  font-size: 12px;
+.tool-summary-row__head:hover {
+  background: var(--color-surface-hover);
 }
 
-.tool-summary-row__status-icon {
-  opacity: 0.9;
-}
-
-.tool-summary-row__status-icon--success {
-  color: var(--color-success);
-}
-
-.tool-summary-row__status-icon--danger {
-  color: var(--color-danger);
-}
-
-.tool-summary-row__status-icon--warning {
-  color: var(--color-warning);
-}
-
-.tool-summary-row__status-icon--muted {
-  color: var(--color-text-subtle);
+.tool-summary-row__head:focus-visible {
+  outline: 2px solid var(--color-focus, var(--color-primary));
+  outline-offset: 2px;
 }
 
 .tool-summary-row__visual {
@@ -292,20 +184,6 @@ function toggle() {
   text-overflow: ellipsis;
 }
 
-.tool-summary-row__thumb-wrap {
-  flex: 0 0 auto;
-  line-height: 0;
-}
-
-.tool-summary-row__thumb {
-  width: 28px;
-  height: 28px;
-  object-fit: cover;
-  border-radius: 4px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-}
-
 .tool-summary-row__status {
   flex: 0 0 auto;
   display: inline-flex;
@@ -319,24 +197,15 @@ function toggle() {
   white-space: nowrap;
 }
 
-.tool-summary-row__chevron-btn {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  color: inherit;
-}
-
 .tool-summary-row__chevron {
+  flex: 0 0 auto;
   font-size: 10px;
   color: var(--color-text-subtle);
 }
 
 .tool-summary-row__detail {
+  min-width: 0;
+  overflow: hidden;
   padding: 0 8px 8px;
   border-top: 1px solid var(--color-border);
 }

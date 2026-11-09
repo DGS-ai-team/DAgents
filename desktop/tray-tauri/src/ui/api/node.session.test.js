@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAgentTodo, deleteAgentTodo, getAgentBrowserView, pickPlatformDirectory, putAutoConfig, updateAgentTodo } from "./node.js";
+import { createAgentTodo, deleteAgentTodo, getAgentBrowserView, pickPlatformDirectory, putAutoConfig, submitMessage, updateAgentTodo } from "./node.js";
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -29,6 +29,40 @@ describe("read-only Agent browser view API", () => {
     vi.stubGlobal("__DAGENTS_API_REQUEST__", request);
     await getAgentBrowserView("agent/1", "page/2");
     expect(request).toHaveBeenCalledWith({ method: "GET", path: "/v1/agents/agent%2F1/browser/view?page_id=page%2F2", body: undefined });
+  });
+});
+
+describe("structured workspace file references", () => {
+  it("preserves anchor metadata in the Node message payload", async () => {
+    const request = vi.fn(async () => ({ accepted: true }));
+    vi.stubGlobal("__DAGENTS_API_REQUEST__", request);
+    await submitMessage("agent-a", "compare these cells", null, [{
+      id: "range-1",
+      path: "reports/plan.csv",
+      name: "plan.csv",
+      revision: "rev-7",
+      draft: true,
+      annotation: "check total",
+      anchor: { type: "sheet-range", label: "B2:B4", quote: "12\n14", location: { range: "B2:B4", sheet: "Summary" } },
+    }]);
+    expect(request).toHaveBeenCalledWith({
+      method: "POST",
+      path: "/v1/messages",
+      body: {
+        agent_id: "agent-a",
+        request_type: "message",
+        content: "compare these cells",
+        file_refs: [{
+          id: "range-1",
+          path: "reports/plan.csv",
+          name: "plan.csv",
+          revision: "rev-7",
+          draft: true,
+          annotation: "check total",
+          anchor: { type: "sheet-range", label: "B2:B4", quote: "12\n14", location: { range: "B2:B4", sheet: "Summary" } },
+        }],
+      },
+    });
   });
 });
 

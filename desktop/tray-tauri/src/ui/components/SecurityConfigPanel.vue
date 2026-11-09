@@ -1,25 +1,37 @@
 <script setup>
 import { onMounted } from "vue";
 import ConfigPanelShell from "./ConfigPanelShell.vue";
+import UiIcon from "./UiIcon.vue";
 import { useSetupConfig } from "../composables/useSetupConfig.js";
 
 const { loading, saving, error, statusMessage, dirty, configPath, configWritable, form, load, save } =
   useSetupConfig();
 
 async function saveSecurity() {
+  const outputLimit = Number(form.tools.bash_compress_max_output_chars);
+  const stderrLimit = Number(form.tools.bash_compress_max_stderr_chars);
+  if (!Number.isInteger(outputLimit) || outputLimit <= 0 || !Number.isInteger(stderrLimit) || stderrLimit <= 0) {
+    error.value = "输出字符上限必须是大于 0 的整数";
+    return;
+  }
   await save({
     tools: {
       bash_output_encoding: form.tools.bash_output_encoding,
       file_encoding: form.tools.file_encoding,
       bash_compress_enabled: form.tools.bash_compress_enabled,
-      bash_compress_max_output_chars: form.tools.bash_compress_max_output_chars,
-      bash_compress_max_stderr_chars: form.tools.bash_compress_max_stderr_chars,
+      bash_compress_max_output_chars: outputLimit,
+      bash_compress_max_stderr_chars: stderrLimit,
     },
     hooks: {
       duplicate_tool_call_enabled: form.hooks.duplicate_tool_call_enabled,
       duplicate_tool_call_window_seconds: form.hooks.duplicate_tool_call_window_seconds,
     },
   });
+}
+
+function restoreBashCompressDefaults() {
+  form.tools.bash_compress_max_output_chars = form.tools.bash_compress_default_max_output_chars;
+  form.tools.bash_compress_max_stderr_chars = form.tools.bash_compress_default_max_stderr_chars;
 }
 
 onMounted(load);
@@ -50,13 +62,16 @@ onMounted(load);
         <div class="setup-config-panel__field-grid">
           <label class="settings-field">
             <span class="settings-field__label">标准输出最大字符</span>
-            <input v-model.number="form.tools.bash_compress_max_output_chars" class="settings-field__input" type="number" min="0" />
+            <input v-model.number="form.tools.bash_compress_max_output_chars" class="settings-field__input" type="number" min="1" step="1" />
           </label>
           <label class="settings-field">
             <span class="settings-field__label">错误输出最大字符</span>
-            <input v-model.number="form.tools.bash_compress_max_stderr_chars" class="settings-field__input" type="number" min="0" />
+            <input v-model.number="form.tools.bash_compress_max_stderr_chars" class="settings-field__input" type="number" min="1" step="1" />
           </label>
         </div>
+        <button class="btn btn--ghost btn--sm desktop-icon-button" type="button" title="恢复默认上限" aria-label="恢复默认上限" @click="restoreBashCompressDefaults">
+          <UiIcon name="refresh-cw" :size="15" />
+        </button>
       </details>
     </section>
 

@@ -11,6 +11,87 @@ export function formatApprovalArguments(item) {
   try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw }
 }
 
+export function canCancelTurnPhase(phase) {
+  return ['queued', 'model_generating', 'tool_executing', 'tool_waiting', 'waiting_user'].includes(String(phase || ''))
+}
+
+export function applyAgentNotificationProjection(agents, event) {
+  if (event?.event_type !== 'notification_changed' || !event?.agent_id || !Array.isArray(agents)) return agents
+  const projection = event.data || {}
+  const sequence = Number(projection.notify_seq) || 0
+  const index = agents.findIndex(agent => agent?.agent_id === event.agent_id)
+  if (index < 0) return agents
+  const currentSequence = Number(agents[index]?.notify_seq) || 0
+  if (sequence && currentSequence > sequence) return agents
+  const projectionFields = {
+    has_pending_hitl: Boolean(projection.has_pending_hitl),
+    has_unread: Boolean(projection.has_unread),
+    pending_hitl_items: Math.max(0, Math.floor(Number(projection.pending_hitl_items) || 0)),
+    notify_seq: sequence || currentSequence,
+  }
+  return agents.map((agent, rowIndex) => rowIndex === index ? { ...agent, ...projectionFields } : agent)
+}
+
+export function handleAgentNotificationEvent(agents, projectionsByAgent = {}, event, version = 0) {
+  if (event?.event_type !== 'notification_changed' || !event?.agent_id || !Array.isArray(agents)) {
+    return { agents, projectionsByAgent, version, accepted: false, shouldRefreshSummaries: false }
+  }
+  const agentId = event.agent_id
+  const row = agents.find(agent => agent?.agent_id === agentId)
+  const cached = projectionsByAgent[agentId]
+  const incomingSequence = Number(event.data?.notify_seq) || 0
+  const currentSequence = Math.max(
+    Number(row?.notify_seq) || 0,
+    Number(cached?.event?.data?.notify_seq) || 0,
+  )
+  if (incomingSequence && incomingSequence < currentSequence) {
+    return { agents, projectionsByAgent, version, accepted: false, shouldRefreshSummaries: !row }
+  }
+
+  const nextVersion = version + 1
+  const nextProjections = {
+    ...projectionsByAgent,
+    [agentId]: { event, version: nextVersion },
+  }
+  return {
+    agents: applyAgentNotificationProjection(agents, event),
+    projectionsByAgent: nextProjections,
+    version: nextVersion,
+    accepted: true,
+    shouldRefreshSummaries: !row,
+  }
+}
+
+export function mergeAgentNotificationSummaries(agents, projectionsByAgent = {}, afterVersion = 0) {
+  if (!Array.isArray(agents)) return []
+  let merged = agents
+  for (const [agentId, record] of Object.entries(projectionsByAgent || {})) {
+    const event = record?.event
+    if (event?.event_type !== 'notification_changed' || event.agent_id !== agentId) continue
+    const index = merged.findIndex(agent => agent?.agent_id === agentId)
+    // The list endpoint owns membership and is authoritative for events that
+    // predate the request, unless its notification sequence is stale.
+    if (index < 0) continue
+    const serverSequence = Number(merged[index]?.notify_seq) || 0
+    const eventSequence = Number(event.data?.notify_seq) || 0
+    const arrivedDuringRequest = Number(record?.version) > Number(afterVersion)
+    if (arrivedDuringRequest || (eventSequence && eventSequence > serverSequence)) {
+      merged = applyAgentNotificationProjection(merged, event)
+    }
+  }
+  return merged
+}
+
+export function cancelledTurnSummary(turnState) {
+  if (String(turnState?.phase || '') !== 'cancelled') return ''
+  const hasCompletedFileWrite = Array.isArray(turnState?.toolExecutions)
+    && turnState.toolExecutions.some(item =>
+      ['write_file', 'search_replace', 'create_file', 'delete_file'].includes(String(item?.toolName || item?.tool_name || ''))
+      && ['completed', 'succeeded', 'success'].includes(String(item?.status || '').toLowerCase()),
+    )
+  return hasCompletedFileWrite ? '已停止。已完成的文件写入仍保留。' : '已停止。'
+}
+
 export function tabForRoute(path, currentTab = 'chat') {
   if (String(path || '').startsWith('/settings')) return 'settings'
   if (['file', 'browser', 'terminal'].includes(currentTab)) return currentTab
@@ -89,9 +170,9 @@ export function turnErrorSummary(error, { partial = false, retryCount = 0 } = {}
   const retries = Math.max(0, Number(retryCount) || 0)
   let message
   if (code === 'provider_authentication') {
-    message = '模型鉴权失败，请到模型设置检查 API Key 和服务地址。'
+    message = raw || '模型鉴权失败，请到模型设置检查 API Key 和服务地址。'
   } else if (code === 'provider_quota') {
-    message = '模型账户余额或额度不足，请检查服务商账户额度后重试。'
+    message = raw || '模型账户余额或额度不足，请检查服务商账户额度后重试。'
   } else if (code === 'provider_unavailable') {
     message = `模型服务暂时不可用，已重试${retries}次。请稍后重试或切换模型。`
   } else if (code === 'provider_timeout') {

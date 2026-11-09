@@ -31,6 +31,22 @@ describe('ResourceAgentDock', () => {
     wrapper.unmount()
   })
 
+  it('labels model recovery metadata as the current selection after a model switch', async () => {
+    const wrapper = mount(ResourceAgentDock, {
+      props: { turnError: '额度不足', modelRecoveryAvailable: true, modelName: 'deepseek-chat', modelProfile: 'production' },
+    })
+    expect(wrapper.find('.dock-turn-error [role="alert"]').text()).toBe('额度不足')
+    expect(wrapper.find('.dock-turn-error__model').text()).toBe('当前选择 · 模型：deepseek-chat · 配置：production')
+    await wrapper.find('[aria-label="切换模型配置"]').trigger('click')
+    await wrapper.find('[aria-label="打开模型设置"]').trigger('click')
+    expect(wrapper.emitted('open-model-picker')).toHaveLength(1)
+    expect(wrapper.emitted('open-model-settings')).toHaveLength(1)
+    await wrapper.setProps({ modelName: 'qwen3.7-plus', modelProfile: 'qwen-free' })
+    expect(wrapper.find('.dock-turn-error [role="alert"]').text()).toBe('额度不足')
+    expect(wrapper.find('.dock-turn-error__model').text()).toBe('当前选择 · 模型：qwen3.7-plus · 配置：qwen-free')
+    wrapper.unmount()
+  })
+
   it('emits input, send, stop, and failed-draft restore actions without duplicate action buttons', async () => {
     const wrapper = mount(ResourceAgentDock, {
       props: {
@@ -78,6 +94,65 @@ describe('ResourceAgentDock', () => {
     expect(wrapper.emitted('remove-reference')).toEqual([['ref-1']])
     await wrapper.find('.dock-input-surface').trigger('submit')
     expect(wrapper.emitted('send')).toHaveLength(1)
+  })
+
+  it('reports actual expanded dock occupancy so workspace scroll can clear panels over 300px tall', async () => {
+    const wrapper = mount(ResourceAgentDock, { props: { expanded: false, collapsedInToolbar: true } })
+    const dockRect = { top: 520, bottom: 590, height: 70 }
+    wrapper.find('.resource-agent-dock').element.getBoundingClientRect = () => dockRect
+    await wrapper.setProps({ expanded: true })
+    Object.defineProperty(wrapper.find('.dock-details-panel').element, 'offsetHeight', { configurable: true, value: 372 })
+    await nextTick()
+    await nextTick()
+    expect(wrapper.emitted('occupied-height').at(-1)).toEqual([450])
+    wrapper.unmount()
+  })
+
+  it('hides expanded details and releases workspace inset when toolbar collapse is active, then restores them', async () => {
+    const wrapper = mount(ResourceAgentDock, {
+      props: {
+        modelValue: '保留的草稿',
+        expanded: true,
+        collapsed: true,
+        collapsedInToolbar: true,
+        references: [{ id: 'ref-1', name: 'guide.md', path: 'docs/guide.md' }],
+      },
+      slots: { details: () => h('p', { class: 'approval-detail' }, '审批详情') },
+    })
+    await nextTick()
+    expect(wrapper.props('expanded')).toBe(true)
+    expect(wrapper.find('.dock-details-panel').exists()).toBe(false)
+    expect(wrapper.find('.dock-input-surface').exists()).toBe(false)
+    expect(wrapper.find('.dock-references').exists()).toBe(false)
+    expect(wrapper.emitted('occupied-height').at(-1)).toEqual([0])
+
+    wrapper.find('.resource-agent-dock').element.getBoundingClientRect = () => ({ top: 520, bottom: 590, height: 70 })
+    await wrapper.setProps({ collapsed: false })
+    expect(wrapper.find('.dock-details-panel').exists()).toBe(true)
+    expect(wrapper.find('.dock-details-panel').attributes('aria-hidden')).toBe('false')
+    expect(wrapper.find('.dock-details-panel').attributes('inert')).toBeUndefined()
+    expect(wrapper.find('.approval-detail').text()).toBe('审批详情')
+    expect(wrapper.find('.dock-references').text()).toContain('guide.md')
+    expect(wrapper.find('.dock-message-input').element.value).toBe('保留的草稿')
+    Object.defineProperty(wrapper.find('.dock-details-panel').element, 'offsetHeight', { configurable: true, value: 372 })
+    await nextTick()
+    await nextTick()
+    expect(wrapper.emitted('occupied-height').at(-1)).toEqual([450])
+    wrapper.unmount()
+  })
+
+  it('returns focus to the collapsed toggle when details become hidden in the normal dock', async () => {
+    const wrapper = mount(ResourceAgentDock, {
+      attachTo: document.body,
+      props: { expanded: true, collapsed: false, collapsedInToolbar: false },
+      slots: { details: () => h('button', { class: 'approval-detail' }, '审批详情') },
+    })
+    await wrapper.find('.approval-detail').element.focus()
+    await wrapper.setProps({ collapsed: true })
+    await nextTick()
+    expect(wrapper.find('.dock-details-panel').exists()).toBe(false)
+    expect(document.activeElement).toBe(wrapper.find('.dock-collapsed-toggle').element)
+    wrapper.unmount()
   })
 
   it('keeps the same input and draft while the panel expands, retains approval slot actions, and returns focus on collapse', async () => {

@@ -175,7 +175,7 @@ const memoryScopeOptions = computed(() =>
 );
 const agentTypeOptions = [
   { value: "normal", label: "普通 Agent" },
-  { value: "auto", label: "Auto Agent（自主任务）" },
+  { value: "auto", label: "Auto Agent（自主运行）" },
 ];
 </script>
 
@@ -258,7 +258,7 @@ const agentTypeOptions = [
         <label v-if="isFull" class="agent-settings-field agent-settings-field--tool-call-limit">
           <span class="agent-settings-field__label">
             最大工具调用数
-            <small>每次人工对话中模型发起的调用总数，范围 1–4096；并行调用逐个计数。Auto 自主激活与 dreaming 使用各自的轮次上限。</small>
+            <small>普通聊天、自主运行和每日经验整理每轮均受此上限约束。模型每提出一次工具调用计 1 次（含失败或拒绝），并行调用逐个计数；范围 1–4096。</small>
           </span>
           <input
             v-model.number="draft.maxToolCalls"

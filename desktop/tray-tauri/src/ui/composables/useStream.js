@@ -85,30 +85,39 @@ function awaitingApprovalCallIds(hitlQueue = []) {
 }
 
 /**
- * 为同批尚未出结果的 tool_step 标注 executionHint。
+ * 用 coordinator 的执行状态补全 tool_step 生命周期信息。
  * 后端同批免审批工具并行执行：未完成的 final tool_call 一律 active（执行中）。
  * 仅当该 call 已出现在 HITL 审批队列时标 pending（尚未开跑）。
  */
 export function annotateToolExecutionHints(items, hitlQueue = [], authority = turnStateStore) {
   if (!Array.isArray(items) || !items.length) return items;
-  const unfinished = items.filter(
-    (item) =>
-      item?.kind === "tool_step" &&
-      item.callEntry &&
-      !item.resultEntry &&
-      !item.callEntry.partial,
-  );
-  if (!unfinished.length) return items;
+  const toolSteps = items.filter((item) => item?.kind === "tool_step");
+  if (!toolSteps.length) return items;
 
   const awaiting = awaitingApprovalCallIds(hitlQueue);
-  for (const item of unfinished) {
-    const id = toolCallIdFromEntry(item.callEntry);
+  for (const item of toolSteps) {
+    const id = toolCallIdFromEntry(item.callEntry) || toolCallIdFromEntry(item.resultEntry);
     const execution = id
       ? (authority === turnStateStore ? toolExecutionForCall(id) : authority?.toolExecutions?.find((row) => row.toolCallId === id))
       : null;
     const status = String(execution?.status || "").trim().toLowerCase();
-    if (["succeeded", "failed", "denied", "cancelled", "timed_out", "unknown"].includes(status)) {
-      item.executionHint = status === "succeeded" ? "settled" : "failed";
+    if (["succeeded", "completed", "failed", "error", "denied", "rejected", "cancelled", "canceled", "timed_out", "unknown"].includes(status)) {
+      item.lifecycleStatus = status;
+    }
+
+    // A result can be persisted from an adapter with a generic or stale status
+    // while the coordinator already has the final outcome. Preserve lifecycle
+    // status independently so the row can present the authoritative outcome.
+    if (item.resultEntry || !item.callEntry || item.callEntry.partial) continue;
+
+    if (["succeeded", "completed"].includes(status)) {
+      item.executionHint = "settled";
+    } else if (["failed", "error", "timed_out", "unknown"].includes(status)) {
+      item.executionHint = "failed";
+    } else if (["denied", "rejected"].includes(status)) {
+      item.executionHint = "rejected";
+    } else if (["cancelled", "canceled"].includes(status)) {
+      item.executionHint = "cancelled";
     } else if (["running"].includes(status)) {
       item.executionHint = "active";
     } else if (awaiting.has(id) || ["proposed", "pending"].includes(status)) {

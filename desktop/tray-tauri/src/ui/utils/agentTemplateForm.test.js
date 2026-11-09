@@ -45,6 +45,7 @@ describe("agentTemplateForm", () => {
     );
     expect(draft.templateId).toBe("ops-runner");
     expect(draft.llmProfileId).toBe("deepseek");
+    expect(draft).not.toHaveProperty("maxSteps");
     expect(draft.maxToolCalls).toBe(64);
     expect(draft.toolGroups).toEqual(["fs", "bash"]);
     expect(draft.visibleSkills).toBeNull();
@@ -89,7 +90,6 @@ describe("agentTemplateForm", () => {
       description: "日常助手",
       role: "assistant",
       llmProfileId: "qwen-plus",
-      maxSteps: 16,
       toolGroups: ["fs", "skills"],
       visibleSkills: ["write-skill", "write-hook"],
       promptSoulMd: "你是助手",
@@ -99,7 +99,7 @@ describe("agentTemplateForm", () => {
     expect(payload.display_name).toBe("我的助手");
     expect(payload.workspace).toEqual({ mode: "private" });
     expect(payload.sandbox).toBeUndefined();
-    expect(payload.defaults.llm).toEqual({ active: "qwen-plus", max_steps: 16, max_tool_calls: 64 });
+    expect(payload.defaults.llm).toEqual({ active: "qwen-plus", max_tool_calls: 64 });
     expect(payload.defaults.tools.enabled_groups).toEqual(["fs", "skills"]);
     expect(payload.defaults.skills).toEqual({
       visible: ["write-skill", "write-hook"],
@@ -112,20 +112,33 @@ describe("agentTemplateForm", () => {
     expect(payload.defaults.prompt_context.custom_md).toBeUndefined();
   });
 
-  it("preserves and submits the per-turn tool-call limit", () => {
+  it("preserves and submits the Agent tool-call limit without restoring max_steps", () => {
     const draft = draftFromAgentView({
       display_name: "受限 Agent",
       config_snapshot: { defaults: { llm: { active: "p", max_tool_calls: 9 } } },
     }, ["p"]);
     expect(draft.maxToolCalls).toBe(9);
     expect(buildPatchAgentPayload(draft).defaults.llm.max_tool_calls).toBe(9);
+    expect(buildPatchAgentPayload(draft).defaults.llm).not.toHaveProperty("max_steps");
+  });
+
+  it.each([0, -1, 1.5, 4097, "not-a-number"])("defaults invalid tool-call limits to 64 (%s)", (limit) => {
+    const draft = draftFromAgentView({
+      config_snapshot: { defaults: { llm: { max_tool_calls: limit } } },
+    });
+    expect(draft.maxToolCalls).toBe(64);
+    expect(buildPatchAgentPayload({ ...draft, maxToolCalls: limit }).defaults.llm.max_tool_calls).toBe(64);
+  });
+
+  it("accepts the tool-call limit boundaries", () => {
+    expect(draftFromTemplate({ defaults: { llm: { max_tool_calls: 1 } } }).maxToolCalls).toBe(1);
+    expect(draftFromTemplate({ defaults: { llm: { max_tool_calls: 4096 } } }).maxToolCalls).toBe(4096);
   });
 
   it("enables automatic memory recall when memory tool group is selected", () => {
     const payload = buildCreateAgentPayload({
       displayName: "有记忆",
       llmProfileId: "default",
-      maxSteps: 8,
       toolGroups: ["memory", "fs"],
       promptMemoryScope: "global",
       role: "assistant",
@@ -140,7 +153,6 @@ describe("agentTemplateForm", () => {
       templateId: "general",
       displayName: "远端",
       llmProfileId: "qwen-plus",
-      maxSteps: 16,
       toolGroups: ["fs"],
     });
     expect(payload.workspace).toEqual({ mode: "private" });
@@ -150,7 +162,6 @@ describe("agentTemplateForm", () => {
     const draft = {
       displayName: "项目助手",
       llmProfileId: "default",
-      maxSteps: 32,
       toolGroups: ["fs"],
       workspaceMode: "custom",
       workspacePath: "D:\\workspace\\project",
@@ -167,7 +178,6 @@ describe("agentTemplateForm", () => {
       templateId: "general",
       displayName: "改名",
       llmProfileId: "a",
-      maxSteps: 8,
       toolGroups: ["fs"],
       promptSoulMd: "角色",
       promptCustomMd: "临时",
@@ -204,6 +214,8 @@ describe("agentTemplateForm", () => {
     expect(draft.toolGroups).toEqual(["bash"]);
     expect(draft.visibleSkills).toEqual(["write-skill"]);
     expect(draft.llmProfileId).toBe("deepseek");
+    expect(draft).not.toHaveProperty("maxSteps");
+    expect(draft.maxToolCalls).toBe(64);
     expect(draft.workspaceMode).toBe("private");
   });
 
@@ -211,7 +223,6 @@ describe("agentTemplateForm", () => {
     const payload = buildCreateAgentPayload({
       displayName: "全技能",
       llmProfileId: "default",
-      maxSteps: 32,
       toolGroups: ["skills"],
       visibleSkills: null,
       role: "assistant",
@@ -228,7 +239,6 @@ describe("agentTemplateForm", () => {
       templateId: BLANK_TEMPLATE_ID,
       displayName: "空白",
       llmProfileId: "default",
-      maxSteps: 32,
       toolGroups: [],
       role: "assistant",
       description: "",
@@ -253,7 +263,6 @@ describe("agentTemplateForm", () => {
         description: "desc",
         role: "assistant",
         llmProfileId: "default",
-      maxSteps: 20,
         toolGroups: ["fs", "memory"],
         promptSoulMd: "  ",
         promptCustomMd: "补充",
@@ -261,7 +270,7 @@ describe("agentTemplateForm", () => {
     );
     expect(payload.id).toBe("my-bot");
     expect(payload.display_name).toBe("我的 Bot");
-    expect(payload.defaults.llm).toEqual({ active: "default", max_steps: 20, max_tool_calls: 64 });
+    expect(payload.defaults.llm).toEqual({ active: "default", max_tool_calls: 64 });
     expect(payload.defaults.tools.enabled_groups).toEqual(["fs", "memory"]);
     expect(payload.defaults.child_agents).toBeUndefined();
     expect(payload.defaults.skills).toEqual({});

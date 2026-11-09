@@ -89,16 +89,24 @@ function userLabelForTool(name) {
 }
 
 function argsFromStep(callEntry, resultEntry) {
-  const data = resultEntry?.data || callEntry?.data || {};
-  const parsed = resolveToolArgumentsFromData(data);
-  if (Object.keys(parsed).length) return parsed;
-  if (callEntry?.data) return resolveToolArgumentsFromData(callEntry.data);
-  return {};
+  const callArgs = resolveToolArgumentsFromData(callEntry?.data || {});
+  const resultArgs = resolveToolArgumentsFromData(resultEntry?.data || {});
+  const callPurpose = String(callArgs.call_purpose || "").trim();
+  const resultPurpose = String(resultArgs.call_purpose || "").trim();
+  const callLegacyPurpose = String(callArgs.purpose || "").trim();
+  const resultLegacyPurpose = String(resultArgs.purpose || "").trim();
+  return {
+    ...callArgs,
+    ...resultArgs,
+    call_purpose: callPurpose || resultPurpose,
+    purpose: callLegacyPurpose || resultLegacyPurpose,
+  };
 }
 
 function toolNameFromStep(callEntry, resultEntry) {
-  const data = resultEntry?.data || callEntry?.data || {};
-  const name = String(data.tool_name || data.name || callEntry?.data?.tool_name || callEntry?.data?.name || "").trim();
+  const callData = callEntry?.data || {};
+  const resultData = resultEntry?.data || {};
+  const name = String(callData.tool_name || callData.name || resultData.tool_name || resultData.name || "").trim();
   if (name && name !== "tool" && name !== "unknown") return name;
   return "";
 }
@@ -112,6 +120,13 @@ export function toolStepPurpose({ callEntry, resultEntry } = {}) {
   // 临时 Agent 的 schema 使用 purpose，而普通工具统一使用 call_purpose。
   const directPurpose = sanitizeInline(args.purpose);
   return directPurpose ? truncateGraphemes(directPurpose, 48) : "";
+}
+
+/** Purpose-only row label with a friendly tool-name fallback. */
+export function toolStepPurposeOrToolLabel(step = {}) {
+  const purpose = toolStepPurpose(step);
+  if (purpose) return purpose;
+  return userLabelForTool(toolNameFromStep(step.callEntry, step.resultEntry));
 }
 
 /** 供紧凑标题共享的结构化工具名和执行目的；详情面板不再重复目的。 */
@@ -175,9 +190,30 @@ export function toolStepUserSummary({ callEntry, resultEntry } = {}) {
  *
  * @param {{ callEntry?: object, resultEntry?: object, executionHint?: 'active' | 'pending' | null }} args
  */
-export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = null } = {}) {
+export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = null, lifecycleStatus = "" } = {}) {
   const entry = resultEntry || callEntry || {};
   if (entry.sideEffectApplied) return "completed";
+  // Coordinator lifecycle is authoritative when it conflicts with a
+  // transcript result projection (for example, a cancelled write carrying a
+  // generic adapter success status).
+  switch (String(lifecycleStatus || "").trim().toLowerCase()) {
+    case "succeeded":
+    case "completed":
+      return "completed";
+    case "failed":
+    case "error":
+    case "timed_out":
+    case "unknown":
+      return "failed";
+    case "denied":
+    case "rejected":
+      return "rejected";
+    case "cancelled":
+    case "canceled":
+      return "cancelled";
+    default:
+      break;
+  }
   const resultStatus = String(resultEntry?.data?.status || "").trim().toLowerCase();
   if (resultEntry) {
     if (resultStatus === "denied") return "rejected";
@@ -231,12 +267,12 @@ export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = n
   return "idle";
 }
 
-export function toolStepStatusText({ callEntry, resultEntry, executionHint = null } = {}) {
+export function toolStepStatusText({ callEntry, resultEntry, executionHint = null, lifecycleStatus = "" } = {}) {
   const entry = resultEntry || callEntry || {};
   if (entry.sideEffectStale) return "已失效";
   if (entry.sideEffectApplied) return "已入库";
 
-  switch (resolveToolStepPhase({ callEntry, resultEntry, executionHint })) {
+  switch (resolveToolStepPhase({ callEntry, resultEntry, executionHint, lifecycleStatus })) {
     case "generating":
       return "生成中";
     case "running":
@@ -261,8 +297,8 @@ export function toolStepStatusText({ callEntry, resultEntry, executionHint = nul
 }
 
 /** 真正在跑（生成参数 / 执行 / 后台）— 用于转圈与高亮；待审批不算。 */
-export function toolStepIsInProgress({ callEntry, resultEntry, executionHint = null } = {}) {
-  const phase = resolveToolStepPhase({ callEntry, resultEntry, executionHint });
+export function toolStepIsInProgress({ callEntry, resultEntry, executionHint = null, lifecycleStatus = "" } = {}) {
+  const phase = resolveToolStepPhase({ callEntry, resultEntry, executionHint, lifecycleStatus });
   return phase === "generating" || phase === "running" || phase === "background";
 }
 
@@ -274,6 +310,6 @@ export function toolStepIsActiveInGroup(step = {}) {
 }
 
 /** 已收到 tool_call、尚未开跑（如 HITL 待审批）。 */
-export function toolStepIsPending({ callEntry, resultEntry, executionHint = null } = {}) {
-  return resolveToolStepPhase({ callEntry, resultEntry, executionHint }) === "pending";
+export function toolStepIsPending({ callEntry, resultEntry, executionHint = null, lifecycleStatus = "" } = {}) {
+  return resolveToolStepPhase({ callEntry, resultEntry, executionHint, lifecycleStatus }) === "pending";
 }

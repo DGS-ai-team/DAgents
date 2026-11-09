@@ -336,6 +336,11 @@ export function submitMessage(agentId, content, contentParts = null, fileRefs = 
     body.file_refs = fileRefs.map((file) => ({
       path: file?.path || "",
       name: file?.name || "",
+      ...(file?.id ? { id: file.id } : {}),
+      ...(file?.revision ? { revision: file.revision } : {}),
+      ...(file?.draft ? { draft: true } : {}),
+      ...(file?.annotation ? { annotation: file.annotation } : {}),
+      ...(file?.anchor && typeof file.anchor === "object" ? { anchor: file.anchor } : {}),
     }));
   }
   return apiFetch("/v1/messages", { method: "POST", body });

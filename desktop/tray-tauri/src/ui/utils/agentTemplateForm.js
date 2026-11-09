@@ -75,7 +75,6 @@ export function emptyAgentDraft() {
     description: "",
     role: "assistant",
     llmProfileId: "",
-    maxSteps: 32,
     maxToolCalls: 64,
     toolGroups: [],
     // null = 不限制（全部可见）；string[] = 显式白名单（可为空）
@@ -116,9 +115,9 @@ function boolOr(value, fallback) {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function numberOr(value, fallback) {
+function toolCallsOrDefault(value) {
   const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
+  return Number.isInteger(n) && n >= 1 && n <= 4096 ? n : 64;
 }
 
 /** 技能能力与工具组 skills 收敛：未收窄（空列表）视为开启；否则看是否勾选 skills。 */
@@ -193,8 +192,7 @@ export function draftFromTemplate(template, llmProfileIds = []) {
   draft.displayName = String(template?.display_name || template?.id || "").trim();
   draft.description = String(template?.description || agent.description || "").trim();
   draft.role = String(agent.role || "assistant").trim() || "assistant";
-  draft.maxSteps = numberOr(llm.max_steps, 32);
-  draft.maxToolCalls = numberOr(llm.max_tool_calls, 64);
+  draft.maxToolCalls = toolCallsOrDefault(llm.max_tool_calls);
   draft.toolGroups = normalizeToolGroupNames(tools.enabled_groups);
   draft.visibleSkills = normalizeVisibleSkills(skills);
   draft.promptSoulEnabled = boolOr(prompt.soul_enabled, true);
@@ -228,8 +226,7 @@ export function draftFromAgentView(agent, llmProfileIds = []) {
   draft.displayName = String(agent?.display_name || "").trim();
   draft.description = String(agentMeta.description || "").trim();
   draft.role = String(agentMeta.role || "assistant").trim() || "assistant";
-  draft.maxSteps = numberOr(llm.max_steps, 32);
-  draft.maxToolCalls = numberOr(llm.max_tool_calls, 64);
+  draft.maxToolCalls = toolCallsOrDefault(llm.max_tool_calls);
   draft.toolGroups = normalizeToolGroupNames(tools.enabled_groups);
   draft.visibleSkills = normalizeVisibleSkills(skills);
   draft.promptSoulEnabled = boolOr(prompt.soul_enabled, true);
@@ -273,8 +270,7 @@ export function buildCreateAgentPayload(draft) {
       },
       llm: {
         ...(llmActive ? { active: llmActive } : {}),
-        max_steps: numberOr(draft.maxSteps, 32),
-        max_tool_calls: numberOr(draft.maxToolCalls, 64),
+        max_tool_calls: toolCallsOrDefault(draft.maxToolCalls),
       },
       tools: {
         enabled_groups: normalizeToolGroupNames(draft.toolGroups),
@@ -334,8 +330,7 @@ export function buildCreateTemplatePayload(meta, draft) {
       },
       llm: {
         ...(llmActive ? { active: llmActive } : {}),
-        max_steps: numberOr(draft?.maxSteps, 32),
-        max_tool_calls: numberOr(draft?.maxToolCalls, 64),
+        max_tool_calls: toolCallsOrDefault(draft?.maxToolCalls),
       },
       tools: {
         enabled_groups: normalizeToolGroupNames(draft?.toolGroups),
