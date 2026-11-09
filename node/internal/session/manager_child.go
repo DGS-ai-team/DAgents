@@ -28,15 +28,18 @@ func (m *Manager) ParentSessionActive(parentID string) bool {
 // SpawnChild 创建子 runtime 并启动 consumer。
 func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if _, ok := m.sessions[spec.ChildAgentID]; ok {
+		m.mu.Unlock()
 		return fmt.Errorf("child session already exists")
 	}
-	if parent, ok := m.sessions[spec.ParentAgentID]; !ok || parent.isChildSession() {
+	parent := m.sessions[spec.ParentAgentID]
+	if !m.parentCanSpawnChildLocked(parent) {
+		m.mu.Unlock()
 		return fmt.Errorf("parent session not found")
 	}
 	loadedSkills, err := m.resolveChildLoadedSkills(spec.SkillNames)
 	if err != nil {
+		m.mu.Unlock()
 		return err
 	}
 	childOpts := m.turn
@@ -44,10 +47,24 @@ func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 	// Manager is created, so m.turn may still contain only process defaults.
 	// Child work must inherit the parent's effective limit, or a zero manager
 	// default would silently disable max_tool_calls for the child.
-	parent := m.sessions[spec.ParentAgentID]
+	// Do not acquire lifecycleMu while holding Manager.mu. Lifecycle publishes
+	// synchronously reach Hub listeners, which may call back into getRuntime and
+	// need Manager.mu. Capturing the pointer is safe because runtime identity is
+	// revalidated before the child is installed.
+	m.mu.Unlock()
 	parent.lifecycleMu.Lock()
 	childOpts.Budget = parent.turnBudget
 	parent.lifecycleMu.Unlock()
+
+	m.mu.Lock()
+	if _, exists := m.sessions[spec.ChildAgentID]; exists {
+		m.mu.Unlock()
+		return fmt.Errorf("child session already exists")
+	}
+	if m.sessions[spec.ParentAgentID] != parent || !m.parentCanSpawnChildLocked(parent) {
+		m.mu.Unlock()
+		return fmt.Errorf("parent session not found")
+	}
 	rt := newChildRuntime(
 		spec.ChildAgentID,
 		spec.ParentAgentID,
@@ -66,7 +83,22 @@ func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 	m.bindMaintenanceGate(rt)
 	m.sessions[spec.ChildAgentID] = rt
 	rt.start(m.ctx)
+	m.mu.Unlock()
 	return nil
+}
+
+// parentCanSpawnChildLocked reports whether a parent runtime is usable for
+// child work. The caller must hold Manager.mu and separately validate its map
+// identity; this intentionally does not acquire lifecycleMu so manager and
+// lifecycle lock order cannot invert.
+func (m *Manager) parentCanSpawnChildLocked(parent *runtime) bool {
+	if parent == nil || parent.isChildSession() || m.ctx.Err() != nil {
+		return false
+	}
+	if parent.inputBox == nil || parent.inputBox.Closed() {
+		return false
+	}
+	return parent.queue != nil && !parent.queue.Closed()
 }
 
 func (m *Manager) resolveChildLoadedSkills(names []string) ([]skills.LoadedSkill, error) {
