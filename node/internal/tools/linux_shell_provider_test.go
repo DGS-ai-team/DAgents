@@ -401,6 +401,73 @@ func TestLinuxShellProviderReportsUnknownHostKeyFingerprint(t *testing.T) {
 	}
 }
 
+func TestLinuxShellProviderPasswordAuthCreatesMissingKnownHostsAndCanPin(t *testing.T) {
+	addr, expectedFingerprint := startTestSSHServer(t)
+	host, portText, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var port int
+	if _, err := fmt.Sscanf(portText, "%d", &port); err != nil {
+		t.Fatal(err)
+	}
+	knownHostsPath := filepath.Join(t.TempDir(), ".ssh", "known_hosts")
+	channel := LinuxChannelConfig{
+		ID: "missing-known-hosts", Host: host, Port: port, Username: "test-user",
+		CredentialID: "cred", HostKeyPolicy: "known_hosts", HostKeyRef: knownHostsPath,
+		RemoteShell: "bash", Enabled: true,
+	}
+	credential := LinuxCredential{ID: "cred", AuthType: "password", SecretRef: "test-secret", Enabled: true}
+	secretResolver := func(context.Context, string) (string, error) { return "test-password", nil }
+	newProvider := func(cfg LinuxChannelConfig, cred LinuxCredential) *LinuxShellProvider {
+		return NewLinuxShellProvider(testLinuxResolver{channel: cfg, credential: cred}, secretResolver).
+			WithHostKeyResolver(DefaultLinuxHostKeyResolver)
+	}
+	target := ExecutionTarget{Kind: executionTargetLinuxChannel, ID: channel.ID}
+
+	firstStatus, err := newProvider(channel, credential).Test(context.Background(), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstStatus.Available || firstStatus.ErrorCode != "host_key_unknown" {
+		t.Fatalf("first test status=%+v, want host_key_unknown (not a private-key error)", firstStatus)
+	}
+	if firstStatus.HostKeyFingerprint != expectedFingerprint {
+		t.Fatalf("first test fingerprint=%q want=%q", firstStatus.HostKeyFingerprint, expectedFingerprint)
+	}
+	if _, err := os.Stat(knownHostsPath); err != nil {
+		t.Fatalf("missing known_hosts was not created before SSH host-key verification: %v", err)
+	}
+
+	// Saving the observed fingerprint through the pinned policy models the
+	// user's explicit confirmation of the first-use host key.
+	channel.HostKeyPolicy = "pinned"
+	channel.HostKeyRef = firstStatus.HostKeyFingerprint
+	secondStatus, err := newProvider(channel, credential).Test(context.Background(), target)
+	if err != nil || !secondStatus.Available {
+		t.Fatalf("password test with confirmed host fingerprint status=%+v err=%v", secondStatus, err)
+	}
+	for _, stage := range secondStatus.Stages {
+		if stage.Status != "passed" {
+			t.Fatalf("confirmed-host test had failed stage: %+v", secondStatus.Stages)
+		}
+	}
+
+	// A known_hosts file cannot make invalid private-key credential contents
+	// parse as a key; authentication parsing happens before host-key loading.
+	invalidCredential := LinuxCredential{ID: "cred", AuthType: "private_key", SecretRef: "test-secret", Enabled: true}
+	invalidStatus, err := newProvider(LinuxChannelConfig{
+		ID: "invalid-private-key", Host: host, Port: port, Username: "test-user",
+		CredentialID: "cred", HostKeyPolicy: "known_hosts", HostKeyRef: knownHostsPath,
+		Enabled: true,
+	}, invalidCredential).Test(
+		context.Background(), ExecutionTarget{Kind: executionTargetLinuxChannel, ID: "invalid-private-key"},
+	)
+	if err != nil || invalidStatus.ErrorCode != "private_key_invalid" {
+		t.Fatalf("invalid private-key status=%+v err=%v, want private_key_invalid regardless of known_hosts existence", invalidStatus, err)
+	}
+}
+
 func TestLinuxPrivateKeyParserAcceptsEscapedNewlinesAndClassifiesInvalidMaterial(t *testing.T) {
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

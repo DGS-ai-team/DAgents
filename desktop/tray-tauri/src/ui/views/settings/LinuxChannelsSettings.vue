@@ -100,6 +100,33 @@ function credentialStatusLabel(item) {
   return item.has_secret ? "已配置凭据" : "未配置凭据";
 }
 
+const testStageLabels = {
+  config: "配置",
+  credential: "凭据",
+  authentication: "凭据解析",
+  host_key: "主机校验配置",
+  dns: "DNS",
+  tcp: "TCP 连接",
+  ssh_handshake: "SSH 握手",
+  session: "会话",
+  shell: "Shell",
+  command: "命令",
+};
+
+function linuxTestStageLabel(name) {
+  return testStageLabels[name] || name || "检查步骤";
+}
+
+function linuxTestFailureMessage(result, fallback = "通道测试未通过") {
+  if (result?.error_code === "private_key_invalid") {
+    return "SSH 私钥内容无效。请提供未加密的 PEM/OpenSSH 私钥内容；如果您使用的是密码，请新建密码凭据并编辑通道切换到该凭据。";
+  }
+  if (result?.error_code === "host_key_unknown") {
+    return "尚未确认服务器身份，请核对下方指纹，确认无误后保存并重试。";
+  }
+  return result?.message || fallback;
+}
+
 function resetCredentialForm() {
   Object.assign(credential, { display_name: "", auth_type: "password", secret_mode: "direct", secret_ref: "", secret_value: "", username_hint: "" });
 }
@@ -233,11 +260,17 @@ async function testChannel(item) {
   if (!item?.channel_id || testing.value) return;
   testing.value = item.channel_id;
   error.value = "";
+  status.value = "";
   testResult.value = null;
   try {
     const result = await api.testLinuxChannel(item.channel_id);
     testResult.value = { channelId: item.channel_id, ...result };
-    status.value = `${item.display_name || item.channel_id}：${result.message || (result.available ? "配置有效" : "不可用")}`;
+    const label = item.display_name || item.channel_id;
+    if (result.available) {
+      status.value = `${label}：连接测试通过`;
+    } else {
+      error.value = `${label}：${linuxTestFailureMessage(result)}`;
+    }
   } catch (e) {
     error.value = e.message || "测试通道失败";
   } finally {
@@ -258,6 +291,7 @@ async function pinTestFingerprint() {
   if (!confirmed) return;
   saving.value = true;
   error.value = "";
+  status.value = "";
   try {
     await api.patchLinuxChannel(channelID, {
       host_key_policy: "pinned",
@@ -265,10 +299,12 @@ async function pinTestFingerprint() {
     });
     const recheck = await api.testLinuxChannel(channelID);
     testResult.value = { channelId: channelID, ...recheck };
-    status.value = recheck.available
-      ? `${label}：已保存固定指纹并验证成功`
-      : `${label}：固定指纹已保存，但复测仍未通过`;
     await load();
+    if (recheck.available) {
+      status.value = `${label}：固定指纹已保存，连接测试通过`;
+    } else {
+      error.value = `${label}：${linuxTestFailureMessage(recheck, "固定指纹已保存，但连接测试未通过")}`;
+    }
   } catch (e) {
     error.value = e.message || "保存主机指纹失败";
   } finally {
@@ -351,10 +387,14 @@ onMounted(() => {
           class="linux-settings__stage"
           :class="`linux-settings__stage--${stage.status}`"
         >
-          <span class="linux-settings__stage-mark" aria-hidden="true">
+          <span
+            class="linux-settings__stage-mark"
+            aria-hidden="true"
+            :title="stage.status === 'passed' ? '本步骤已通过' : '本步骤未通过'"
+          >
             <UiIcon :name="stage.status === 'passed' ? 'check' : 'alert'" :size="12" />
           </span>
-          <span class="linux-settings__stage-name">{{ stage.name }}</span>
+          <span class="linux-settings__stage-name">{{ linuxTestStageLabel(stage.name) }}</span>
           <span class="linux-settings__stage-message">{{ stage.message || "完成" }}</span>
           <span class="linux-settings__stage-duration">{{ stage.duration_ms || 0 }}ms</span>
         </div>

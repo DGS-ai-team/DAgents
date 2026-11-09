@@ -4,16 +4,26 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import LinuxChannelsSettings from "./LinuxChannelsSettings.vue";
 import * as api from "../../api/node.js";
 
-const { route, routerReplace } = vi.hoisted(() => ({ route: { query: {} }, routerReplace: vi.fn() }));
+const { route, routerReplace, confirmDesktopAction } = vi.hoisted(() => ({
+  route: { query: {} },
+  routerReplace: vi.fn(),
+  confirmDesktopAction: vi.fn(),
+}));
 vi.mock("vue-router", () => ({ useRoute: () => route, useRouter: () => ({ replace: routerReplace }) }));
 vi.mock("../../api/node.js", () => ({
   listLinuxChannels: vi.fn(),
   listLinuxCredentials: vi.fn(),
   createLinuxChannel: vi.fn(),
   createLinuxCredential: vi.fn(),
+  testLinuxChannel: vi.fn(),
+  patchLinuxChannel: vi.fn(),
+}));
+vi.mock("../../utils/desktopDialogs.js", () => ({
+  confirmDesktopAction,
 }));
 
-const savedCredential = { credential_id: "credential-a", display_name: "Fixture key", auth_type: "private_key" };
+const savedCredential = { credential_id: "credential-a", display_name: "Fixture key", auth_type: "private_key", secret_source: "direct", has_secret: true };
+const savedChannel = { channel_id: "channel-a", display_name: "Test server", host: "127.0.0.1", port: 22, username: "fixture", credential_id: "credential-a", host_key_policy: "known_hosts", max_sessions: 1 };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -22,6 +32,10 @@ beforeEach(() => {
   api.listLinuxCredentials.mockResolvedValue({ credentials: [savedCredential] });
   api.createLinuxChannel.mockResolvedValue({ channel_id: "channel-a" });
   api.createLinuxCredential.mockResolvedValue({ credential_id: "credential-b", secret_source: "direct" });
+  api.testLinuxChannel.mockReset();
+  api.patchLinuxChannel.mockReset();
+  confirmDesktopAction.mockReset();
+  confirmDesktopAction.mockResolvedValue(true);
 });
 
 const mountSettings = ({ stubSelect = true } = {}) => {
@@ -125,4 +139,107 @@ describe("Linux channel return flow", () => {
     wrapper.unmount();
   });
 
+});
+
+describe("Linux channel diagnostics", () => {
+  it("labels a direct private-key credential as direct input, not as a password", async () => {
+    const wrapper = mountSettings();
+    await flushPromises();
+
+    const credentialRow = wrapper.findAll(".linux-settings__row").find(row => row.text().includes("Fixture key"));
+    expect(credentialRow.text()).toContain("SSH 私钥 · 已配置直接输入");
+    expect(credentialRow.text()).not.toContain("已配置直接密码");
+    wrapper.unmount();
+  });
+
+  it("shows private-key authentication failures as actionable errors and clears stale success", async () => {
+    api.listLinuxChannels.mockResolvedValue({ channels: [savedChannel] });
+    api.testLinuxChannel
+      .mockResolvedValueOnce({ available: true, message: "connected", stages: [] })
+      .mockResolvedValueOnce({
+        available: false,
+        error_code: "private_key_invalid",
+        message: "safe backend message",
+        stages: [
+          { name: "config", status: "passed", message: "ok" },
+          { name: "credential", status: "passed", message: "ok" },
+          { name: "authentication", status: "failed", message: "private key invalid" },
+        ],
+      });
+    const wrapper = mountSettings();
+    await flushPromises();
+    await wrapper.get('[aria-label="测试 SSH 通道 Test server"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get(".linux-settings__ok").text()).toContain("连接测试通过");
+
+    await wrapper.get('[aria-label="测试 SSH 通道 Test server"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".linux-settings__ok").exists()).toBe(false);
+    expect(wrapper.get(".linux-settings__error").text()).toContain("SSH 私钥内容无效");
+    expect(wrapper.get(".linux-settings__error").text()).toContain("如果您使用的是密码，请新建密码凭据并编辑通道切换到该凭据");
+    expect(wrapper.get(".linux-settings__stage-name").text()).toBe("配置");
+    expect(wrapper.findAll(".linux-settings__stage-name").map(node => node.text())).toEqual(["配置", "凭据", "凭据解析"]);
+    expect(wrapper.findAll(".linux-settings__stage-mark")[0].attributes("title")).toBe("本步骤已通过");
+    wrapper.unmount();
+  });
+
+  it("uses the success state only when the connection test is available", async () => {
+    api.listLinuxChannels.mockResolvedValue({ channels: [savedChannel] });
+    api.testLinuxChannel.mockResolvedValue({ available: true, message: "connected", stages: [] });
+    const wrapper = mountSettings();
+    await flushPromises();
+    await wrapper.get('[aria-label="测试 SSH 通道 Test server"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get(".linux-settings__ok").text()).toContain("连接测试通过");
+    expect(wrapper.find(".linux-settings__error").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("does not show a failed pinned-fingerprint re-test in the success state", async () => {
+    api.listLinuxChannels.mockResolvedValue({ channels: [savedChannel] });
+    api.testLinuxChannel
+      .mockResolvedValueOnce({ available: false, error_code: "host_key_unknown", host_key_fingerprint: "SHA256:fixture", stages: [] })
+      .mockResolvedValueOnce({ available: false, error_code: "private_key_invalid", message: "safe backend message", stages: [] });
+    api.patchLinuxChannel.mockResolvedValue({});
+    const wrapper = mountSettings();
+    await flushPromises();
+    await wrapper.get('[aria-label="测试 SSH 通道 Test server"]').trigger("click");
+    await flushPromises();
+    await wrapper.get(".linux-settings__diagnostics-head .btn--primary").trigger("click");
+    await flushPromises();
+
+    expect(api.patchLinuxChannel).toHaveBeenCalledWith("channel-a", expect.objectContaining({ host_key_policy: "pinned", host_key_ref: "SHA256:fixture" }));
+    expect(wrapper.find(".linux-settings__ok").exists()).toBe(false);
+    expect(wrapper.get(".linux-settings__error").text()).toContain("SSH 私钥内容无效");
+    wrapper.unmount();
+  });
+
+  it("explains unknown host identity and does not pin it when confirmation is cancelled", async () => {
+    api.listLinuxChannels.mockResolvedValue({ channels: [savedChannel] });
+    api.testLinuxChannel.mockResolvedValue({
+      available: false,
+      error_code: "host_key_unknown",
+      host_key_fingerprint: "SHA256:fixture",
+      stages: [
+        { name: "host_key", status: "passed", message: "host-key policy ready" },
+        { name: "ssh_handshake", status: "failed", message: "unknown host key" },
+      ],
+    });
+    confirmDesktopAction.mockResolvedValue(false);
+    const wrapper = mountSettings();
+    await flushPromises();
+    await wrapper.get('[aria-label="测试 SSH 通道 Test server"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get(".linux-settings__error").text()).toContain("尚未确认服务器身份，请核对下方指纹，确认无误后保存并重试");
+    expect(wrapper.findAll(".linux-settings__stage-name").map(node => node.text())).toEqual(["主机校验配置", "SSH 握手"]);
+    await wrapper.get(".linux-settings__diagnostics-head .btn--primary").trigger("click");
+    await flushPromises();
+
+    expect(confirmDesktopAction).toHaveBeenCalledWith(expect.stringContaining("SHA256:fixture"));
+    expect(api.patchLinuxChannel).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
 });
