@@ -1071,6 +1071,23 @@ button:disabled .icon-mask { color: #a0a5a8; }
   overflow: hidden;
 }
 
+.resource-menu-anchor { flex: 0 0 auto; }
+.resource-menu-trigger {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #596c74;
+  cursor: pointer;
+}
+.resource-menu-trigger:hover,
+.resource-menu-trigger.active { background: #f0f3f4; color: #34464e; }
+.resource-menu-trigger:focus-visible { outline: 2px solid #718a98; outline-offset: 1px; }
+.resource-menu-anchor .menu-popover { top: calc(100% + 3px); }
+
 .open-resource-tab {
   display: flex;
   align-items: center;
@@ -1278,42 +1295,6 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
 @keyframes pulse {
   to { opacity: .3; }
 }
-.dock-approval-call code {
-  color: #334850;
-  overflow-wrap: anywhere;
-}
-
-.approval-arguments {
-  grid-column: 1 / -1;
-  max-width: 100%;
-  max-height: 260px;
-  margin: 2px 0 0;
-  padding: 8px 10px;
-  overflow: auto;
-  border: 1px solid #e1e6e8;
-  border-radius: 6px;
-  background: #f7f9fa;
-  color: #263740;
-  font: 11px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: normal;
-}
-
-.approval-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.approval-actions button {
-  padding: 7px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
 .quiet {
   border: 1px solid #dbe3e5;
   background: #fff;
@@ -1429,7 +1410,8 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.desktop-composer-toolbar .composer-toolbar__model { padding: 4px 5px; color: #4b5256; font-size: 11px; }
+.desktop-composer-toolbar .composer-toolbar__trigger-label { max-width: 150px; }
+.desktop-composer-toolbar .composer-toolbar__model { padding: 4px 5px; color: #4b5256; font-family: var(--desktop-font-ui); font-size: 12px; font-weight: 500; line-height: 1.25; }
 .desktop-composer-toolbar .composer-toolbar__chevron { flex: 0 0 auto; }
 .attachment-action { position: relative; z-index: 4; display: flex; align-items: center; gap: 2px; min-width: 30px; height: 30px; }
 .attach-button { display: grid; flex: none; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
@@ -1499,14 +1481,16 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
 .attachment-actions-leave-active .attachment-action-option:nth-child(3) { transition-delay: 0s; }
 .composer-toolbar__status {
   display: inline-flex;
-  flex: 0 1 80px;
+  flex: 0 1 110px;
   align-items: center;
   min-width: 0;
-  width: 80px;
+  width: 110px;
   height: 18px;
-  color: #6d777e;
-  font-size: 9.5px;
-  line-height: 18px;
+  color: #5d686e;
+  font-family: var(--desktop-font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
   white-space: nowrap;
 }
 .composer-toolbar__status-window {
@@ -1529,7 +1513,7 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
 }
 @supports (background-clip: text) or (-webkit-background-clip: text) {
   .composer-toolbar__status-text {
-    background-image: linear-gradient(110deg, #6d777e 38%, #adb5ba 50%, #6d777e 62%);
+    background-image: linear-gradient(110deg, #5d686e 40%, #6d777e 50%, #5d686e 60%);
     background-size: 250% 100%;
     background-clip: text;
     -webkit-background-clip: text;
@@ -1589,6 +1573,14 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
   outline-offset: 2px;
 }
 .desktop-error-hint > .ui-icon { flex: 0 0 auto; }
+.desktop-error-hint--visible {
+  width: min(760px, calc(100% - 32px));
+  max-width: calc(100% - 32px);
+  align-items: flex-start;
+  border-radius: 8px;
+  cursor: default;
+}
+.desktop-error-hint__message { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .desktop-error-hint__retry {
   display: grid;
   flex: 0 0 20px;
@@ -2058,6 +2050,10 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
   pointer-events: auto;
 }
 .dock-turn-error {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
   width: 100%;
   margin: 0 0 6px;
   padding: 8px 12px;
@@ -2070,6 +2066,12 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
   box-shadow: 0 4px 16px #172f3b12;
   pointer-events: auto;
 }
+.dock-turn-error > p { grid-column: 1 / -1; margin: 0; }
+.dock-turn-error__model { grid-column: 1; min-width: 0; overflow: hidden; color: #7e5653; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.dock-turn-error__actions { display: flex; grid-column: 2; gap: 2px; }
+.dock-turn-error__actions button { display: grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #7e4a45; cursor: pointer; }
+.dock-turn-error__actions button:hover { background: #f5e7e5; }
+.dock-turn-error__actions button:focus-visible { outline: 2px solid #b77a73; outline-offset: 1px; }
 .dock-reference-target {
   display: flex;
   flex: none;
@@ -2282,34 +2284,12 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
 
 .dock-approval {
   margin-top: 7px;
-  padding: 9px;
-  border: 1px solid #edd5a9;
-  border-radius: 7px;
-  background: #fffaf1;
-  font-size: 11px;
 }
 
-.dock-approval strong {
-  display: block;
-  color: #60481f;
+.dock-approval .approval-bubble {
+  margin: 0;
 }
-
-.dock-approval-call {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 8px;
-  color: #60481f;
-}
-
-.dock-approval-call code { font-size: 11px; }
-.dock-approval-call .approval-arguments {
-  max-height: 150px;
-  margin-top: 0;
-}
-.dock-approval .approval-actions { margin-top: 8px; }
-.dock-approval .approval-actions button { padding: 5px 9px; }
-.dock-approval p {
+.dock-approval-fallback p {
   margin: 7px 0 0;
   color: #6a5a3b;
   font-size: 11px;
@@ -2415,7 +2395,7 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
 
 @media (prefers-reduced-motion: reduce) {
   .dock-status-icon.is-generating { animation: none; }
-  .composer-toolbar__status-text { animation: none; background: none; color: #6d777e; }
+  .composer-toolbar__status-text { animation: none; background: none; color: #5d686e; }
   .composer-status-enter-active,
   .composer-status-leave-active,
   .composer-action__send,

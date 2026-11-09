@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Desktop 第一轮改造验收记录 · 更新于 2026-11-06</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f5f7f9;
+      --surface: #fff;
+      --soft: #f8fafb;
+      --text: #24313d;
+      --muted: #667684;
+      --subtle: #85929c;
+      --border: #dbe2e8;
+      --border-soft: #e8edf1;
+      --accent: #557f91;
+      --accent-soft: #eaf1f4;
+      --pass: #61745d;
+      --pass-bg: #edf3eb;
+      --pending: #7a705d;
+      --pending-bg: #f5f2eb;
+      --partial: #6c718d;
+      --partial-bg: #f0f0f6;
+      --radius: 10px;
+      font: 14px/1.65 "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background: var(--page);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #476f82; text-underline-offset: 3px; }
+    a:hover { color: #315a6d; }
+    .layout { display: grid; grid-template-columns: 224px minmax(0, 1fr); min-height: 100vh; }
+    aside { position: sticky; top: 0; align-self: start; height: 100vh; overflow: auto; padding: 24px 16px; border-right: 1px solid var(--border); background: #f8fafb; }
+    .brand { margin: 0 0 5px; font-size: 15px; font-weight: 650; }
+    .meta { margin: 0 0 20px; color: var(--muted); font-size: 12px; }
+    .nav-title { margin: 17px 0 6px; color: var(--subtle); font-size: 11px; font-weight: 650; letter-spacing: .05em; }
+    nav a { display: block; margin: 2px 0; padding: 6px 9px; border-radius: 7px; color: var(--muted); text-decoration: none; font-size: 13px; }
+    nav a:hover, nav a:focus-visible { background: var(--accent-soft); color: var(--text); outline: none; }
+    main { width: min(1120px, 100%); margin: 0 auto; padding: 36px clamp(20px, 4vw, 56px) 64px; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-size: 12px; font-weight: 650; }
+    h1 { margin: 0; font-size: clamp(26px, 3vw, 34px); line-height: 1.2; letter-spacing: -.02em; }
+    h2 { margin: 0 0 10px; font-size: 20px; line-height: 1.35; }
+    h3 { margin: 0; font-size: 15px; }
+    p { margin: 8px 0; }
+    .lead { max-width: 820px; margin: 14px 0 0; color: var(--muted); font-size: 15px; }
+    .scope { display: flex; flex-wrap: wrap; gap: 7px; margin: 20px 0 28px; }
+    .chip { padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 11px; }
+    section { margin-top: 28px; scroll-margin-top: 18px; }
+    .card, .note { margin: 10px 0; padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .card p:last-child, .note p:last-child { margin-bottom: 0; }
+    .note { background: var(--soft); }
+    .state { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 650; white-space: nowrap; }
+    .pass { color: var(--pass); background: var(--pass-bg); }
+    .pending { color: var(--pending); background: var(--pending-bg); }
+    .partial { color: var(--partial); background: var(--partial-bg); }
+    .label { color: var(--muted); font-size: 12px; font-weight: 650; }
+    .status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+    table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: 13px; }
+    th, td { padding: 9px 10px; border-bottom: 1px solid var(--border-soft); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 12px; font-weight: 650; }
+    tr:last-child td { border-bottom: 0; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 9px; }
+    code { overflow-wrap: anywhere; font-family: Consolas, "Cascadia Code", monospace; font-size: 12px; }
+    .timeline { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .timeline article { padding: 13px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--surface); }
+    .timeline time { display: block; margin-bottom: 5px; color: var(--accent); font-size: 12px; font-weight: 650; }
+    .todo { margin: 10px 0; padding: 12px 14px; border-left: 3px solid #b9b2a2; border-radius: 0 8px 8px 0; background: var(--soft); }
+    .todo strong { display: block; margin-bottom: 3px; }
+    .code-ref { overflow-wrap: anywhere; font-family: Consolas, "Cascadia Code", monospace; font-size: 12px; }
+    footer { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--subtle); font-size: 12px; }
+    @media (max-width: 760px) {
+      .layout { display: block; }
+      aside { position: static; width: 100%; height: auto; padding: 14px 18px; border-right: 0; border-bottom: 1px solid var(--border); }
+      nav { display: flex; flex-wrap: wrap; gap: 2px; }
+      .nav-title { width: 100%; margin: 10px 0 2px; }
+      nav a { padding: 5px 8px; }
+      main { padding-top: 24px; }
+      .timeline { grid-template-columns: 1fr; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <p class="brand">Desktop 第一轮验收</p>
+      <p class="meta">初版 2026-11-05 · 更新 2026-11-06 · 工作流、资源与配置</p>
+      <nav aria-label="报告目录">
+        <p class="nav-title">总览</p>
+        <a href="#summary">结论与边界</a>
+        <a href="#coverage">第一轮覆盖清单</a>
+        <p class="nav-title">证据</p>
+        <a href="#api">真实 API 流程</a>
+        <a href="#checks">代码与测试</a>
+        <a href="#native-evidence">原生截图 01–53</a>
+        <a href="#pending">验收边界</a>
+        <a href="#references">原始记录</a>
+      </nav>
+    </aside>
+    <main>
+      <header>
+        <p class="eyebrow">实现覆盖与验收记录 · 不替代原始审计</p>
+        <h1>第一轮必需原生验收已完成</h1>
+        <p class="lead">这一页汇总聊天审批、工具状态、模型恢复、资源引用与预览、设置和统一工具额度的实现目标与证据。第一轮必需原生验收已完成；连续动画、系统 reduced-motion 与更广兼容性仍未采样，不作通过声明。现有浅色低饱和风格、行式设置、简洁 icon 操作与工具 purpose 摘要继续作为设计基线。</p>
+        <div class="scope" aria-label="报告范围">
+          <span class="chip">真实 LLM + 隔离 Agent / 工作区</span>
+          <span class="chip">实现、API 与自动化测试证据</span>
+          <span class="chip">历史观察 01–20 + 当前回归 21–61</span>
+          <span class="chip">未修改正式环境</span>
+        </div>
+      </header>
+
+      <section id="summary">
+        <h2>结论与边界</h2>
+        <div class="card">
+          <div class="status-line"><span class="state pass">实现与自动化检查有通过记录</span><span class="state pass">第一轮必要原生验收通过</span></div>
+          <p><strong>覆盖目标：</strong>让长短对话中的审批可操作，工具组状态不误报，错误和取消后有清晰可恢复路径；让文件引用以结构化数据传输且不泄漏内部协议文字；让 Dock、资源预览和设置遵循一致的布局与额度语义。</p>
+          <p><strong>本轮限制：</strong>01–20 是旧 Node 候选 SHA-256 <code>21CB7AA0AF1F81356CB3FD5068E1951AEA2F9DFD4B1EE38DAF43742BB1E350E5</code> 与旧 Desktop SHA-256 <code>B1474431E150AE06156EED7279D28AB17CDA7D731169F0E4622F942BEA86CE7D</code> 下采集的历史观察。旧候选 Node PID 43344（health 1.0.5）与 Desktop PID 11484 的活跃 tool_waiting Stop、长对话审批可见与取消结果（21–23），短对话部分批准及子项（24–26）均通过；27–29 点击 Stop 时回合已自然完成，不是取消证据，也不构成另一个阶段的阻断。30–33 真实 quota 错误归属、切换 DeepSeek、打开对应设置编辑及新问题回答通过；34 资源菜单一次展示三类资源，36 原生导入并校验 brief 内容一致，37 CSV 七行与金额对齐、展开 Dock 可见。35/38 的空态间距与展开 Dock 遮挡问题已在最终候选通过51/52复验；53记录75EA575上折叠Dock详情残留；BBDDA422在54–57原生复验通过展开/折叠/重开循环。截图60记录Security恢复默认图标空白；最终候选1F76B550由截图61验证修复。09/10 是修复前旧状态；<code>00-before-sidebar-stale.png</code> 是更早的基线。</p>
+          <p><strong>改动范围：</strong>产品实现与真实 API 隔离数据已有改动；本报告只整理证据，不改产品代码、不重跑测试。三个原始审计仍保留各自的问题发现与详情。</p>
+        </div>
+      </section>
+
+      <section id="coverage">
+        <h2>第一轮覆盖清单</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>领域</th><th>目标与验收条件</th><th>当前证据状态</th><th>下一步</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><strong>审批与侧栏状态</strong></td>
+                <td>长对话的审批卡不被压缩；多项默认未选，checkbox 与详情展开分离；批准/拒绝后给出清楚结果。侧栏待审批标记跟随同一通知状态，旧通知不能覆盖较新 seq。</td>
+                <td><span class="state pass">长对话审批可见；短对话原生部分批准与拒绝结果通过</span><br>21 显示长对话真实待审批；25–26 显示只批准第一项，获批写入成功、未选项以 <code>user_rejected</code> 结束且文件未改。通知回归覆盖 seq 20 → 迟到 18 → GET 19、未知 Agent 不造占位行、完整 GET 决定成员列表。</td>
+                <td>无需重复拒绝整批；保留同接口分支自动化测试结果。继续覆盖既有状态同步检查。</td>
+              </tr>
+              <tr>
+                <td><strong>工具组与审批结果</strong></td>
+                <td>主行稳定显示 call purpose，折叠态不弹出 active 子行；失败/拒绝/取消不写成全成功。展开后能核查参数与每项终态。</td>
+                <td><span class="state pass">状态静态可读与键盘展开通过；连续动画帧未采样</span><br>tool_waiting Stop 后父项与子项均取消、pending/queue/jobs 清零、橙点清除且目标未写；截图25–26 显示一项成功、一项未批准；48–50 验证工具 purpose、子行状态、Tab 焦点与 Enter 展开真实路径参数。</td>
+                <td>静态工具状态与键盘展开已通过；动画连续帧仍未采样。</td>
+              </tr>
+              <tr>
+                <td><strong>错误恢复、模型与取消</strong></td>
+                <td>结构化额度错误显示具体原因；错误附近提供合适的模型/设置入口。失败后可恢复但不能自动重放已执行写工具。取消显示“已停止”，下一条新请求优先新意图；显式继续才恢复旧任务。</td>
+                <td><span class="state pass">真实 quota 错误恢复入口与新问题答复通过</span><br>30–33 显示错误原因，Qwen 当前选择清楚；从错误卡切至 DeepSeek 后，设置 CTA 打开对应 profile 编辑器，随后新问题被正确回答，没有复读失败探针。</td>
+                <td>本项原生路径已通过；模型 picker 的键盘关闭行为由既有交互测试覆盖。</td>
+              </tr>
+              <tr>
+                <td><strong>结构化资源引用</strong></td>
+                <td>原始用户文字保持原样；同一文件不同选区以独立 anchors 传输、hydrate；附件和结构化引用正确合并，不把 hash、内部注释拼进消息正文。</td>
+                <td><span class="state pass">API payload / hydrate、原生引用卡与真实只读引用流程通过</span><br>真实 API 保存同路径两个不同选区，消息文字干净，模型读取并回答对应行数据。截图44中引用 chip 仅显示文件名、整个文件和移除按钮，输入文本没有内部 metadata；47 验证隔离工作区中只读 brief、CSV、expense-review.md 后正确答出三项编号。45 的无工具 fixture 限制单独记录，不代表产品引用能力失败。revision 是随引用传输的 metadata 提示，本次未做文件内容 hash 比较。</td>
+                <td>原生发送前 chip、发送后定位卡、失败保留引用和附件合并场景。</td>
+              </tr>
+              <tr>
+                <td><strong>资源工作区与 Dock</strong></td>
+                <td>资源入口清晰，空工作区就近可新建/导入；布局适配窄预览；Dock 展开按真实占用高度避让所有预览末端，CSV 数值对齐且编号不乱拆。</td>
+                <td><span class="state pass">菜单、导入、CSV、空态与 Dock 展开/折叠/重开循环通过</span><br>34、36、37原有路径通过；最终候选75EA575的51确认空目录说明与按钮紧邻居中，52确认展开 Dock 时 Markdown 末段完整可见。53发现收起快速消息栏后详情仍留在右下、occupancy=0并遮挡末段；BBDDA422 候选（Desktop PID 45588、Node PID 43344）已原生复验：54–57确认展开、折叠隐藏详情/输入、恢复展开意图与草稿，并再次确认Markdown末段无遮挡。</td>
+                <td>BBDDA422 上54–57已通过完整展开/折叠/重开循环；不外推其他预览格式。</td>
+              </tr>
+              <tr>
+                <td><strong>浏览器禁用态入口</strong></td>
+                <td>浏览器能力关闭时，空态明确指出设置位置并能直接前往对应设置。</td>
+                <td><span class="state pass">自动化与原生跳转通过</span><br><code>WorkgroupDesktopContract.test.js</code> 覆盖 browser_disabled 通知及前往共享服务设置事件；截图39–40 显示“共享服务”提示且点击后到达 <code>/settings/capabilities</code>。</td>
+                <td>39–40 已原生验证禁用态文案和点击后到达共享服务设置。</td>
+              </tr>
+              <tr>
+                <td><strong>设置与统一工具额度</strong></td>
+                <td>只保留每轮 <code>max_tool_calls</code>（默认 64，范围 1–4096）；普通聊天、自动激活、每日经验整理及子 Agent 共用；每个提议调用计数，失败/拒绝也计数，并行逐项计数。保存无效值需明确阻止。</td>
+                <td><span class="state pass">必要设置视觉验收通过</span><br>截图41 显示普通 Agent 只有 max_tool_calls 数字项（fixture=8）及共用说明，截图42 保持记忆标题与 Tab 位置，截图43 为一项一行且频率/每日整理均关闭。截图58显示启动配置/重启说明，59显示raw-history当前持久化值（未覆盖environment只读分支）。60是图标缺失的历史截图；61在最终候选确认refresh-cw图标、12000/16000限额与UIA label/Description正常。只读检查未执行恢复/修改/保存。隔离Dock测试日志记录9/9定向通过，历史全量85 files/593 tests保持为另一次运行。</td>
+                <td>截图41–43覆盖 Agent/Auto 的字段与行式文案；截图58–59的页面可读性已观察；60的恢复默认图标由最终候选61验证修复。环境覆盖只读分支没有在原生UI中切换或注入；只以API/组件结果为据。自动化结果不代表原生保存操作已验证。</td>
+              </tr>
+              <tr>
+                <td><strong>视觉状态与可访问性</strong></td>
+                <td>状态与模型文字字体、字号、行高协调；扫光不降低文字可读性；reduced-motion、键盘焦点、固定槽位高度是验收目标（当前原生结果见状态列）。</td>
+                <td><span class="state partial">静态可读性与键盘操作通过；连续动画 / reduced-motion 未采样</span></td>
+                <td>键盘焦点与 Enter 展开已由49–50通过；连续动画帧及系统 reduced-motion 未采样，不据此宣称通过。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note">
+          <p><strong>设计基线：</strong>保留浅色低饱和界面，不换主题、不增加大块新导航。设置项继续一行一项；非菜单动作优先使用 icon + tooltip 与可访问名称；工具主行以用户能理解的 purpose 摘要为先，原始工具名和参数按需展开。</p>
+          <p><strong>资源入口实现位置：</strong><code>DesktopApp.vue:2110–2114</code> 将 folder-open 资源菜单放在对话 tab 后的 resource-tabs 行；不是 titlebar 上的独立“+”按钮。空目录按钮位于 <code>WorkspaceFiles.vue:1618–1624</code>，BrowserViewer 的禁用态入口位于 <code>BrowserViewer.vue:152–154</code>，设置事件由 <code>DesktopApp.vue:1259</code> 路由至 capabilities 页面。</p>
+        </div>
+      </section>
+
+      <section id="api">
+        <h2>真实 API 流程与证据</h2>
+        <div class="card">
+          <p>以下是隔离 Agent 与工作区的真实模型/API 验证，不是原生界面验收。follow-up 记录时间为 2026-11-05 06:00 UTC；三个独立 message POST 各自形成一个 turn。</p>
+          <div class="timeline">
+            <article><time>06:00:03 UTC · Turn 1</time><strong>长文本请求 → 取消</strong><p>模型 generation 已开始；API cancel 得到 accepted，终态为 <code>cancelled_by_user</code>。</p></article>
+            <article><time>06:00:03–06:00:05 UTC · Turn 2</time><strong>新的一句话请求</strong><p>取消后下一条请求以独立 turn 完成，并先回答最新意图。</p></article>
+            <article><time>06:00:05–06:00:07 UTC · Turn 3</time><strong>用户明确续做第 1 节</strong><p>显式续做后完成指定部分；history/SSE 与 hydrate 记录三轮生命周期。</p></article>
+          </div>
+          <p>另一份 API 证据中，Qwen quota 探针只有一次请求，错误为 <code>provider_quota</code>、<code>retryable:false</code>；同一 CSV 路径带两个不同 row anchors 的 <code>file_refs</code> 被保留，用户原始消息文本没有混入引用 metadata，模型读取并返回对应行数据。记录中的 <code>revision</code> 是引用 metadata 提示，不是已验证的内容 hash；本次没有比较文件 hash。</p>
+          <p><strong>失败恢复实测（隔离 Agent <code>agt-265f1e252b4525a5</code>）：</strong>Qwen turn <code>turn-aa88fbfe284122b5</code> 以 attempt 1 终态失败，错误 <code>provider_quota</code>、不可重试；timeline 为一次 model request started/failed。只读 SQLite provenance 核验确认有且仅有一条 system marker 的 <code>operation=failed_turn_context</code>、reference 精确等于该 turn；原失败 user message 的 provenance reference 也匹配同一 turn。切换至 DeepSeek 后，自然新问题 <code>turn-896ebf48f7fe2e71</code> 正常完成并答文件核验需依据原始文件/权威记录，没有隐式回放旧探针；只有在明确恢复请求后，<code>turn-048ab7d1e4e472a6</code> 才回答“旧失败探针”。三个 turn 均各自完成一次模型尝试。此为隔离真实 API/持久层证据，不是 UI 验收。</p>
+          <p>这些结果支持 API/持久层行为判断，不证明原生审批按钮、Stop 控件、picker 或窗口布局通过。以下路径指向被 Git 忽略的本地 QA 文件，不随 PR 提交，在 PR 页面中不可访问；本页内的摘要与原生截图才是随 PR 可审阅记录：<a href="../../../../../.runtime-test-real-ux/round-one-api-followup-review.json">本地 follow-up review JSON</a>、<a href="../../../../../.runtime-test-real-ux/round-one-api-final-evidence.json">本地最终 API evidence JSON</a> 与 <a href="../../../../../.runtime-test-real-ux/failed-recovery-real-model.json">本地失败恢复时序 JSON</a>。</p>
+        </div>
+      </section>
+
+      <section id="checks">
+        <h2>代码与自动化检查</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>检查</th><th>结果</th><th>记录</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td>Desktop frontend（此前全量运行）</td><td><span class="state pass">85 files · 593 tests PASS</span></td><td><code>npm run test:frontend</code></td><td>这是此前全量结果，不是BBDDA422本次运行；本次定向 ResourceAgentDock 为1文件/9项通过，见候选记录。</td></tr>
+              <tr><td>Desktop UI suites</td><td><span class="state pass">118 tests PASS</span></td><td><code>npm run test:ui</code></td><td>涵盖 UI 状态、workspace refs、CSV、dock inset 等测试。</td></tr>
+              <tr><td>Shared icons</td><td><span class="state pass">7 checks PASS</span></td><td>frontend suite 的 icon registry 验证</td><td>别名、manifest 和 SVG 资源可解析。</td></tr>
+              <tr><td>Desktop lint</td><td><span class="state pass">PASS</span></td><td><code>npm run lint</code></td><td>ESLint Desktop <code>src</code>。</td></tr>
+              <tr><td>Go Node / shared config</td><td><span class="state pass">全量通过</span></td><td><code>node-go-test-all.log</code>、<code>shared-config-go-test-all.log</code></td><td>包含 Node 模块及 shared/config。</td></tr>
+              <tr><td>Go clients / shared logfiles / update</td><td><span class="state pass">通过</span></td><td>Root 本轮全量检查记录</td><td>不以这些测试替代 Desktop 原生交互验收。</td></tr>
+              <tr><td>Python</td><td><span class="state pass">212 tests PASS</span></td><td><code>round-one-python-tests.log</code></td><td>全量 Python 测试记录。</td></tr>
+              <tr><td>Node build</td><td><span class="state pass">通过</span></td><td>Root 最终构建记录</td><td>构建成功不代表旧 QA Node 进程已替换；启动验收前需使用最终构建。</td></tr>
+              <tr><td>Tauri debug custom-protocol build</td><td><span class="state pass">通过</span></td><td>Root 最终构建记录</td><td>原生窗口尚未使用最终构建完成视觉与交互检查。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note">
+          <p>最终 Node build 与 Tauri debug custom-protocol build 的构建记录通过。最新候选已复制并在隔离 QA home 成功启动（Node PID 43344 / health 1.0.5，Desktop PID 11484）；原生交互复测仍进行中。01–20 的哈希见下方，均为旧候选。本页汇总已有结果，不重新运行测试。</p>
+        </div>
+      </section>
+
+      <section id="native-evidence">
+        <h2>原生截图元数据 01–61</h2>
+        <div class="card">
+          <p>01–20 是旧 Node <code>21CB7AA0…E5</code> / Desktop <code>B1474431…CE7D</code> 候选下的历史观察；21–60 为原生回归与工作流记录。35、38的空态布局和Markdown Dock遮挡由51–52复验通过；39–44补齐浏览器设置入口、额度/记忆/Auto设置和引用卡观察；54–57完成BBDDA Dock状态循环复验，58–60记录配置页视觉结果。所有链接指向本报告目录内原图，文件 SHA-256 在下表记录。</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>截图</th><th>简要观察</th><th>验收状态</th></tr></thead>
+              <tbody>
+                <tr><td><a href="01-final-quota-error.png">01 · 配额错误</a></td><td>真实配额失败原因在聊天中可见。</td><td>观察记录；最终候选复核错误提示。</td></tr>
+                <tr><td><a href="02-error-model-picker.png">02 · 模型选择器</a></td><td>从失败附近打开模型 picker。</td><td>观察记录；最终候选复核恢复入口。</td></tr>
+                <tr><td><a href="03-model-error-label-followed-selection.png">03 · 错误归属</a></td><td>旧错误附近的模型/配置归属提示不准确。</td><td>历史文案问题；30–33已在最终原生流程验证“当前选择”与切换入口。</td></tr>
+                <tr><td><a href="04-real-model-recovery-reply.png">04 · 恢复答复</a></td><td>真实模型恢复时答复了旧请求内容。</td><td>历史恢复错误；30–33及隔离API证据验证修复后的新问题/显式恢复边界。</td></tr>
+                <tr><td><a href="05-native-generating.png">05 · 生成中</a></td><td>记录生成状态截图。</td><td>Stop 点击时 turn 已 completed，不算 Stop 通过。</td></tr>
+                <tr><td><a href="06-native-active-before-stop.png">06 · Stop 前状态</a></td><td>记录 Stop 操作前的生成中画面。</td><td>实际点击时 turn 已 completed，不算 Stop 通过。</td></tr>
+                <tr><td><a href="07-long-chat-pending-approval.png">07 · 长对话审批</a></td><td>长聊天中的审批卡可见。</td><td>早期局部观察；后续21–26已验证审批详情与原生决策。</td></tr>
+                <tr><td><a href="08-approval-details.png">08 · 审批详情</a></td><td>审批详情内容可见。</td><td>历史局部截图；后续21–26已验证原生审批可见与部分决策。</td></tr>
+                <tr><td><a href="09-native-stopped-pending-cleared.png">09 · tool_waiting 停止</a></td><td>早期画面中等待工具审批时停止成功、pending 已清、目标文件未写入，但侧栏橙点残留。</td><td>历史缺陷；截图21–23在最终 native regression 中验证取消后侧栏标记清除。</td></tr>
+                <tr><td><a href="10-cancelled-tool-wrong-completed.png">10 · 取消工具状态</a></td><td>早期画面中取消成功且文件未写入，但工具行显示 completed。</td><td>历史缺陷；截图21–23验证工具父组与子行显示 cancelled。</td></tr>
+                <tr><td><a href="11-tab-resource-entry.png">11 · 资源入口</a></td><td>folder-open 入口位于聊天 tab 后。</td><td>历史位置观察；34已验证资源菜单三类入口可发现。</td></tr>
+                <tr><td><a href="12-csv-aligned-preview.png">12 · CSV 预览</a></td><td>CSV 数值列对齐。</td><td>只记录已测视口布局；窄宽度未覆盖，不外推。</td></tr>
+                <tr><td><a href="13-csv-dock-expanded.png">13 · 展开 Dock</a></td><td>CSV 预览与展开 Dock 同屏。</td><td>需继续确认窄宽度与末行避让。</td></tr>
+                <tr><td><a href="14-markdown-bottom-above-dock.png">14 · Markdown 末尾</a></td><td>Markdown 末尾内容位于展开 Dock 上方。</td><td>单一视口观察；未覆盖的预览类型不作通过声明。</td></tr>
+                <tr><td><a href="15-clean-reference-composer.png">15 · 引用 composer</a></td><td>待发送引用 chip 文案干净。</td><td>原生局部观察；失败保留/合并场景待验。</td></tr>
+                <tr><td><a href="16-reference-response-in-dock.png">16 · 引用后答复</a></td><td><code>read_file</code> 回答最新报告内容，没有续写已取消文件。</td><td>本次行为观察；不外推至其他文件/任务。</td></tr>
+                <tr><td><a href="17-clean-reference-transcript.png">17 · 消息与引用卡</a></td><td>用户原话保留，显示单张引用卡，没有 hash。</td><td>原生局部观察；附件合并边界另按 API 测试记录。</td></tr>
+                <tr><td><a href="18-agent-settings-basic.png">18 · 基本设置</a></td><td>Agent 基本设置与单一工具额度字段。</td><td>可见性观察；额度默认/边界验证另按测试记录。</td></tr>
+                <tr><td><a href="19-agent-settings-memory.png">19 · 记忆设置</a></td><td>记忆页保持既有标题与结构。</td><td>局部视觉观察，不代表记忆默认行为变更。</td></tr>
+                <tr><td><a href="20-auto-settings-rows.png">20 · Auto 设置</a></td><td>Auto 行式设置可见，当前自主激活关闭。</td><td>旧候选局部观察；截图43在原生复核中确认自主激活与每日整理均关闭。</td></tr>
+                <tr><td><a href="21-final-pending-approval.png">21 · 审批等待</a></td><td>Agent <code>agt-7586cd7bdf009d08</code> 的长 turn <code>turn-40848a1c299430ab</code> 处于真实 tool_waiting；长对话审批卡可见。</td><td>最新候选原生回归；审批可见与取消前状态均有证据。</td></tr>
+                <tr><td><a href="22-final-cancel-cleared.png">22 · 取消后清除</a></td><td>输入栏 Stop 后 hydrate 为 cancelled、active=false、pending=0、queue=0、jobs=0；sidebar 橙点清除。</td><td>tool_waiting 原生 Stop 通过；此图不验证纯generating时的点击结果，该相位未采样且不作为本轮门槛。</td></tr>
+                <tr><td><a href="23-final-cancelled-tool-details.png">23 · 取消工具详情</a></td><td>父工具组 1 项取消，子行终态已停止；fixture 文件仍为 <code># Native approval fixture</code>，未被改写。</td><td>取消状态与未批准写入保护通过。</td></tr>
+                <tr><td><a href="24-final-batch-approval.png">24 · 双项审批待决</a></td><td>短 Agent <code>agt-640e72ce2279582c</code> 等待两项真实 <code>write_file</code> 审批（<code>hitl-55c1a88ed993bb34</code>）。两条 provider 生成的 <code>call_purpose</code> 都是“更新允许测试文件”，对应路径分别为 <code>native-batch-allow.md</code> 与 <code>native-batch-deny.md</code>；展开详情可辨认路径。</td><td>待决前记录；随后用户已仅批准第一项，结果见截图25。可选打磨：同名 purpose 可附目标文件辅助辨认；保留 purpose 优先，不视为 UI 映射缺陷。</td></tr>
+                <tr><td><a href="25-final-batch-partial-result.png">25 · 部分审批终态</a></td><td>turn <code>turn-d80cfa2c20a2c72d</code> completed、active=false、pending HITL=null。获批 <code>native-batch-allow.md</code> 内容为“# 已批准的测试”；未批准 <code>native-batch-deny.md</code> 仍为原始“# Approval baseline”。工具00 succeeded、工具01 denied/user_rejected 且不可重试；最终答复未重试并说明 purpose 写错。折叠父组显示 1 项完成、1 项未批准，sidebar 橙点清除。</td><td>短对话原生 checkbox 部分批准与混合结果通过；只读 hydrate、事件与文件证据见 <a href="../../../../../.runtime-test-real-ux/native-batch-partial-result.json">仅本地 gitignored 原生结果 JSON（PR 不包含）</a>。截图 SHA-256 见候选记录。</td></tr>
+                <tr><td><a href="26-final-batch-child-results.png">26 · 展开子项终态</a></td><td>展开截图25的父组，子行分别显示已完成与已拒绝；状态与事件、文件结果一致。</td><td>子行终态原生验证通过。</td></tr>
+                <tr><td><a href="27-generating-before-stop.png">27 · 模型生成中 Stop 前</a></td><td>点击 Stop 前截到模型生成状态。</td><td>点击时回合已自然 completed；不能作为活动中取消证据。</td></tr>
+                <tr><td><a href="28-active-model-before-stop.png">28 · 第二次 Stop 前</a></td><td>第二次尝试的 Stop 前状态截图。</td><td>点击时回合已自然 completed；不能作为活动中取消证据。</td></tr>
+                <tr><td><a href="29-model-stopped.png">29 · Stop 后状态</a></td><td>显示模型回合结束画面。</td><td>结束发生于点击前的自然完成；不记录为取消通过。真实运行中 Stop 已在 tool_waiting 由21–23验证。</td></tr>
+                <tr><td><a href="30-final-quota-error-actions.png">30 · 真实 quota 错误</a></td><td>错误卡显示实际额度原因并提供当前模型恢复入口。</td><td>真实错误归属与就近恢复操作通过。</td></tr>
+                <tr><td><a href="31-final-current-model-label.png">31 · 当前模型名称</a></td><td>失败后模型选择器显示当前 DeepSeek。</td><td>名称和当前选择关系清楚。</td></tr>
+                <tr><td><a href="32-error-settings-destination.png">32 · Profile 设置入口</a></td><td>从错误卡切换 DeepSeek 后，设置 CTA 打开对应 DeepSeek 编辑窗口；API key 仅为保密占位显示。</td><td>恢复入口到达正确 profile 设置。</td></tr>
+                <tr><td><a href="33-native-model-recovery-reply.png">33 · 新问题恢复答复</a></td><td>切换后新问题得到正确答复；普通“收到”前缀不等同于复读旧探针。</td><td>真实新意图恢复通过。</td></tr>
+                <tr><td><a href="34-final-resource-menu.png">34 · 资源菜单</a></td><td>资源菜单一次显示工作区、浏览器、终端三类入口。</td><td>原生资源入口发现通过。</td></tr>
+                <tr><td><a href="35-empty-workspace-actions.png">35 · 空工作区操作</a></td><td>空态说明约在 y=300，按钮约在 y=590，纵向距离明显过大。</td><td>该旧候选截图暴露布局缺陷；最终候选已在51复验通过空目录空态布局。</td></tr>
+                <tr><td><a href="36-native-import-success.png">36 · 导入 brief</a></td><td>原生文件选择器导入 brief 成功；导入文件与 <code>empty-ui-review/brief.md</code> SHA-256 均为 <code>8298BF29C5DB65CA4F238DA780417DCF2984BAB5701520F461A5F5ECCDAABA60</code>。</td><td>原生导入与内容一致性通过。</td></tr>
+                <tr><td><a href="37-final-csv-expanded-dock.png">37 · CSV 与展开 Dock</a></td><td>七行数据与展开 Dock 同屏，金额列右对齐。</td><td>该 CSV 路径通过；不外推其他视口/格式。</td></tr>
+                <tr><td><a href="38-final-markdown-bottom-inset.png">38 · Markdown 末尾遮挡</a></td><td>连续滚动至 Markdown 最末段后，内容仍被展开的短回复 Dock 遮住。</td><td>该旧候选截图记录展开Dock遮挡；最终候选已在52复验通过展开状态。旧截图14不能替代本次更晚的52验证。</td></tr>
+                <tr><td><a href="39-disabled-browser-entry.png">39 · 浏览器禁用提示</a></td><td>禁用态说明明确指向“共享服务”设置。</td><td>原生提示文案通过。</td></tr>
+                <tr><td><a href="40-browser-settings-destination.png">40 · 共享服务设置跳转</a></td><td>点击提示按钮到达 <code>/settings/capabilities</code>。</td><td>原生路由目标通过。</td></tr>
+                <tr><td><a href="41-agent-single-tool-limit.png">41 · 单一工具额度字段</a></td><td>普通 Agent 只有一个最大工具调用数字段，fixture 值为 8；说明普通聊天、自主运行和每日经验整理共用此限制，失败/拒绝逐项计数，范围 1–4096。</td><td>字段与文案原生观察通过；数值边界及运行时预算语义以自动化/API 测试为准。</td></tr>
+                <tr><td><a href="42-agent-memory-tab.png">42 · 记忆子页</a></td><td>记忆子页保留原标题与 Tab 位置。</td><td>原生结构观察通过；不代表记忆默认行为变更。</td></tr>
+                <tr><td><a href="43-auto-settings-disabled.png">43 · Auto 设置关闭态</a></td><td>设置一项一行；激活频率关闭，每日经验整理也关闭。</td><td>原生行式布局与关闭态通过。</td></tr>
+                <tr><td><a href="44-clean-reference-card.png">44 · 干净引用卡</a></td><td>引用卡仅显示 <code>expense-review.md · 整个文件</code> 与移除按钮；输入文本无内部 metadata。</td><td>原生引用展示与原始文本洁净通过；45为无工具fixture限制，47验证配置正确的隔离Agent完成三文件只读回复。</td></tr>
+                <tr><td><a href="45-reference-read-fixture-limitation.png">45 · 引用探针 fixture 限制</a></td><td>原 Agent <code>agt-265f1e252b4525a5</code> 的 enabled_groups、policy 与 MCP 均为空；整文件引用不会自行读取正文，不用工具的单句探针无法从文件取值，模型输出的裸 <code>dagents-tool-call</code> 文本也不会被 Node 当作真实工具调用。</td><td>测试 fixture 能力不足的记录，不是产品 bug；不计为引用回复失败。改用具备只读工具的隔离 Agent 验证，见47。</td></tr>
+                <tr><td><a href="46-status-waiting.png">46 · 状态等待截图</a></td><td>文件名标为 waiting，但画面实际与47一致：turn <code>turn-ae118091768b012d</code> 已完成。</td><td>不是等待态或连续动画证据；不用于证明生成中效果。</td></tr>
+                <tr><td><a href="47-real-readonly-tools-completed.png">47 · 三文件只读核对完成</a></td><td>隔离 Agent <code>f77fe72ed7793ff2</code> 的 turn <code>turn-ae118091768b012d</code> 依次只读 brief.md、CSV、expense-review.md 共3次后完成，active=false、pending=0、queue=0、jobs=0，答出 TR-104、ME-205、SW-306。</td><td>真实原生引用/只读工具工作流通过；未改写文件。</td></tr>
+                <tr><td><a href="48-real-tool-purpose-rows.png">48 · 工具 purpose 与子行</a></td><td>完成摘要下三项工具各自显示图标、purpose 与子行右侧状态。</td><td>静态信息可读性通过；此图不是连续动画证据。</td></tr>
+                <tr><td><a href="49-tool-keyboard-focus.png">49 · 工具键盘焦点</a></td><td>按 Tab 后焦点到首个工具子行。</td><td>键盘焦点可见性通过。</td></tr>
+                <tr><td><a href="50-tool-keyboard-expanded.png">50 · 键盘展开详情</a></td><td>按 Enter 展开工具详情，可看到真实路径参数。</td><td>键盘展开与参数可读性通过。</td></tr>
+                <tr><td><a href="51-final-empty-directory-grouped.png">51 · 最终候选空目录</a></td><td>空态说明与新建/导入按钮紧邻并整体居中。</td><td>75EA575 最终候选原生复验通过。</td></tr>
+                <tr><td><a href="52-final-markdown-expanded-clearance.png">52 · 展开 Dock 的 Markdown 末尾</a></td><td>展开聊天面板时，文档末段完整显示在面板上方。</td><td>75EA575 最终候选原生复验通过。</td></tr>
+                <tr><td><a href="53-collapsed-dock-detail-remains.png">53 · 折叠 Dock 后详情残留</a></td><td>75EA575时收起快速消息栏后详情仍停在右下角，occupancy为0并遮挡Markdown末段。</td><td>历史失败；BBDDA422截图54–57已原生确认修复。</td></tr>
+                <tr><td><a href="54-final-expanded-dock-bottom.png">54 · BBDDA 展开 Dock</a></td><td>展开面板时Markdown末段可见。</td><td>BBDDA422，Desktop PID45588，Node PID43344；通过。</td></tr>
+                <tr><td><a href="55-final-collapsed-no-residual-panel.png">55 · 折叠后清除详情</a></td><td>详情和输入栏消失，文档末段无遮挡。</td><td>BBDDA422；通过。</td></tr>
+                <tr><td><a href="56-final-reopen-preserves-draft.png">56 · 重开并保留草稿</a></td><td>重开恢复展开意图和未发送草稿。</td><td>BBDDA422；通过。</td></tr>
+                <tr><td><a href="57-final-reopened-dock-bottom-clear.png">57 · 重开后文档底部</a></td><td>未发送草稿仍在时滚到底，末段仍无遮挡。</td><td>BBDDA422；通过。</td></tr>
+                <tr><td><a href="58-final-general-restart-explanation.png">58 · 通用设置重启说明</a></td><td>可见启动配置与需重启说明。</td><td>BBDDA422原生视觉观察通过。</td></tr>
+                <tr><td><a href="59-final-raw-history-current-setting.png">59 · Raw history 当前设置</a></td><td>当前持久化设置启用；非环境覆盖分支。</td><td>截图未验证 environment 只读状态，相关行为由API/组件证据覆盖。</td></tr>
+                <tr><td><a href="60-final-output-limits-default-control.png">60 · 输出限制默认入口（历史缺陷）</a></td><td>BBDDA422上12000/16000限额与恢复默认控件可见，但图标空白。</td><td>由最终候选截图61验证已修复。</td></tr>
+                <tr><td><a href="61-final-output-reset-icon-visible.png">61 · 最终候选恢复默认图标</a></td><td>1F76B550上refresh-cw图标清晰，12000/16000限额可读；UIA button label/Description正确。未点击恢复、修改或保存。</td><td>最终候选原生验收通过；PID 34012，Node PID43344。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><strong>候选记录：</strong>01–20来自旧Node <code>21CB7AA0…E5</code> / Desktop <code>B1474431…CE7D</code>；21–50来自早先部署。51–53来自75EA575（Desktop SHA-256 <code>75EA575B17D599FA524B5EB6E83770BECC57D2E28D3F542804665A27900413A3</code>，PID33248，Node PID43344）。54–60来自BBDDA422（Desktop SHA-256 <code>BBDDA422D217322A21D895DD13408458DD25D63EE2FD4C1668CD97F043A407F8</code>，PID45588，Node SHA-256 <code>3CB60BCA335D21516EED4C79CCDF30B69ACFAE4FE5879B16A86C200575D7056C</code>，PID43344）。61来自最终候选1F76B550（Desktop SHA-256 <code>1F76B5502D60BDB864A5631EE4550C7F0B2EC2F99F1DFE59D934FC90CD5D07ED</code>，PID34012，Node PID43344）。75EA截图53记录Dock折叠缺陷，BBDDA截图54–57确认修复；57中未发送草稿仍保留。截图60记录Security恢复图标空白，1F76B550截图61验证修复。1F76B550 build、2/2组件测试、lint及原生图标/UIA检查通过。截图SHA-256：61 <code>d46478ba8ef6528d540ae15d4bfb4c235ff658631dce145559cdc649ade2546d</code>；54 <code>ededc4cda58d441c7c05971927283a0ff54054fb657aa8dfe0666daaf3f32c14</code>；55 <code>174a6a548d5f0afa4fcadd817b5e4e599538ed41ba5d6967c83fbb2810598514</code>；56 <code>22f416554e191f722a18afc382e363fb4558a00dc901e496e62b20c0ce7c1e21</code>；57 <code>92ff6d58dd0ca7ac85772ce26fec2bdc252bd7f4cb0c70ed089b414ba4cdea34</code>；58 <code>7e03e544564d7812d8140c4ff75b8eb09f2e2c8c15a6dcf95837e0c1294028b7</code>；59 <code>839c344990ae12e03dc876bc2eb41d324838b80e55d78341a2667a563cfc40e2</code>；60 <code>138a2115ca26c1a4d030df316672389fae24ffff785a444c88712f3c82579b05</code>。ResourceAgentDock定向测试为1文件/9项通过；历史全量前端为85 files/593 tests，非BBDDA422或1F76B550定向运行结果。</p>
+          <p><strong>11/09 提交前统一质量门（最终源码）：</strong><code>scripts/verify.ps1</code> exit 0（[verify] passed）：Desktop Vitest 85 files/595 tests、icons 7、UI 118；Python 212；Go 全模块 vet/staticcheck/tests/build；Rustfmt 与 77 tests；frontend/Manage lint/build、Ruff/Pyright、branding/API/OpenAPI 检查通过。后端同时修复 <code>setup.ApplyPatch</code> 对 <code>LLM.Profiles</code> 的 map 隔离复制，防止多字段 PATCH 失败后把部分修改泄漏到活动配置；新增 setup/API 回归通过。该质量门验证最终源码，与 11/06 原生候选分开记录；原生 Desktop SHA-256 仍为 <code>1F76B5502D60BDB864A5631EE4550C7F0B2EC2F99F1DFE59D934FC90CD5D07ED</code>，不表示该二进制包含后续源码。日志 <code>.runtime-test-real-ux/pr-verify-2026-11-09.log</code> 被 Git 忽略，不随 PR 提交；以上摘要是可审阅记录。</p>
+        </div>
+      </section>
+
+      <section id="pending">
+        <h2>验收完成与明确边界</h2>
+        <div class="card">
+          <p>01–20 仅作旧候选定位材料。第一轮必需的原生确认均已完成；下列证据记录通过项与不作声明的扩展边界。</p>
+          <h3>必要原生验收已通过</h3>
+          <div class="todo"><strong>审批真实决策</strong>长对话审批卡可见（截图21）；短对话原生双项部分批准已通过：用户只批准第一项，另一项未执行并以 user_rejected 终态显示，文件与最终答复均核实（截图25–26）。不要求重复拒绝整批；该分支由同接口自动化测试覆盖。</div>
+          <div class="todo"><strong>运行中 Stop 与取消终态（已通过）</strong>真实活跃的 tool_waiting 回合通过输入栏 Stop 取消：turn 进入 cancelled、pending/queue/jobs 清零、sidebar 橙点清除，工具父组/子行显示取消，审批目标文件未写入（截图21–23）。27–29 尝试纯模型生成 Stop 时，点击发生在自然完成之后，不作为活动中取消证据；该相位未采样，不构成额外阻断门槛。</div>
+          <div class="todo"><strong>失败恢复与意图边界（原生已通过）</strong>30–33 真实 quota 错误显示原因，截图31显示当前 DeepSeek；原生切换至 DeepSeek，设置 CTA 打开对应编辑窗口，新问题正确回答且未复读旧探针。此前隔离 API 序列也验证了新 turn 与显式恢复边界；03/04 是修复前旧截图。</div>
+          <div class="todo"><strong>本轮资源、引用与设置关键路径</strong>34 资源菜单、36 原生导入和 37 CSV 路径已通过。51/52 已在最终候选复验通过空态布局和展开 Dock 避让。53记录75EA上的折叠详情残留，BBDDA422已由54–57原生复验Dock循环通过。配置页面截图58–59显示重启说明和raw-history持久化开启状态；59不是environment覆盖只读分支。60为恢复图标空白的历史截图，由最终候选61确认修复。1F76B550 build、2/2组件测试、lint与原生检查均通过。API/组件测试覆盖行为，不声称原生保存点击通过。39–44已验证 Browser 禁用态跳转、引用卡无内部 metadata、单一工具额度字段、记忆页标题/Tab位置与 Auto 行式关闭态。45 是无工具策略 fixture 的限制，不是产品错误；47–50 验证了真实只读引用流程、工具状态/子行及键盘展开。</div>
+          <h3>本轮明确不作通过声明的可选检查</h3>
+          <div class="todo"><strong>工具状态静态可读性与键盘操作（通过）</strong>取消、部分批准的工具子项终态及侧栏清除已通过（21–23、25–26）；工具 purpose/子行状态和 Tab/Enter 展开详情通过（48–50）。连续动画帧与系统 reduced-motion 未采样；代码虽有 reduced-motion 规则，本报告不宣称动态效果已原生通过，也不将其另立为本轮剩余强制验收。</div>
+          <div class="todo"><strong>更广泛的兼容与无障碍审计</strong>本轮不据此声称 PDF、图片/SVG 等所有预览格式、多个 DPI/窗口尺寸、读屏器完整流程均通过；这些需独立安排，不阻止上面限定路径的验收。</div>
+          <div class="todo"><strong>更大范围模型/错误与样式探索</strong>不扩展到其他 provider 错误格式、付费额度行为、Manage/深色主题/大量文件，也不重做整套动画或视觉规范；本轮仅记录静态状态与键盘行为，不把连续动画或系统 reduced-motion 纳入剩余阻断验收。</div>
+          <p><span class="label">现有图像：</span>01–20为旧候选观察；21–50为较早记录；51–53为75EA575原生回归，其中53失败；54–60为BBDDA422记录，54–57 Dock完整状态循环通过，58–59设置视觉已观察，60为历史缺陷，由61在1F76B550验证修复；27–29未形成取消结果，35/38由51/52复验通过。46不是等待态证据，连续动画/reduced-motion未采样；Security恢复默认图标已由最终候选61验证通过；哈希见上节。<a href="00-before-sidebar-stale.png">00-before-sidebar-stale.png</a> 是修复前侧栏状态的旧基线，不能作为本轮通过证据。</p>
+        </div>
+      </section>
+
+      <section id="references">
+        <h2>原始审计与证据索引</h2>
+        <div class="card">
+          <p>本报告是总覆盖索引，不替代三份原始审计中的问题细节、截图和单项建议：</p>
+          <ul>
+            <li><a href="../2026-11-04-ui-polish/index.html">Desktop UI/UX polish 审查</a>：设置一致性、聊天空态、资源入口与源码观察。</li>
+            <li><a href="../2026-11-05-real-llm-workflow/index.html">真实 LLM 工作流审查</a>：CSV、写入审批、取消/续聊、引用和资源预览观察。</li>
+            <li><a href="../2026-11-05-config-governance/index.html">Node 配置治理验收</a>：字段归属、设置 API 与必要原生检查结果。</li>
+          </ul>
+          <p><code>.runtime-test-*</code> 路径均为 Git 忽略的本地 QA 证据，不随 PR 提交；上方报告摘要和本目录原生截图是可随 PR 审阅的记录。仅本地 API 摘要：<a href="../../../../../.runtime-test-real-ux/round-one-api-followup-review.json">follow-up review</a>、<a href="../../../../../.runtime-test-real-ux/round-one-api-final-evidence.json">最终 API evidence</a>。仅本地测试日志：<a href="../../../../../.runtime-test-real-ux/node-go-test-all.log">Node Go</a>、<a href="../../../../../.runtime-test-real-ux/shared-config-go-test-all.log">shared config</a>、<a href="../../../../../.runtime-test-real-ux/round-one-python-tests.log">Python</a>。</p>
+        </div>
+      </section>
+      <footer>Desktop 第一轮覆盖与验收记录 · 2026-11-05 · 自动化/API 通过项与自动化/API 与原生 UI 证据分开记录；本报告未修改产品代码或自行重跑测试。</footer>
+    </main>
+  </div>
+</body>
+</html>

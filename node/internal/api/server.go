@@ -353,16 +353,15 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		autonomyStore = opened
 	}
 	// session.Manager 持有 per-session consumer；Publish 的事件经 Hub 广播给 SSE 订阅者。
-	var triggerRoundProvider func(context.Context, string, string, string) (int, bool, error)
+	var triggerActivationProvider func(context.Context, string, string, string) (bool, error)
 	mgr := session.NewManager(cfg.NodeID, hub, o.llmClient, o.tools, o.policyEngine, st, session.TurnOptions{
-		TriggerToolRoundProvider: func(ctx context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
-			if triggerRoundProvider == nil {
-				return 0, false, nil
+		TriggerActivationProvider: func(ctx context.Context, agentID, triggerID, deliveryID string) (bool, error) {
+			if triggerActivationProvider == nil {
+				return false, nil
 			}
-			return triggerRoundProvider(ctx, agentID, triggerID, deliveryID)
+			return triggerActivationProvider(ctx, agentID, triggerID, deliveryID)
 		},
-		WorkspaceRoot: cfg.RuntimeDir(),
-		// MaxSteps 由各 Agent config_snapshot（defaults.llm.max_steps）在装入 runtime 时写入。
+		WorkspaceRoot:              cfg.RuntimeDir(),
 		SkillsRoot:                 cfg.SkillsRoot(),
 		SkillsEnabled:              cfg.Skills.Enabled,
 		SkillsMaxInPrompt:          cfg.Skills.MaxInPrompt,
@@ -416,8 +415,6 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		Enabled:            true,
 		DefaultTTLSeconds:  cfg.ChildAgents.DefaultTTLSeconds,
 		MaxTTLSeconds:      cfg.ChildAgents.MaxTTLSeconds,
-		DefaultMaxTurns:    cfg.ChildAgents.DefaultMaxTurns,
-		MaxMaxTurns:        cfg.ChildAgents.MaxMaxTurns,
 		MaxActivePerParent: cfg.ChildAgents.MaxActivePerParent,
 	}, hub, cfg.NodeID, logger)
 	childMgr.SetRunRepository(session.NewChildRunRepository(st))
@@ -624,7 +621,7 @@ func NewServer(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server 
 		directoryPicker:       o.directoryPicker,
 		pendingRuntimeReload:  make(map[string]string),
 	}
-	triggerRoundProvider = s.triggerToolRoundProvider
+	triggerActivationProvider = s.triggerActivationProvider
 	if s.workgroupAgents != nil {
 		s.workgroupAgents.server = s
 	}

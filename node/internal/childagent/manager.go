@@ -21,8 +21,6 @@ type Config struct {
 	Enabled            bool
 	DefaultTTLSeconds  int
 	MaxTTLSeconds      int
-	DefaultMaxTurns    int
-	MaxMaxTurns        int
 	MaxActivePerParent int
 }
 
@@ -44,7 +42,6 @@ type SpawnSpec struct {
 	ParentAgentID string
 	AllowedTools  []string
 	SkillNames    []string
-	MaxTurns      int
 	Purpose       string
 }
 
@@ -74,12 +71,6 @@ func NewManager(cfg Config, hub *stream.Hub, agentID string, logger *slog.Logger
 	}
 	if cfg.MaxTTLSeconds <= 0 {
 		cfg.MaxTTLSeconds = 7200
-	}
-	if cfg.DefaultMaxTurns <= 0 {
-		cfg.DefaultMaxTurns = 20
-	}
-	if cfg.MaxMaxTurns <= 0 {
-		cfg.MaxMaxTurns = 50
 	}
 	if cfg.MaxActivePerParent <= 0 {
 		cfg.MaxActivePerParent = 8
@@ -201,7 +192,6 @@ func (m *Manager) handleCreate(ctx context.Context, parentSessionID, argsJSON, t
 		ParentAgentID: parentSessionID,
 		AllowedTools:  allowed,
 		SkillNames:    append([]string(nil), input.SkillNames...),
-		MaxTurns:      input.MaxTurns,
 		Purpose:       input.Purpose,
 	}); err != nil {
 		m.finishWithEvent(childID, StatusFailed, "", err.Error(), false, string(StatusCreating))
@@ -214,7 +204,6 @@ func (m *Manager) handleCreate(ctx context.Context, parentSessionID, argsJSON, t
 	agent.Status = StatusActive
 	agent.Progress.Status = StatusActive
 	agent.Progress.Phase = "queued"
-	agent.Progress.MaxTurns = agent.MaxTurns
 	agent.Progress.Revision++
 	agent.Progress.UpdatedAt = time.Now().UTC()
 	agent.mu.Unlock()
@@ -418,7 +407,6 @@ func (m *Manager) finishWithEvent(childSessionID string, status Status, summary,
 	agent.Progress.Summary = strings.TrimSpace(summary)
 	agent.Progress.Error = strings.TrimSpace(errText)
 	agent.Progress.TurnCount = agent.TurnCount
-	agent.Progress.MaxTurns = agent.MaxTurns
 	agent.Progress.Revision++
 	agent.Progress.UpdatedAt = time.Now().UTC()
 	agent.Progress.FinishedAt = agent.Progress.UpdatedAt
@@ -548,7 +536,6 @@ func (m *Manager) publishCreated(parentID string, agent *ActiveAgent) {
 		"loaded_skills":   append([]string(nil), snapshot.LoadedSkills...),
 		"status":          StatusActive,
 		"expires_at":      snapshot.ExpiresAt.Format(time.RFC3339),
-		"max_turns":       snapshot.MaxTurns,
 		"phase":           snapshot.Progress.Phase,
 		"revision":        snapshot.Progress.Revision,
 		"updated_at":      snapshot.Progress.UpdatedAt,
@@ -602,7 +589,6 @@ func (m *Manager) persistSnapshot(snapshot ActiveAgentSnapshot) error {
 		LoadedSkills:  snapshot.LoadedSkills,
 		ProgressJSON:  progress,
 		TurnCount:     snapshot.Progress.TurnCount,
-		MaxTurns:      snapshot.MaxTurns,
 		Summary:       snapshot.Progress.Summary,
 		Error:         snapshot.Progress.Error,
 		CreatedAt:     snapshot.CreatedAt,
@@ -628,9 +614,6 @@ func snapshotFromRecord(record RunRecord) (ActiveAgentSnapshot, error) {
 	if progress.TurnCount == 0 {
 		progress.TurnCount = record.TurnCount
 	}
-	if progress.MaxTurns == 0 {
-		progress.MaxTurns = record.MaxTurns
-	}
 	if progress.Summary == "" {
 		progress.Summary = record.Summary
 	}
@@ -649,8 +632,8 @@ func snapshotFromRecord(record RunRecord) (ActiveAgentSnapshot, error) {
 		AllowedTools: append([]string(nil), record.AllowedTools...),
 		LoadedSkills: append([]string(nil), record.LoadedSkills...), Status: status,
 		CreatedAt: record.CreatedAt, ExpiresAt: record.ExpiresAt,
-		MaxTurns: record.MaxTurns, TurnCount: record.TurnCount,
-		Progress: progress, FinishedAt: record.FinishedAt,
+		TurnCount: record.TurnCount,
+		Progress:  progress, FinishedAt: record.FinishedAt,
 	}, nil
 }
 

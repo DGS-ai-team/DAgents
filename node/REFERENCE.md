@@ -35,7 +35,7 @@
 |------|------|
 | `State` | `idle` / `model_streaming` / `awaiting_tool` |
 | `BuildSystemPrompt` | 稳定 system prompt（行为规则、工作区与可用能力目录；运行时身份通过 ContextInjection 注入） |
-| `DefaultMaxSteps` | Agent 每个 Turn 的工具步数默认上限（32） |
+| `defaults.llm.max_tool_calls` | 每轮唯一工具调用额度（默认 64，范围 1–4096）；普通对话、Auto 与 dreaming 共用 |
 | `RunHumanMessageTurn` / `RunToolMessageTurn` | 单步 LLM + 工具；生产由 session runtime 在同一 Turn 链内 inline 续跑 |
 | `publishTurnFinished` | `turn_finished` 终态事件；实现见 `node/internal/turn/sse_publish.go` |
 

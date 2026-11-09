@@ -2,6 +2,7 @@ package turn
 
 import (
 	"context"
+	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -88,7 +89,12 @@ func (o *Orchestrator) runTurnErrorPhase(ctx context.Context, sessionID string, 
 }
 
 func (o *Orchestrator) runTurnCancelPhase(ctx context.Context, sessionID string, history *[]llm.Message, reason string) {
-	if o == nil || o.toolHooks == nil {
+	if o == nil {
+		return
+	}
+	execution, _ := ExecutionContextFromContext(ctx)
+	o.RecordTurnCancellationContext(sessionID, history, execution.TurnID)
+	if o.toolHooks == nil {
 		return
 	}
 	hc := &hooks.Context{
@@ -100,6 +106,44 @@ func (o *Orchestrator) runTurnCancelPhase(ctx context.Context, sessionID string,
 		},
 	}
 	_, _ = o.runPhase(ctx, hooks.PhaseTurnCancel, hc, sessionID, history, "cancelled")
+}
+
+// RecordTurnCancellationContext durably records a cancelled request boundary.
+// Session cancellation calls this when a Turn is waiting for HITL and no
+// model goroutine remains to run the ordinary cancellation hook phase.
+func (o *Orchestrator) RecordTurnCancellationContext(sessionID string, history *[]llm.Message, turnID string) {
+	if o == nil || history == nil {
+		return
+	}
+	if turnID != "" {
+		for _, message := range *history {
+			if llm.IsTurnIncompleteContextMessage(message) && message.Provenance.Reference == turnID {
+				return
+			}
+		}
+	}
+	o.appendHistory(sessionID, history, llm.TurnCancellationContextMessage(turnID))
+}
+
+// RecordTurnFailureContext durably marks a terminally failed user request so
+// a later user message does not implicitly replay it. Canonical user/tool
+// history stays intact; only the provider projection marks the failed request.
+func (o *Orchestrator) RecordTurnFailureContext(sessionID string, history *[]llm.Message, turnID string) {
+	if o == nil || history == nil || strings.TrimSpace(turnID) == "" {
+		return
+	}
+	hasTurnRequest := false
+	for _, message := range *history {
+		if llm.IsTurnIncompleteContextMessage(message) && message.Provenance.Reference == turnID {
+			return
+		}
+		if message.Role == "user" && llm.EffectiveMessageProvenance(message).Reference == turnID {
+			hasTurnRequest = true
+		}
+	}
+	if hasTurnRequest {
+		o.appendHistory(sessionID, history, llm.TurnFailureContextMessage(turnID))
+	}
 }
 
 // RunTurnBeforeCompressPhase 供 session 包在步前压缩前触发 turn.before_compress。

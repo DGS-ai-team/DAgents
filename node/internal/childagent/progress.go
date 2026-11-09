@@ -31,7 +31,6 @@ func (m *Manager) ObserveChildEvent(childSessionID, eventType string, data map[s
 	next.RecentTools = cloneToolActivities(previous.RecentTools)
 	next.PendingApprovalData = cloneMap(previous.PendingApprovalData)
 	next.Status = agent.Status
-	next.MaxTurns = agent.MaxTurns
 	applyChildProgressEvent(&next, eventType, data)
 	if progressEqual(previous, next) {
 		agent.mu.Unlock()
@@ -157,7 +156,6 @@ func (m *Manager) publishProgress(parentID string, agent *ActiveAgent, progress 
 		"status":                progress.Status,
 		"phase":                 progress.Phase,
 		"turn_count":            progress.TurnCount,
-		"max_turns":             progress.MaxTurns,
 		"current_tool":          progress.CurrentTool,
 		"current_tool_call_id":  progress.CurrentToolCallID,
 		"current_tool_status":   progress.CurrentToolStatus,
@@ -177,7 +175,6 @@ func progressEqual(a, b Progress) bool {
 	return a.Status == b.Status &&
 		a.Phase == b.Phase &&
 		a.TurnCount == b.TurnCount &&
-		a.MaxTurns == b.MaxTurns &&
 		a.CurrentTool == b.CurrentTool &&
 		a.CurrentToolCallID == b.CurrentToolCallID &&
 		a.CurrentToolStatus == b.CurrentToolStatus &&

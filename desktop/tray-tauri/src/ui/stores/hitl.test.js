@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { approvalItemDisplayName } from "@shared-frontend/utils/toolCalls.js";
 import {
-  buildApprovalOneResume,
   buildApprovalSelectionResume,
   buildUserInfoResumeFromSelection,
   buildUserInfoSubmitResume,
   resolveUserInfoSelectionIds,
   approvalQueueKey,
+  approvalRequestKey,
   clearHitl,
   dequeueHitlAt,
   enqueueHitl,
@@ -64,14 +64,41 @@ describe("extractToolApprovals", () => {
 
 describe("buildApprovalSelectionResume", () => {
   it("covers every pending tool call in selection resume", () => {
-    const resume = buildApprovalSelectionResume(multiToolApprovalData, {
-      "call-a": true,
-      "call-b": false,
-    });
+    const resume = buildApprovalSelectionResume(multiToolApprovalData, ["call-a"]);
     expect(resume.type).toBe("selection");
     expect(resume.approved).toEqual(["call-a"]);
     expect(resume.rejected).toEqual(["call-b"]);
     expect(resume.approved.length + resume.rejected.length).toBe(2);
+  });
+
+  it("rejects unselected and unknown calls and normalizes duplicate selections", () => {
+    const resume = buildApprovalSelectionResume(multiToolApprovalData, ["call-a", "call-a", "unknown"]);
+    expect(resume.approved).toEqual(["call-a"]);
+    expect(resume.rejected).toEqual(["call-b"]);
+  });
+
+  it("treats an empty selection as rejecting the whole batch", () => {
+    const resume = buildApprovalSelectionResume(multiToolApprovalData, []);
+    expect(resume.approved).toEqual([]);
+    expect(resume.rejected).toEqual(["call-a", "call-b"]);
+  });
+
+  it("keeps child-agent and approval routing while sending an exact selection", () => {
+    const data = {
+      ...multiToolApprovalData,
+      approval_id: "approval-child",
+      child_agent_id: "child-qa",
+      hitl_scope: "temporary_agent",
+      child_purpose: "inspect isolated samples",
+    };
+    const resume = buildApprovalSelectionResume(data, ["call-b"]);
+    expect(resume).toMatchObject({
+      type: "selection",
+      approved: ["call-b"],
+      rejected: ["call-a"],
+      approval_id: "approval-child",
+      child_agent_id: "child-qa",
+    });
   });
 });
 
@@ -215,21 +242,7 @@ describe("expandHitlRequired", () => {
     expect(approval?.child_agent_id).toBe("child-abc");
     expect(approval?.hitl_scope).toBe("temporary_agent");
     expect(approval?.child_purpose).toBe("research");
-    expect(buildApprovalOneResume(approval, "call-1", true).child_agent_id).toBe("child-abc");
-  });
-});
-
-describe("buildApprovalOneResume", () => {
-  it("approves one tool and rejects the rest", () => {
-    const resume = buildApprovalOneResume(multiToolApprovalData, "call-a", true);
-    expect(resume.approved).toEqual(["call-a"]);
-    expect(resume.rejected).toEqual(["call-b"]);
-  });
-
-  it("reject-one rejects entire batch without approving siblings", () => {
-    const resume = buildApprovalOneResume(multiToolApprovalData, "call-b", false);
-    expect(resume.approved).toEqual([]);
-    expect(resume.rejected).toEqual(["call-a", "call-b"]);
+    expect(buildApprovalSelectionResume(approval, ["call-1"]).child_agent_id).toBe("child-abc");
   });
 });
 
@@ -248,6 +261,31 @@ describe("approvalQueueKey", () => {
       approval_args: { tool_calls: [{ id: "call-2", name: "bash_run", arguments: {} }] },
     });
     expect(a).not.toBe(b);
+  });
+});
+
+describe("approvalRequestKey", () => {
+  it("is stable across duplicate refreshes and changes for a new approval batch", () => {
+    const original = {
+      approval_id: "approval-1",
+      child_agent_id: "child-a",
+      approval_args: { tool_calls: [{ id: "call-1", name: "read_file", arguments: {} }] },
+    };
+    expect(approvalRequestKey(original)).toBe(approvalRequestKey({ ...original }));
+    expect(approvalRequestKey(original)).not.toBe(approvalRequestKey({ ...original, approval_id: "approval-2" }));
+  });
+
+  it("uses stable turn, step, child, and sorted call IDs when no request ID exists", () => {
+    const first = {
+      child_agent_id: "child-a", turn_id: "turn-1", step_id: "step-1",
+      approval_args: { tool_calls: [{ id: "b" }, { id: "a" }] },
+    };
+    const reordered = {
+      ...first,
+      approval_args: { tool_calls: [{ id: "a" }, { id: "b" }] },
+    };
+    expect(approvalRequestKey(first)).toBe(approvalRequestKey(reordered));
+    expect(approvalRequestKey(first)).not.toBe(approvalRequestKey({ ...first, step_id: "step-2" }));
   });
 });
 

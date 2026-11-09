@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	_ "time/tzdata" // Embed IANA zone data for standalone Node builds on Windows.
 )
 
 var ErrNotFound = errors.New("autonomy record not found")
@@ -25,7 +26,6 @@ type Profile struct {
 	Revision            int64  `json:"revision"`
 	Responsibility      string `json:"responsibility"`
 	WakeIntervalSeconds int64  `json:"wake_interval_seconds"`
-	MaxToolRounds       int    `json:"max_tool_rounds"`
 	DreamingEnabled     bool   `json:"dreaming_enabled"`
 	DreamingTime        string `json:"dreaming_time"`
 	Timezone            string `json:"timezone"`
@@ -404,7 +404,7 @@ func (s *Store) ListTodos(agentID string) []Todo {
 }
 
 func validateProfile(p Profile) error {
-	if strings.TrimSpace(p.AgentID) == "" || p.WakeIntervalSeconds < 0 || p.WakeIntervalSeconds > 31536000 || p.MaxToolRounds <= 0 || p.MaxToolRounds > 10000 {
+	if strings.TrimSpace(p.AgentID) == "" || p.WakeIntervalSeconds < 0 || p.WakeIntervalSeconds > 31536000 {
 		return fmt.Errorf("invalid profile")
 	}
 	if p.DreamingEnabled && p.DreamingTime == "" {

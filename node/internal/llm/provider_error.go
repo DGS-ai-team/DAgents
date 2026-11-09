@@ -2,10 +2,12 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -43,6 +45,9 @@ func ProviderErrorCode(err error) string {
 	}
 	var providerErr *ProviderHTTPError
 	if errors.As(err, &providerErr) {
+		if code := providerErrorCode(providerErr.Body); code != "" {
+			return code
+		}
 		switch providerErr.StatusCode {
 		case 401:
 			return "provider_authentication"
@@ -67,6 +72,51 @@ func ProviderErrorCode(err error) string {
 		return "provider_network_error"
 	}
 	return "provider_error"
+}
+
+// providerErrorCode reads only explicit structured provider fields. Provider
+// message text is intentionally excluded because it is free-form and may
+// contain request details; it must not control retry or quota classification.
+func providerErrorCode(body string) string {
+	var envelope struct {
+		Code  string          `json:"code"`
+		Type  string          `json:"type"`
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal([]byte(body), &envelope) != nil {
+		return ""
+	}
+	fields := []string{envelope.Code, envelope.Type}
+	if len(envelope.Error) > 0 {
+		var nested struct {
+			Code string `json:"code"`
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(envelope.Error, &nested) == nil {
+			fields = append(fields, nested.Code, nested.Type)
+		}
+	}
+	for _, field := range fields {
+		switch normalizeProviderErrorCode(field) {
+		case "insufficient_quota", "quota_exceeded", "billing_hard_limit_reached", "account_insufficient_quota":
+			return "provider_quota"
+		case "invalid_api_key", "incorrect_api_key", "invalid_token", "authentication_error", "unauthorized":
+			return "provider_authentication"
+		case "rate_limit_exceeded", "too_many_requests", "rate_limited":
+			return "provider_rate_limited"
+		case "request_timeout", "timeout":
+			return "provider_timeout"
+		case "server_error", "internal_error", "service_unavailable", "overloaded", "upstream_error":
+			return "provider_unavailable"
+		}
+	}
+	return ""
+}
+
+func normalizeProviderErrorCode(code string) string {
+	code = strings.ToLower(strings.TrimSpace(code))
+	code = strings.ReplaceAll(code, "-", "_")
+	return code
 }
 
 func isProviderTimeoutError(err error) bool {

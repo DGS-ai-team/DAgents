@@ -34,14 +34,11 @@ import (
 
 // TurnOptions 为 session turn 编排配置（system prompt、skills、压缩等）。
 type TurnOptions struct {
-	// TriggerMaxToolRounds applies only to trusted trigger-origin Turns. User
-	// messages retain the ordinary unlimited round behavior.
-	TriggerMaxToolRounds int
-	// TriggerToolRoundProvider authorizes and supplies the per-activation cap.
-	// It must validate the durable trigger/controller/owner/delivery identity.
-	TriggerToolRoundProvider func(context.Context, string, string, string) (int, bool, error)
-	ConditionValidator       func(context.Context, turn.ConditionApprovalMetadata) error
-	ConditionCompletion      func(triggers.ConditionRequest, triggers.ConditionResult) error
+	// TriggerActivationProvider validates durable trigger/controller/owner/
+	// delivery identity for trusted Auto activations.
+	TriggerActivationProvider func(context.Context, string, string, string) (bool, error)
+	ConditionValidator        func(context.Context, turn.ConditionApprovalMetadata) error
+	ConditionCompletion       func(triggers.ConditionRequest, triggers.ConditionResult) error
 	// AgentPromptProvider loads the current Agent-owned responsibilities,
 	// experience and todo snapshot at each new Turn boundary. It is never
 	// inherited by temporary child runtimes.
@@ -208,6 +205,11 @@ type Manager struct {
 	lifecycleProjectionMu    sync.Mutex
 	lifecycleProjectionCache map[lifecycleProjectionKey]lifecycleProjectionCacheEntry
 	lifecycleProjectionOrder []lifecycleProjectionKey
+
+	// notificationProjectionMu serializes notification snapshot reads with
+	// their Hub publication. Hub listeners may be invoked concurrently, so a
+	// delayed callback must read the latest runtime state before publishing.
+	notificationProjectionMu sync.Mutex
 
 	triggerDelivery     triggers.DeliveryTracker
 	conditionCompletion func(triggers.ConditionRequest, triggers.ConditionResult) error

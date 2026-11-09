@@ -24,7 +24,6 @@ type ChildRunRecord struct {
 	LoadedSkills  []string
 	Progress      json.RawMessage
 	TurnCount     int
-	MaxTurns      int
 	Summary       string
 	Error         string
 	CreatedAt     time.Time
@@ -48,7 +47,6 @@ CREATE TABLE IF NOT EXISTS child_runs (
   loaded_skills_json TEXT NOT NULL DEFAULT '[]',
   progress_json TEXT NOT NULL DEFAULT '{}',
   turn_count INTEGER NOT NULL DEFAULT 0,
-  max_turns INTEGER NOT NULL DEFAULT 0,
   summary TEXT NOT NULL DEFAULT '',
   error TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
@@ -106,9 +104,9 @@ func (s *SQLiteStore) SaveChildRun(ctx context.Context, rec ChildRunRecord) erro
 INSERT INTO child_runs(
   child_agent_id, parent_agent_id, node_id, tool_call_id, purpose, status,
   phase, allowed_tools_json, loaded_skills_json, progress_json, turn_count,
-  max_turns, summary, error, created_at, expires_at, updated_at, finished_at,
+  summary, error, created_at, expires_at, updated_at, finished_at,
   revision
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(child_agent_id) DO UPDATE SET
   parent_agent_id=excluded.parent_agent_id,
   node_id=excluded.node_id,
@@ -120,7 +118,6 @@ ON CONFLICT(child_agent_id) DO UPDATE SET
   loaded_skills_json=excluded.loaded_skills_json,
   progress_json=excluded.progress_json,
   turn_count=excluded.turn_count,
-  max_turns=excluded.max_turns,
   summary=excluded.summary,
   error=excluded.error,
   expires_at=excluded.expires_at,
@@ -129,7 +126,7 @@ ON CONFLICT(child_agent_id) DO UPDATE SET
   revision=excluded.revision`,
 		rec.ChildAgentID, rec.ParentAgentID, rec.NodeID, rec.ToolCallID, rec.Purpose,
 		rec.Status, rec.Phase, string(allowed), string(loaded), string(progress),
-		rec.TurnCount, rec.MaxTurns, rec.Summary, rec.Error,
+		rec.TurnCount, rec.Summary, rec.Error,
 		created.UTC().Format(time.RFC3339Nano), rec.ExpiresAt.UTC().Format(time.RFC3339Nano),
 		updated.UTC().Format(time.RFC3339Nano), finished, rec.Revision)
 	return err
@@ -145,12 +142,12 @@ func (s *SQLiteStore) LoadChildRun(ctx context.Context, childAgentID string) (*C
 	err := s.db.QueryRowContext(ctx, `
 SELECT child_agent_id, parent_agent_id, node_id, tool_call_id, purpose, status,
        phase, allowed_tools_json, loaded_skills_json, progress_json, turn_count,
-       max_turns, summary, error, created_at, expires_at, updated_at, finished_at,
+       summary, error, created_at, expires_at, updated_at, finished_at,
        revision
 FROM child_runs WHERE child_agent_id = ?`, strings.TrimSpace(childAgentID)).Scan(
 		&rec.ChildAgentID, &rec.ParentAgentID, &rec.NodeID, &rec.ToolCallID,
 		&rec.Purpose, &rec.Status, &rec.Phase, &allowed, &loaded, &progress,
-		&rec.TurnCount, &rec.MaxTurns, &rec.Summary, &rec.Error, &created,
+		&rec.TurnCount, &rec.Summary, &rec.Error, &created,
 		&expires, &updated, &finished, &rec.Revision)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -181,7 +178,7 @@ func (s *SQLiteStore) ListChildRuns(ctx context.Context, parentAgentID string, l
 	query := `
 SELECT child_agent_id, parent_agent_id, node_id, tool_call_id, purpose, status,
        phase, allowed_tools_json, loaded_skills_json, progress_json, turn_count,
-       max_turns, summary, error, created_at, expires_at, updated_at, finished_at,
+       summary, error, created_at, expires_at, updated_at, finished_at,
        revision
 FROM child_runs`
 	args := []any{}
@@ -203,7 +200,7 @@ FROM child_runs`
 		if err := rows.Scan(
 			&rec.ChildAgentID, &rec.ParentAgentID, &rec.NodeID, &rec.ToolCallID,
 			&rec.Purpose, &rec.Status, &rec.Phase, &allowed, &loaded, &progress,
-			&rec.TurnCount, &rec.MaxTurns, &rec.Summary, &rec.Error, &created,
+			&rec.TurnCount, &rec.Summary, &rec.Error, &created,
 			&expires, &updated, &finished, &rec.Revision,
 		); err != nil {
 			return nil, err

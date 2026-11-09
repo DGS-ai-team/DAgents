@@ -28,6 +28,40 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
+describe("SetupConfigPanel manage payload ownership", () => {
+  it("does not resubmit hidden Manage fields from the GET response", async () => {
+    const config = {
+      config_writable: true,
+      llm: { active: "profile-a", profiles: [{ id: "profile-a", provider: "mock", model: "mock", mock: true }] },
+      manage: {
+        enabled: false,
+        url: "",
+        team: "hidden-team",
+        registration_base_url: "https://internal.example.test",
+        registration_interval_seconds: 12,
+        registration_ttl_seconds: 34,
+        workgroup_enabled: false,
+        has_node_token: true,
+      },
+    };
+    getSetupConfig.mockResolvedValue(config);
+    patchSetupConfig.mockResolvedValue(config);
+    getLLMCapabilities.mockResolvedValue({ supported: false });
+    wrapper = mount(SetupConfigPanel, { attachTo: document.body });
+    await flushPromises();
+
+    await wrapper.get(".btn--primary").trigger("click");
+    await flushPromises();
+
+    const manage = patchSetupConfig.mock.calls[0][0].manage;
+    expect(manage).toEqual({ enabled: false, url: "", workgroup_enabled: false, clear_node_token: false });
+    expect(manage).not.toHaveProperty("team");
+    expect(manage).not.toHaveProperty("registration_base_url");
+    expect(manage).not.toHaveProperty("registration_interval_seconds");
+    expect(manage).not.toHaveProperty("registration_ttl_seconds");
+  });
+});
+
 describe("LLM reasoning profile settings", () => {
   it("opens only the requested profile after setup finishes loading", async () => {
     getSetupConfig.mockResolvedValue({

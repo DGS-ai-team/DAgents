@@ -12,13 +12,13 @@ const loading = ref(true); const saving = ref(false); const error = ref(""); con
 const loaded = ref(false); const loadedAgentId = ref("");
 const dreamingLoading = ref(false); const dreamingError = ref(""); const experienceError = ref(""); const dreamingStatus = ref(null);
 const triggerLoading = ref(false); const triggerError = ref(""); const triggerRecovery = ref(null);
-const config = reactive({ revision: 0, responsibility: "", wake_interval_seconds: 0, max_tool_rounds: 32, dreaming_enabled: false, dreaming_time: "03:00", timezone: "Asia/Shanghai", experience: null });
-const draft = reactive({ responsibility: "", wake_interval_seconds: 0, max_tool_rounds: 32, dreaming_enabled: false, dreaming_time: "03:00", timezone: "Asia/Shanghai" });
+const config = reactive({ revision: 0, experience: null });
+const draft = reactive({ responsibility: "", wake_interval_seconds: 0, dreaming_enabled: false, dreaming_time: "03:00", timezone: "Asia/Shanghai" });
 const savedDraft = ref("");
 const draftValue = () => JSON.stringify({ ...draft, wake_interval_seconds: customWake.value ? Number(draft.wake_interval_seconds) : Number(wakeValue.value) });
 const dirty = computed(() => !!savedDraft.value && draftValue() !== savedDraft.value);
 let epoch = 0; let saveEpoch = 0; let disposed = false;
-const wakeOptions = [{ value: 0, label: "关闭自主激活" }, { value: 1800, label: "每 30 分钟" }, { value: 3600, label: "每 1 小时" }, { value: -1, label: "自定义间隔" }];
+const wakeOptions = [{ value: 0, label: "关闭自主运行" }, { value: 1800, label: "每 30 分钟" }, { value: 3600, label: "每 1 小时" }, { value: -1, label: "自定义间隔" }];
 const customWake = ref(false);
 const wakeValue = computed({
   get: () => (customWake.value ? -1 : Number(draft.wake_interval_seconds)),
@@ -28,15 +28,15 @@ const wakeValue = computed({
     else if (Number(draft.wake_interval_seconds) <= 0) draft.wake_interval_seconds = 1800;
   },
 });
-const defaults = () => ({ responsibility: "", wake_interval_seconds: 0, max_tool_rounds: 32, dreaming_enabled: false, dreaming_time: "03:00", timezone: "Asia/Shanghai" });
-function apply(data) { const value = data || {}; Object.assign(config, value); Object.assign(draft, { responsibility: String(value.responsibility || ""), wake_interval_seconds: Number(value.wake_interval_seconds || 0), max_tool_rounds: Number(value.max_tool_rounds || 32), dreaming_enabled: !!value.dreaming_enabled, dreaming_time: String(value.dreaming_time || "03:00"), timezone: String(value.timezone || "Asia/Shanghai") }); customWake.value = ![0, 1800, 3600].includes(draft.wake_interval_seconds); savedDraft.value = draftValue(); }
-function updateConfigSnapshot(data) { if (data && typeof data === "object") Object.assign(config, data); }
+const defaults = () => ({ responsibility: "", wake_interval_seconds: 0, dreaming_enabled: false, dreaming_time: "03:00", timezone: "Asia/Shanghai" });
+function apply(data) { const value = data || {}; Object.assign(config, { revision: Number(value.revision || 0), experience: value.experience || null }); Object.assign(draft, { responsibility: String(value.responsibility || ""), wake_interval_seconds: Number(value.wake_interval_seconds || 0), dreaming_enabled: !!value.dreaming_enabled, dreaming_time: String(value.dreaming_time || "03:00"), timezone: String(value.timezone || "Asia/Shanghai") }); customWake.value = ![0, 1800, 3600].includes(draft.wake_interval_seconds); savedDraft.value = draftValue(); }
+function updateConfigSnapshot(data) { if (!data || typeof data !== "object") return; if (Object.hasOwn(data, "revision")) config.revision = Number(data.revision || 0); if (Object.hasOwn(data, "experience")) config.experience = data.experience || null; }
 const dreamingStateLabels = { disabled: "已关闭", waiting: "等待执行", running: "整理中", succeeded: "最近成功", failed: "上次失败", recovery_pending: "等待恢复" };
 function dreamingStateLabel(state) { return dreamingStateLabels[String(state || "").trim()] || "未知状态"; }
 function formatDreamingDate(value) { if (!value) return "暂无"; const date = new Date(value); return Number.isNaN(date.getTime()) || date.getUTCFullYear() <= 1 ? "暂无" : date.toLocaleString(); }
 function openTriggerSettings() { void router?.push?.("/settings/triggers"); }
-function applyAggregateState(data) { dreamingStatus.value = data?.dreaming_status || null; dreamingError.value = data?.dreaming_available === false ? "Dreaming 状态服务不可用，已禁用编辑" : ""; experienceError.value = data?.experience_available === false ? "经验摘要暂不可用" : ""; triggerRecovery.value = data?.trigger_recovery || null; triggerError.value = data?.trigger_available === false ? "默认唤醒状态服务不可用" : (Number(data?.wake_interval_seconds) > 0 && !data?.trigger && !triggerRecovery.value ? "默认唤醒尚未同步" : ""); needsReconcile.value = !triggerRecovery.value && Boolean(data?.needs_reconcile); }
-async function loadDreamingStatus(id, token = epoch) { dreamingLoading.value = true; triggerLoading.value = true; try { const data = await api.getAutoSettings(id); if (disposed || token !== epoch || id !== props.agentId) return; applyAggregateState(data); updateConfigSnapshot({ experience: data?.experience || null }); } catch (e) { if (!disposed && token === epoch && id === props.agentId) { dreamingStatus.value = null; dreamingError.value = e?.message || "无法读取 Auto 状态，已禁用编辑"; triggerError.value = e?.message || "无法读取默认唤醒状态"; needsReconcile.value = true; } } finally { if (!disposed && token === epoch) { dreamingLoading.value = false; triggerLoading.value = false; } } }
+function applyAggregateState(data) { dreamingStatus.value = data?.dreaming_status || null; dreamingError.value = data?.dreaming_available === false ? "每日经验整理状态服务不可用，已禁用编辑" : ""; experienceError.value = data?.experience_available === false ? "经验摘要暂不可用" : ""; triggerRecovery.value = data?.trigger_recovery || null; triggerError.value = data?.trigger_available === false ? "自主运行状态服务不可用" : (Number(data?.wake_interval_seconds) > 0 && !data?.trigger && !triggerRecovery.value ? "自主运行尚未同步" : ""); needsReconcile.value = !triggerRecovery.value && Boolean(data?.needs_reconcile); }
+async function loadDreamingStatus(id, token = epoch) { dreamingLoading.value = true; triggerLoading.value = true; try { const data = await api.getAutoSettings(id); if (disposed || token !== epoch || id !== props.agentId) return; applyAggregateState(data); updateConfigSnapshot({ experience: data?.experience || null }); } catch (e) { if (!disposed && token === epoch && id === props.agentId) { dreamingStatus.value = null; dreamingError.value = e?.message || "无法读取每日经验整理状态，已禁用编辑"; triggerError.value = e?.message || "无法读取自主运行状态"; needsReconcile.value = true; } } finally { if (!disposed && token === epoch) { dreamingLoading.value = false; triggerLoading.value = false; } } }
 async function load() { const token = ++epoch; const id = props.agentId; loaded.value = false; loadedAgentId.value = ""; Object.assign(draft, defaults()); config.revision = 0; config.experience = null; dreamingStatus.value = null; triggerRecovery.value = null; triggerError.value = ""; dreamingError.value = ""; experienceError.value = ""; dreamingLoading.value = true; triggerLoading.value = true; loading.value = true; error.value = ""; try { const data = await api.getAutoSettings(id); if (disposed || token !== epoch || id !== props.agentId) return; apply(data); applyAggregateState(data); loaded.value = true; loadedAgentId.value = id; } catch (e) { if (!disposed && token === epoch && id === props.agentId) error.value = e?.message || "加载 Auto 设置失败"; } finally { if (!disposed && token === epoch) { dreamingLoading.value = false; triggerLoading.value = false; loading.value = false; } } }
 async function save() { if (saving.value || !props.agentId || !loaded.value || loadedAgentId.value !== props.agentId) return; const id = props.agentId; const token = ++saveEpoch; if (customWake.value && Number(draft.wake_interval_seconds) <= 0) { error.value = "自定义间隔必须大于 0 秒"; return; } saving.value = true; error.value = ""; notice.value = ""; try { const payload = { ...draft, wake_interval_seconds: customWake.value ? Number(draft.wake_interval_seconds) : Number(wakeValue.value), expected_revision: config.revision }; const savedValue = JSON.stringify({ ...payload, expected_revision: undefined }); const data = await api.putAutoConfig(id, payload); if (disposed || token !== saveEpoch || id !== props.agentId) return; updateConfigSnapshot(data); applyAggregateState(data); savedDraft.value = savedValue; notice.value = "Auto 设置已保存"; } catch (e) { if (!disposed && token === saveEpoch && id === props.agentId) { const details = e?.data?.error?.details; if (e?.status === 503 && details?.saved_profile) { updateConfigSnapshot({ ...details.saved_profile, experience: config.experience }); needsReconcile.value = true; notice.value = "配置已保存、唤醒未同步"; } else error.value = e?.message || "保存失败"; } } finally { if (token === saveEpoch) saving.value = false; } }
 async function reconcile() { if (saving.value || !loaded.value || loadedAgentId.value !== props.agentId) return; const id = props.agentId; const token = ++saveEpoch; saving.value = true; error.value = ""; try { const data = await api.reconcileAutoConfig(id); if (!disposed && token === saveEpoch && id === props.agentId) { updateConfigSnapshot(data); applyAggregateState(data); notice.value = "唤醒已同步"; } } catch (e) { if (!disposed && token === saveEpoch && id === props.agentId) error.value = e?.message || "唤醒同步失败"; } finally { if (token === saveEpoch) saving.value = false; } }
@@ -53,14 +53,14 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
       <div class="simplified-auto-panel__row"><div><strong>职责</strong><small>定义这个 Auto Agent 的长期工作责任</small></div><textarea v-model="draft.responsibility" rows="2" aria-label="职责" /></div>
       <div class="simplified-auto-panel__row">
         <div>
-          <strong>自主激活频率</strong>
-          <small>设置自动工作的唤醒间隔</small>
+          <strong>自主运行频率</strong>
+          <small>设置 Auto Agent 自动工作的间隔</small>
         </div>
         <div class="simplified-auto-panel__control">
           <UiSelect
             v-model="wakeValue"
             :options="wakeOptions"
-            aria-label="自主激活频率"
+            aria-label="自主运行频率"
             :disabled="loading || saving"
           />
           <input
@@ -73,24 +73,23 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
           <span v-if="customWake" class="simplified-auto-panel__unit">秒</span>
         </div>
       </div>
-      <div class="simplified-auto-panel__row"><div><strong>最大工具轮次</strong><small>自主激活与 dreaming 都受此限制，普通聊天保持原规则</small></div><input v-model.number="draft.max_tool_rounds" type="number" min="1" aria-label="最大工具轮次" /></div>
-      <div class="simplified-auto-panel__row"><div><strong>每日 dreaming</strong><small>定时整理近期经验，帮助保持长期工作脉络</small></div><div class="simplified-auto-panel__control"><input v-model="draft.dreaming_enabled" class="settings-switch-input" type="checkbox" aria-label="启用每日 dreaming" :disabled="dreamingLoading || !!dreamingError || !dreamingStatus" /></div></div>
+      <div class="simplified-auto-panel__row"><div><strong>每日经验整理</strong><small>定时整理近期经验，帮助保持长期工作脉络</small></div><div class="simplified-auto-panel__control"><input v-model="draft.dreaming_enabled" class="settings-switch-input" type="checkbox" aria-label="启用每日经验整理" :disabled="dreamingLoading || !!dreamingError || !dreamingStatus" /></div></div>
       <div
         v-if="triggerRecovery || triggerError || needsReconcile"
         class="simplified-auto-panel__row"
         role="status"
       >
         <div>
-          <strong>默认唤醒</strong>
-          <small>{{ triggerError || (triggerRecovery ? "上次投递需要核对" : (needsReconcile ? "唤醒配置尚未同步" : "")) }}</small>
+          <strong>自主运行状态</strong>
+          <small>{{ triggerError || (triggerRecovery ? "上次投递需要核对" : (needsReconcile ? "自主运行配置尚未同步" : "")) }}</small>
         </div>
         <div class="simplified-auto-panel__control">
           <button
             v-if="triggerRecovery"
             type="button"
             class="btn btn--ghost btn--sm desktop-icon-button"
-            aria-label="打开定时任务设置"
-            title="打开定时任务设置"
+            aria-label="打开自主运行设置"
+            title="打开自主运行设置"
             @click="openTriggerSettings"
           >
             <UiIcon name="clock" :size="16" />
@@ -107,16 +106,16 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
           </button>
         </div>
       </div>
-      <div v-if="draft.dreaming_enabled" class="simplified-auto-panel__row"><div><strong>整理时间</strong></div><input v-model="draft.dreaming_time" type="time" aria-label="dreaming 时间" :disabled="dreamingLoading || !!dreamingError || !dreamingStatus" /></div>
+      <div v-if="draft.dreaming_enabled" class="simplified-auto-panel__row"><div><strong>整理时间</strong></div><input v-model="draft.dreaming_time" type="time" aria-label="经验整理时间" :disabled="dreamingLoading || !!dreamingError || !dreamingStatus" /></div>
       <div v-if="draft.dreaming_enabled" class="simplified-auto-panel__row"><div><strong>时区</strong></div><input v-model="draft.timezone" aria-label="时区" :disabled="dreamingLoading || !!dreamingError || !dreamingStatus" /></div>
       <div class="simplified-auto-panel__row">
         <div>
-          <strong>dreaming 状态</strong>
+          <strong>每日经验整理状态</strong>
           <small v-if="dreamingError">{{ dreamingError }}</small>
-          <small v-else>经验整理状态</small>
+          <small v-else>每日经验整理运行情况</small>
         </div>
         <div class="simplified-auto-panel__control">
-          <span>{{ dreamingLoading ? "读取中…" : dreamingStateLabel(dreamingStatus?.state) }}</span>
+          <span>{{ dreamingLoading ? "读取中…" : (!draft.dreaming_enabled ? "已关闭" : dreamingStateLabel(dreamingStatus?.state)) }}</span>
           <button
             type="button"
             class="btn btn--ghost btn--sm desktop-icon-button"
@@ -129,11 +128,11 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
           </button>
         </div>
       </div>
-      <div v-if="dreamingStatus" class="simplified-auto-panel__row"><div><strong>执行时间</strong></div><span>下次 {{ formatDreamingDate(dreamingStatus.next_at) }} · 上次成功 {{ formatDreamingDate(dreamingStatus.last_success) }}<template v-if="dreamingStatus.last_error"> · {{ dreamingStatus.last_error }}</template></span></div>
-      <div class="simplified-auto-panel__row"><div><strong>经验</strong><small>仅在 dreaming 成功后更新</small></div><p class="simplified-auto-panel__experience">{{ experienceError || config.experience?.content || "暂无经验摘要" }}<span v-if="!experienceError && config.experience?.updated_at"> · {{ new Date(config.experience.updated_at).toLocaleString() }}</span></p></div>
+      <div v-if="draft.dreaming_enabled && dreamingStatus" class="simplified-auto-panel__row"><div><strong>执行时间</strong></div><span>下次 {{ formatDreamingDate(dreamingStatus.next_at) }} · 上次成功 {{ formatDreamingDate(dreamingStatus.last_success) }}<template v-if="dreamingStatus.last_error"> · {{ dreamingStatus.last_error }}</template></span></div>
+      <div class="simplified-auto-panel__row"><div><strong>经验摘要</strong><small>每日经验整理成功后更新</small></div><p class="simplified-auto-panel__experience">{{ experienceError || config.experience?.content || "暂无经验摘要" }}<span v-if="!experienceError && config.experience?.updated_at"> · {{ new Date(config.experience.updated_at).toLocaleString() }}</span></p></div>
       </fieldset>
-      <SettingsSaveBar :status="dirty ? (needsReconcile ? '有未保存的更改 · 配置已保存、唤醒未同步' : '有未保存的更改') : (notice || '当前智能体设置。')" :error="error" :saving="saving" :disabled="!loaded || !dirty" @save="save">
-        <button v-if="needsReconcile" type="button" class="btn btn--ghost btn--sm" :disabled="saving" @click="reconcile">同步唤醒</button>
+      <SettingsSaveBar :status="dirty ? (needsReconcile ? '有未保存的更改 · 自主运行配置已保存、尚未同步' : '有未保存的更改') : (notice || '当前智能体设置。')" :error="error" :saving="saving" :disabled="!loaded || !dirty" @save="save">
+        <button v-if="needsReconcile" type="button" class="btn btn--ghost btn--sm" :disabled="saving" @click="reconcile">同步自主运行</button>
       </SettingsSaveBar>
     </template>
   </section>
@@ -153,10 +152,10 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
 
 .simplified-auto-panel__row {
   display: grid;
-  grid-template-columns: minmax(200px, 0.8fr) minmax(0, 1.2fr);
-  gap: 20px;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr);
+  gap: 24px;
   align-items: center;
-  padding: 10px 0;
+  padding: 14px 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -166,9 +165,13 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
 }
 
 .simplified-auto-panel small {
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.4;
+  color: var(--color-text-subtle);
+  font: 400 11px/1.45 var(--desktop-font-ui);
+}
+
+.simplified-auto-panel__row strong {
+  color: var(--color-text-muted);
+  font: 500 12.5px/1.4 var(--desktop-font-ui);
 }
 
 .simplified-auto-panel textarea,
@@ -176,12 +179,12 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  padding: 8px 10px;
-  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: var(--color-surface);
   color: var(--color-text);
-  font: inherit;
+  font: 400 13px/1.4 var(--desktop-font-ui);
 }
 
 .simplified-auto-panel textarea {
@@ -206,7 +209,7 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
 
 .simplified-auto-panel__control :deep(.ui-select) {
   width: 100%;
-  max-width: 320px;
+  max-width: none;
 }
 
 .simplified-auto-panel__control input:not([type="checkbox"]) {
@@ -216,8 +219,8 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
 
 .simplified-auto-panel__unit {
   flex: 0 0 auto;
-  color: var(--text-secondary);
-  font-size: 12px;
+  color: var(--color-text-subtle);
+  font: 400 11px/1.4 var(--desktop-font-ui);
 }
 
 .simplified-auto-panel__experience {
@@ -228,7 +231,8 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   background: var(--color-surface-alt);
-  color: var(--text-secondary);
+  color: var(--color-text-subtle);
+  font: 400 12px/1.5 var(--desktop-font-ui);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

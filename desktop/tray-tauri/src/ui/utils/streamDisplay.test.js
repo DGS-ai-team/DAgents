@@ -6,11 +6,11 @@ function step(key) {
 }
 
 describe("groupConsecutiveToolSteps", () => {
-  it("keeps a single tool step unchanged", () => {
+  it("wraps a single tool step in the same stable group used for batches", () => {
     const one = step("tool-1");
     const result = groupConsecutiveToolSteps([{ kind: "assistant", key: "assistant-1" }, one]);
     expect(result).toHaveLength(2);
-    expect(result[1]).toBe(one);
+    expect(result[1]).toEqual({ key: "tool-group-tool-1", kind: "tool_group", steps: [one] });
   });
 
   it("groups only adjacent tool steps and preserves order", () => {
@@ -25,9 +25,10 @@ describe("groupConsecutiveToolSteps", () => {
       c,
     ]);
 
-    expect(result.map((item) => item.kind)).toEqual(["assistant", "tool_group", "assistant", "tool_step"]);
+    expect(result.map((item) => item.kind)).toEqual(["assistant", "tool_group", "assistant", "tool_group"]);
     expect(result[1].steps).toEqual([a, b]);
-    expect(result[3]).toBe(c);
+    expect(result[3].key).toBe("tool-group-tool-c");
+    expect(result[3].steps).toEqual([c]);
   });
 
   it("merges a tool-generating step across an empty streaming thinking placeholder", () => {
@@ -56,7 +57,7 @@ describe("groupConsecutiveToolSteps", () => {
 
     const result = groupConsecutiveToolSteps([emptyThinking, tool]);
 
-    expect(result).toEqual([tool]);
+    expect(result).toEqual([{ key: "tool-group-tool-1", kind: "tool_group", steps: [tool] }]);
   });
 
   it("keeps meaningful streaming thinking between tool steps", () => {
@@ -70,6 +71,8 @@ describe("groupConsecutiveToolSteps", () => {
 
     const result = groupConsecutiveToolSteps([a, thinking, b]);
 
-    expect(result.map((item) => item.kind)).toEqual(["tool_step", "reasoning", "tool_step"]);
+    expect(result.map((item) => item.kind)).toEqual(["tool_group", "reasoning", "tool_group"]);
+    expect(result[0].steps).toEqual([a]);
+    expect(result[2].steps).toEqual([b]);
   });
 });

@@ -22,6 +22,12 @@ type NotificationState struct {
 // OnStreamEvent Hub 发布后推进 notify_seq（Node 为真相源）。
 func (m *Manager) OnStreamEvent(ev stream.Event) {
 	if !ShouldBumpNotifySeq(ev) {
+		if ev.AgentID != "" && isCancelledTerminalEvent(ev) {
+			// Cancellation clears pending HITL, but does not represent a new
+			// unread notification. Refresh the projection without advancing the
+			// session cursor so shells can clear stale approval indicators.
+			m.publishNotificationChanged(ev.AgentID)
+		}
 		return
 	}
 	seq := ev.AgentSeq
@@ -34,6 +40,20 @@ func (m *Manager) OnStreamEvent(ev stream.Event) {
 	m.publishNotificationChanged(ev.AgentID)
 }
 
+func isCancelledTerminalEvent(ev stream.Event) bool {
+	switch ev.Type {
+	case "turn_state":
+		phase, _ := ev.Data["phase"].(string)
+		terminal, _ := ev.Data["terminal"].(bool)
+		return terminal && strings.EqualFold(strings.TrimSpace(phase), "cancelled")
+	case "turn_finished":
+		finish, _ := ev.Data["finish_reason"].(string)
+		return strings.EqualFold(strings.TrimSpace(finish), "cancelled")
+	default:
+		return false
+	}
+}
+
 // publishNotificationChanged publishes the complete notification projection
 // after the durable cursor/pending projection has changed. Shells consume this
 // event directly; they only use GET /v1/agents for initial/reconnect hydrate.
@@ -43,6 +63,11 @@ func (m *Manager) publishNotificationChanged(sessionID string) {
 	if m == nil || m.hub == nil || trimSessionID(sessionID) == "" {
 		return
 	}
+	// Read the projection only after acquiring this lock and hold it through
+	// publication. A callback for an earlier event that arrives late will then
+	// publish the current state instead of a stale pending-HITL snapshot.
+	m.notificationProjectionMu.Lock()
+	defer m.notificationProjectionMu.Unlock()
 	state := m.NotificationState(sessionID)
 	m.hub.Publish(sessionID, "notification_changed", map[string]any{
 		"notify_seq":         state.NotifySeq,

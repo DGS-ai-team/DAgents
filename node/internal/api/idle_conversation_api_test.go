@@ -74,7 +74,7 @@ func TestIdleConversationBoundaryThroughHTTP(t *testing.T) {
 	createBody := map[string]any{
 		"display_name": "Idle boundary test", "agent_type": "normal",
 		"defaults": map[string]any{
-			"llm":            map[string]any{"active": "default", "max_steps": 4},
+			"llm":            map[string]any{"active": "default", "max_tool_calls": 4},
 			"tools":          map[string]any{"enabled_groups": []string{"fs"}},
 			"prompt_context": map[string]any{"memory_enabled": false},
 		},

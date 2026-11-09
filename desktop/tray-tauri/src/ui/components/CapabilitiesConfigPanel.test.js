@@ -13,6 +13,7 @@ const setupConfig = () => ({
     browser_enabled: true,
     wecom_enabled: false,
     raw_message_history_enabled: false,
+    raw_message_history_source: "settings",
     skills_enabled: true,
     triggers_enabled: true,
     child_agents_enabled: true,
@@ -31,9 +32,9 @@ const setupConfig = () => ({
   child_agents: {
     default_ttl_seconds: 900,
     max_ttl_seconds: 3600,
+    max_active_per_parent: 3,
     default_max_turns: 10,
     max_max_turns: 20,
-    max_active_per_parent: 3,
   },
 });
 
@@ -69,7 +70,49 @@ describe("CapabilitiesConfigPanel advanced settings", () => {
     expect(api.patchSetupConfig).toHaveBeenCalledWith(expect.objectContaining({
       browser: expect.objectContaining({ default_timeout_ms: 10000, ignore_https_errors: true }),
       features: expect.objectContaining({ raw_message_history_enabled: true }),
+      child_agents: {
+        default_ttl_seconds: 900,
+        max_ttl_seconds: 3600,
+        max_active_per_parent: 3,
+      },
     }));
+    expect(api.patchSetupConfig.mock.calls[0][0].features).not.toHaveProperty("skills_enabled");
+    expect(api.patchSetupConfig.mock.calls[0][0].features).not.toHaveProperty("triggers_enabled");
+    expect(api.patchSetupConfig.mock.calls[0][0].features).not.toHaveProperty("child_agents_enabled");
+    expect(api.patchSetupConfig.mock.calls[0][0].child_agents).not.toHaveProperty("default_max_turns");
+    expect(api.patchSetupConfig.mock.calls[0][0].child_agents).not.toHaveProperty("max_max_turns");
+    wrapper.unmount();
+  });
+
+  it("shows effective raw history as read-only when environment controls it", async () => {
+    api.getSetupConfig.mockResolvedValue({
+      ...setupConfig(),
+      features: { ...setupConfig().features, raw_message_history_enabled: true, raw_message_history_source: "environment" },
+    });
+    const wrapper = mount(CapabilitiesConfigPanel);
+    await flushPromises();
+    expect(wrapper.text()).toContain("当前由环境变量 AGENT_RAW_MESSAGE_HISTORY_ENABLED 控制");
+    const checkbox = wrapper.get('input[type="checkbox"][disabled]');
+    expect(checkbox.element.checked).toBe(true);
+    await wrapper.get(".setup-config-panel__actions button").trigger("click");
+    await flushPromises();
+    expect(api.patchSetupConfig.mock.calls[0][0].features).not.toHaveProperty("raw_message_history_enabled");
+    wrapper.unmount();
+  });
+
+  it("does not submit environment-controlled raw history when its effective value is false", async () => {
+    api.getSetupConfig.mockResolvedValue({
+      ...setupConfig(),
+      features: { ...setupConfig().features, raw_message_history_enabled: false, raw_message_history_source: "environment" },
+    });
+    const wrapper = mount(CapabilitiesConfigPanel);
+    await flushPromises();
+    expect(wrapper.text()).toContain("当前由环境变量 AGENT_RAW_MESSAGE_HISTORY_ENABLED 控制");
+    const checkbox = wrapper.get('input[type="checkbox"][disabled]');
+    expect(checkbox.element.checked).toBe(false);
+    await wrapper.get(".setup-config-panel__actions button").trigger("click");
+    await flushPromises();
+    expect(api.patchSetupConfig.mock.calls[0][0].features).not.toHaveProperty("raw_message_history_enabled");
     wrapper.unmount();
   });
 });

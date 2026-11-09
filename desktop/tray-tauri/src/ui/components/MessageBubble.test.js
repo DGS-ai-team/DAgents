@@ -30,6 +30,26 @@ describe("MessageBubble context boundary", () => {
     wrapper.unmount();
   });
 
+  it("shows the user's original text with distinct structured file location cards", () => {
+    const wrapper = mount(MessageBubble, {
+      props: {
+        entry: {
+          kind: "user",
+          text: "请比较这两处",
+          file_refs: [
+            { id: "a", path: "reports/plan.csv", name: "plan.csv", anchor: { label: "A1:A2" } },
+            { id: "b", path: "reports/plan.csv", name: "plan.csv", anchor: { label: "C1:C2" } },
+          ],
+        },
+      },
+    });
+    expect(wrapper.find(".msg__text").text()).toBe("请比较这两处");
+    expect(wrapper.findAll(".msg__file-ref")).toHaveLength(2);
+    expect(wrapper.text()).toContain("A1:A2");
+    expect(wrapper.text()).toContain("C1:C2");
+    wrapper.unmount();
+  });
+
   it("keeps the empty streaming assistant placeholder out of the message area", () => {
     const wrapper = mount(MessageBubble, {
       props: { entry: { kind: "assistant", text: "", streaming: true } },

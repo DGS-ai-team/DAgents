@@ -49,7 +49,7 @@ func TestDreamingRestoreFailsAttemptWithoutDroppingQueuedHumanInput(t *testing.T
 	}
 	attempt, err := json.Marshal(DreamingAttempt{
 		AgentID: "agent-1", SessionID: sessionID, TurnID: "orphan-dreaming-turn",
-		MaxToolRounds: 2, State: DreamingAttemptWaiting, Boundary: "opaque-boundary",
+		State: DreamingAttemptWaiting, Boundary: "opaque-boundary",
 		StartedAt: time.Now().UTC(),
 	})
 	if err != nil {

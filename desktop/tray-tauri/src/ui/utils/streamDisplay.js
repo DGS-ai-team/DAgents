@@ -21,15 +21,11 @@ export function groupConsecutiveToolSteps(items = []) {
 
   function flushToolRun() {
     if (!toolRun.length) return;
-    if (toolRun.length === 1) {
-      output.push(toolRun[0]);
-    } else {
-      output.push({
-        key: `tool-group-${toolRun[0].key}`,
-        kind: "tool_group",
-        steps: toolRun,
-      });
-    }
+    output.push({
+      key: `tool-group-${toolRun[0].key}`,
+      kind: "tool_group",
+      steps: toolRun,
+    });
     toolRun = [];
   }
 

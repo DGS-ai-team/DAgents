@@ -109,7 +109,7 @@ func TestDreamingActiveContextResetHydratesAndKeepsChatUsable(t *testing.T) {
 			t.Fatalf("lease: ok=%v err=%v", ok, err)
 		}
 		defer release()
-		result, err := mgr.RunDreaming(ctx, rt.ID, prompt, 2)
+		result, err := mgr.RunDreaming(ctx, rt.ID, prompt)
 		if err != nil || result.Content == "" || !result.Changed {
 			t.Fatalf("dreaming result=%+v err=%v", result, err)
 		}
@@ -151,7 +151,7 @@ func TestDreamingActiveContextResetHydratesAndKeepsChatUsable(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("reopened lease: ok=%v err=%v", ok, err)
 	}
-	result, err := mgr2.RunDreaming(ctx, rt.ID, "third experience", 2)
+	result, err := mgr2.RunDreaming(ctx, rt.ID, "third experience")
 	release()
 	if err != nil || result.Content == "" || !result.Changed {
 		t.Fatalf("reopened dreaming result=%+v err=%v", result, err)

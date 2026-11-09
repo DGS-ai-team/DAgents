@@ -34,14 +34,14 @@ const showCredentialForm = ref(false);
 const showChannelForm = ref(false);
 const editingChannelId = ref("");
 
-const credential = reactive({ display_name: "", auth_type: "private_key", secret_mode: "environment", secret_ref: "", secret_value: "", username_hint: "" });
+const credential = reactive({ display_name: "", auth_type: "password", secret_mode: "direct", secret_ref: "", secret_value: "", username_hint: "" });
 const channel = reactive({
   display_name: "", host: "", port: 22, username: "", credential_id: "",
   host_key_policy: "known_hosts", host_key_ref: "", remote_shell: "bash", default_cwd: "", max_sessions: 4,
 });
 
 const credentialAuthMeta = {
-  private_key: { label: "SSH 私钥", description: "可直接输入私钥或引用环境变量，Node 不会把私钥放进工具参数。" },
+  private_key: { label: "SSH 私钥", description: "可粘贴完整私钥，或引用值为完整私钥内容的环境变量；不能填私钥文件路径。" },
   password: { label: "密码", description: "可直接输入密码，也可以通过环境变量引用。" },
 };
 const authTypeOptions = [
@@ -95,17 +95,43 @@ function onHostKeyPolicyChange() {
 }
 
 function credentialStatusLabel(item) {
-  if (item.secret_source === "direct") return "已配置直接密码";
+  if (item.secret_source === "direct") return "已配置直接输入";
   if (item.secret_source === "environment") return "已配置环境变量";
   return item.has_secret ? "已配置凭据" : "未配置凭据";
 }
 
+const testStageLabels = {
+  config: "配置",
+  credential: "凭据",
+  authentication: "凭据解析",
+  host_key: "主机校验配置",
+  dns: "DNS",
+  tcp: "TCP 连接",
+  ssh_handshake: "SSH 握手",
+  session: "会话",
+  shell: "Shell",
+  command: "命令",
+};
+
+function linuxTestStageLabel(name) {
+  return testStageLabels[name] || name || "检查步骤";
+}
+
+function linuxTestFailureMessage(result, fallback = "通道测试未通过") {
+  if (result?.error_code === "private_key_invalid") {
+    return "SSH 私钥内容无效。请提供未加密的 PEM/OpenSSH 私钥内容；如果您使用的是密码，请新建密码凭据并编辑通道切换到该凭据。";
+  }
+  if (result?.error_code === "host_key_unknown") {
+    return "尚未确认服务器身份，请核对下方指纹，确认无误后保存并重试。";
+  }
+  return result?.message || fallback;
+}
+
 function resetCredentialForm() {
-  Object.assign(credential, { display_name: "", auth_type: "private_key", secret_mode: "environment", secret_ref: "", secret_value: "", username_hint: "" });
+  Object.assign(credential, { display_name: "", auth_type: "password", secret_mode: "direct", secret_ref: "", secret_value: "", username_hint: "" });
 }
 
 function onCredentialAuthTypeChange() {
-  credential.secret_mode = "environment";
   credential.secret_ref = "";
   credential.secret_value = "";
 }
@@ -234,11 +260,17 @@ async function testChannel(item) {
   if (!item?.channel_id || testing.value) return;
   testing.value = item.channel_id;
   error.value = "";
+  status.value = "";
   testResult.value = null;
   try {
     const result = await api.testLinuxChannel(item.channel_id);
     testResult.value = { channelId: item.channel_id, ...result };
-    status.value = `${item.display_name || item.channel_id}：${result.message || (result.available ? "配置有效" : "不可用")}`;
+    const label = item.display_name || item.channel_id;
+    if (result.available) {
+      status.value = `${label}：连接测试通过`;
+    } else {
+      error.value = `${label}：${linuxTestFailureMessage(result)}`;
+    }
   } catch (e) {
     error.value = e.message || "测试通道失败";
   } finally {
@@ -259,6 +291,7 @@ async function pinTestFingerprint() {
   if (!confirmed) return;
   saving.value = true;
   error.value = "";
+  status.value = "";
   try {
     await api.patchLinuxChannel(channelID, {
       host_key_policy: "pinned",
@@ -266,10 +299,12 @@ async function pinTestFingerprint() {
     });
     const recheck = await api.testLinuxChannel(channelID);
     testResult.value = { channelId: channelID, ...recheck };
-    status.value = recheck.available
-      ? `${label}：已保存固定指纹并验证成功`
-      : `${label}：固定指纹已保存，但复测仍未通过`;
     await load();
+    if (recheck.available) {
+      status.value = `${label}：固定指纹已保存，连接测试通过`;
+    } else {
+      error.value = `${label}：${linuxTestFailureMessage(recheck, "固定指纹已保存，但连接测试未通过")}`;
+    }
   } catch (e) {
     error.value = e.message || "保存主机指纹失败";
   } finally {
@@ -352,10 +387,14 @@ onMounted(() => {
           class="linux-settings__stage"
           :class="`linux-settings__stage--${stage.status}`"
         >
-          <span class="linux-settings__stage-mark" aria-hidden="true">
+          <span
+            class="linux-settings__stage-mark"
+            aria-hidden="true"
+            :title="stage.status === 'passed' ? '本步骤已通过' : '本步骤未通过'"
+          >
             <UiIcon :name="stage.status === 'passed' ? 'check' : 'alert'" :size="12" />
           </span>
-          <span class="linux-settings__stage-name">{{ stage.name }}</span>
+          <span class="linux-settings__stage-name">{{ linuxTestStageLabel(stage.name) }}</span>
           <span class="linux-settings__stage-message">{{ stage.message || "完成" }}</span>
           <span class="linux-settings__stage-duration">{{ stage.duration_ms || 0 }}ms</span>
         </div>
@@ -366,7 +405,7 @@ onMounted(() => {
       <div class="settings-section__head">
         <div>
           <h2 class="settings-section__title">凭据</h2>
-          <p class="settings-section__desc">ID由系统自动生成。密码和 SSH 私钥都可直接输入或使用 <code>env:变量名</code> 引用；直接输入内容会加密存储。</p>
+          <p class="settings-section__desc">ID由系统自动生成。密码和 SSH 私钥都可直接输入或使用 <code>env:变量名</code> 引用；私钥环境变量必须包含完整密钥文本，不能是文件路径。</p>
         </div>
         <div class="settings-section__actions">
           <button type="button" class="btn btn--primary btn--sm" @click="openCredentialForm">新增凭据</button>
@@ -446,7 +485,7 @@ onMounted(() => {
         <div class="linux-settings__editor">
           <div class="linux-settings__field">
             <label>显示名称 <span>可选</span></label>
-            <input v-model="credential.display_name" class="settings-field__input" placeholder="例如：生产环境部署密钥" />
+            <input v-model="credential.display_name" class="settings-field__input" placeholder="例如：生产环境登录凭据" />
           </div>
           <div class="linux-settings__field">
             <label>认证方式 <span>必选</span></label>
@@ -473,12 +512,13 @@ onMounted(() => {
               <label>{{ credential.auth_type === "private_key" ? "SSH 私钥" : "登录密码" }} <span>必选</span></label>
               <textarea v-if="credential.auth_type === 'private_key'" v-model="credential.secret_value" rows="6" class="settings-field__input" placeholder="粘贴 SSH 私钥内容" />
               <input v-else v-model="credential.secret_value" type="password" autocomplete="new-password" class="settings-field__input" placeholder="输入 SSH 登录密码" />
-              <small>只会在建立 SSH 连接时使用，不会通过凭据列表接口返回。</small>
+              <small v-if="credential.auth_type === 'private_key'">请粘贴完整私钥内容（含 BEGIN/END 行）；内容会加密保存，不会通过凭据列表接口返回。</small>
+              <small v-else>密码会加密保存，不会通过凭据列表接口返回。</small>
             </template>
             <template v-else>
-              <label>环境变量引用 <span>必选</span></label>
+              <label>{{ credential.auth_type === "private_key" ? "保存完整私钥内容的环境变量" : "环境变量引用" }} <span>必选</span></label>
               <input v-model="credential.secret_ref" class="settings-field__input" :placeholder="credential.auth_type === 'private_key' ? '例如：env:SSH_KEY' : '例如：env:SSH_PASSWORD'" />
-              <small>这里只保存引用名称，Node 会在连接时从进程环境变量解析；修改环境变量后仍需重启 Node 才能让进程看到新值。</small>
+              <small>{{ credential.auth_type === "private_key" ? "变量值必须是完整私钥文本，不是文件路径。" : "这里只保存引用名称，Node 会在连接时从进程环境变量解析。" }} 修改环境变量后需重启 Node 才能读取新值。</small>
             </template>
           </div>
         </div>

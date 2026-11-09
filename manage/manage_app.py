@@ -51,7 +51,7 @@ _CONSOLE_DIR = Path(__file__).resolve().parent / "console" / "static"
 def create_app(settings: ManageSettings | None = None) -> FastAPI:
     cfg = settings or ManageSettings.from_env()
     db = SQLiteDatabase(cfg.db_path)
-    store = AgentRegistryStore(db=db if db.enabled else None)
+    store = AgentRegistryStore(db=db if db.enabled else None, offline_grace_seconds=cfg.offline_grace_seconds)
     llm_store = LLMConfigStore(db=db if db.enabled else None)
     audit = AuditLog(max_entries=cfg.audit_max_entries)
     blob = BlobStore(BlobStoreConfig.from_settings(cfg))

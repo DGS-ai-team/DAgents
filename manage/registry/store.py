@@ -15,7 +15,7 @@ from manage.registry.models import (
     AgentRegisterRequest,
     AgentStoredRecord,
 )
-from manage.registry.status import AgentStatus, derive_status, offline_grace_seconds
+from manage.registry.status import AgentStatus, derive_status
 from manage.storage.sqlite import SQLiteDatabase
 
 
@@ -30,9 +30,9 @@ class AgentListQuery:
     page_size: int = 50
 
 
-def stored_to_public(record: AgentStoredRecord, *, now_unix: int | None = None) -> AgentRecord:
+def stored_to_public(record: AgentStoredRecord, *, now_unix: int | None = None, grace_seconds: int = 86400) -> AgentRecord:
     now = int(time.time()) if now_unix is None else now_unix
-    status = derive_status(now_unix=now, expires_at_unix=record.expires_at_unix)
+    status = derive_status(now_unix=now, expires_at_unix=record.expires_at_unix, grace_seconds=grace_seconds)
     return AgentRecord(**record.model_dump(mode="python"), status=status)
 
 
@@ -46,11 +46,12 @@ def record_node_id(record: AgentStoredRecord | AgentRecord) -> str:
 
 
 class AgentRegistryStore:
-    def __init__(self, db: SQLiteDatabase | None = None) -> None:
+    def __init__(self, db: SQLiteDatabase | None = None, *, offline_grace_seconds: int = 86400) -> None:
         self._lock = threading.RLock()
         self._records: dict[str, AgentStoredRecord] = {}
         self._group_catalog: set[str] = set()
         self._db = db
+        self._offline_grace_seconds = max(0, int(offline_grace_seconds))
         self._load_from_db()
 
     def register(self, payload: AgentRegisterRequest, *, expected_node_id: str | None = None) -> AgentRecord:
@@ -93,7 +94,7 @@ class AgentRegistryStore:
             )
             self._records[agent_key] = stored
             self._persist_locked()
-            return stored_to_public(stored, now_unix=now_unix)
+            return stored_to_public(stored, now_unix=now_unix, grace_seconds=self._offline_grace_seconds)
 
     def update_groups(self, agent_id: str, discovery_group: list[str]) -> AgentRecord | None:
         with self._lock:
@@ -110,7 +111,7 @@ class AgentRegistryStore:
             for name in cleaned:
                 self._group_catalog.add(name)
             self._persist_all_locked()
-            return stored_to_public(stored, now_unix=now_unix)
+            return stored_to_public(stored, now_unix=now_unix, grace_seconds=self._offline_grace_seconds)
 
     def list_discovery_groups(self) -> list[dict[str, object]]:
         """聚合目录 + 节点上已出现的 discovery_group。"""
@@ -198,7 +199,7 @@ class AgentRegistryStore:
             stored = AgentStoredRecord.model_validate(data)
             self._records[agent_id] = stored
             self._persist_locked()
-            return stored_to_public(stored, now_unix=now_unix)
+            return stored_to_public(stored, now_unix=now_unix, grace_seconds=self._offline_grace_seconds)
 
     def get(self, agent_id: str) -> AgentRecord | None:
         with self._lock:
@@ -206,13 +207,13 @@ class AgentRegistryStore:
             stored = self._records.get(agent_id)
             if stored is None:
                 return None
-            return stored_to_public(stored)
+            return stored_to_public(stored, grace_seconds=self._offline_grace_seconds)
 
     def list(self, query: AgentListQuery) -> tuple[list[AgentRecord], int]:
         with self._lock:
             self._prune_expired_locked()
             now_unix = int(time.time())
-            records = [stored_to_public(item, now_unix=now_unix) for item in self._records.values()]
+            records = [stored_to_public(item, now_unix=now_unix, grace_seconds=self._offline_grace_seconds) for item in self._records.values()]
         filtered = self._apply_filters(records, query)
         total = len(filtered)
         page = max(1, query.page)
@@ -290,7 +291,7 @@ class AgentRegistryStore:
 
     def _prune_expired_locked(self) -> bool:
         now_unix = int(time.time())
-        grace = offline_grace_seconds()
+        grace = self._offline_grace_seconds
         expired_ids = [
             agent_id
             for agent_id, item in self._records.items()

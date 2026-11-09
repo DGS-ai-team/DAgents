@@ -40,26 +40,6 @@ func (o *Orchestrator) processToolCalls(
 			}
 		}
 	}
-	if o.toolBudgetCheck != nil {
-		allowed, reason := o.toolBudgetCheck(sessionID)
-		if !allowed {
-			if strings.TrimSpace(reason) == "" {
-				reason = "turn_budget"
-			}
-			o.appendMissingToolResponses(sessionID, history, calls,
-				"ERROR: turn budget exhausted",
-				map[string]any{"budget_exhausted": true, "budget_reason": reason})
-			if reason == "max_tool_calls" {
-				// The assistant has already proposed and recorded the complete batch.
-				// Close every call with a result, then let the normal continuation
-				// budget check either start the reserved no-tools summary or terminate
-				// the turn when no summary is available. Returning ErrBudgetExhausted
-				// here would end the turn before that summary path can run.
-				return nil, "", nil
-			}
-			return nil, "", fmt.Errorf("%w: %s", ErrBudgetExhausted, reason)
-		}
-	}
 	var autoCalls []llm.ToolCall
 	autoIdleCall := false
 	var approvalCalls []pendingApprovalCall
@@ -69,6 +49,21 @@ func (o *Orchestrator) processToolCalls(
 	for i, tc := range calls {
 		if !o.executionBoundaryOpen(ctx) {
 			return nil, "", context.Canceled
+		}
+		if o.toolBudgetCheck != nil {
+			allowed, reason := o.toolBudgetCheck(sessionID, tc.ID)
+			if !allowed {
+				if strings.TrimSpace(reason) == "" {
+					reason = "turn_budget"
+				}
+				o.appendMissingToolResponses(sessionID, history, []llm.ToolCall{tc},
+					"ERROR: turn budget exhausted",
+					map[string]any{"budget_exhausted": true, "budget_reason": reason})
+				if reason != "max_tool_calls" {
+					return nil, "", fmt.Errorf("%w: %s", ErrBudgetExhausted, reason)
+				}
+				continue
+			}
 		}
 		o.publishToolCall(sessionID, tc, false, i)
 		o.recordToolCall(sessionID, tc.Function.Name)
@@ -686,7 +681,7 @@ func (o *Orchestrator) invokeTool(ctx context.Context, sessionID string, tc llm.
 // generic mutation such as bash is therefore never replayed automatically.
 func (o *Orchestrator) invokeToolWithRetries(ctx context.Context, sessionID string, tc llm.ToolCall, plan *clihitl.ApprovalPlan) (string, bool, map[string]any, error) {
 	content, rejected, extra, execErr := o.invokeTool(ctx, sessionID, tc, plan)
-	for retry := 0; execErr != nil && o.canRetryTool(sessionID, tc.Function.Name, execErr, retry); retry++ {
+	for retry := 0; execErr != nil && o.canRetryTool(tc.Function.Name, execErr, retry); retry++ {
 		if err := o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
 			Type:            CommandToolExecutionRetrying,
 			ToolCallID:      tc.ID,
@@ -703,19 +698,13 @@ func (o *Orchestrator) invokeToolWithRetries(ctx context.Context, sessionID stri
 	return content, rejected, extra, nil
 }
 
-func (o *Orchestrator) canRetryTool(sessionID, toolName string, execErr error, retries int) bool {
+func (o *Orchestrator) canRetryTool(toolName string, execErr error, retries int) bool {
 	if o == nil || execErr == nil || retries >= o.toolRetryLimit || !isTransientToolError(execErr) {
 		return false
 	}
 	policy, ok := o.tools.(tools.ToolRetryPolicy)
 	if !ok || !policy.ToolRetryAllowed(toolName) {
 		return false
-	}
-	if o.toolRetryCheck != nil {
-		allowed, _ := o.toolRetryCheck(sessionID)
-		if !allowed {
-			return false
-		}
 	}
 	return true
 }

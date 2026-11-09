@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,6 +100,11 @@ func TestCancelPendingHITLRepairsToolResultOnce(t *testing.T) {
 	}
 	rt.mu.Unlock()
 	setTestPendingHITL(t, rt, &turn.PendingHITL{Items: []turn.PendingHITLItem{{ToolCall: call}}})
+	state := rt.turnCoordinator.Snapshot()
+	rt.mu.Lock()
+	rt.messages[0].Source = &llm.MessageSource{Kind: llm.MessageSourceUser, Form: llm.MessageFormRequest}
+	rt.messages[0].Provenance = &llm.MessageProvenance{Producer: "human", Reference: state.TurnID}
+	rt.mu.Unlock()
 
 	if !mgr.CancelTurn(sess.ID) {
 		t.Fatal("expected pending HITL cancellation to report changed=true")
@@ -116,6 +122,26 @@ func TestCancelPendingHITLRepairsToolResultOnce(t *testing.T) {
 	}
 	if got := countToolResponsesForCall(msgs, call.ID); got != 1 {
 		t.Fatalf("tool result count=%d, want 1; messages=%+v", got, msgs)
+	}
+	for _, message := range msgs {
+		if message.Role == "tool" && message.ToolCallID == call.ID {
+			if message.ToolResultMetadata == nil || message.ToolResultMetadata.Status != "cancelled" {
+				t.Fatalf("cancelled pending HITL result metadata=%+v, want cancelled", message.ToolResultMetadata)
+			}
+		}
+	}
+	markers := 0
+	for _, message := range msgs {
+		if llm.IsTurnCancellationContextMessage(message) {
+			markers++
+		}
+	}
+	if markers != 1 {
+		t.Fatalf("cancellation markers=%d, want one durable boundary: %+v", markers, msgs)
+	}
+	providerMessages := llm.MessagesWithSystem("base", msgs)
+	if len(providerMessages) < 2 || !strings.Contains(providerMessages[1].Content, "此用户请求在完成前已取消") || !strings.HasSuffix(providerMessages[1].Content, "run a command") {
+		t.Fatalf("waiting-user cancellation did not mark its request in next model context: %+v", providerMessages)
 	}
 	if _, err := mgr.EnqueueMessage(context.Background(), sess.ID, queue.RequestTypeResume, "", nil, map[string]any{
 		"type":        "selection",

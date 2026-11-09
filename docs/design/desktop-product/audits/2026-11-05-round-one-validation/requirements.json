@@ -1,0 +1,548 @@
+{
+  "report": "Desktop first-round coverage and validation",
+  "date": "2026-11-06",
+  "product_code_changed_by_report_author": false,
+  "tests_rerun_for_report": false,
+  "design_baseline": [
+    "Keep the low-saturation light interface; do not replace the theme or add a large navigation surface.",
+    "Keep settings as aligned single-item rows.",
+    "Prefer icon-only non-menu actions with tooltip and accessible name.",
+    "Keep tool purpose as the collapsed summary; expose raw details on demand."
+  ],
+  "requirements": [
+    {
+      "id": "approval-visibility-and-decisions",
+      "status": "native-long-chat-visibility-and-short-batch-partial-result-passed; reject-all-branch-covered-by-automated-tests",
+      "acceptance": [
+        "Long chat approval visibility and short batch details/selection are verified natively.",
+        "The user-approved write succeeds; the unchecked write is rejected without file changes; mixed outcomes are truthful.",
+        "The explicit reject-all branch is covered by the existing automated test for the same interface; no duplicate native rejection round is required."
+      ]
+    },
+    {
+      "id": "notification-sequence-and-sidebar",
+      "status": "automated-tests-passed; native-tool-waiting-cancel-and-partial-result-indicator-clear-passed",
+      "acceptance": [
+        "A late lower notify_seq cannot replace newer row or cache state.",
+        "Unknown Agent notification requests a full summary refresh without a fabricated sidebar row.",
+        "Full list response controls membership; current notification projections do not re-add deleted members."
+      ]
+    },
+    {
+      "id": "tool-group-status-and-layout",
+      "status": "automated-tests-recorded; native-cancel-and-partial-outcomes-and-static-keyboard-readability-passed; continuous-animation-unverified",
+      "acceptance": [
+        "Purpose is stable and clipped safely.",
+        "Mixed outcomes are not described as all successful.",
+        "Parent/child rows and expanded state remain stable through consecutive calls and terminal updates.",
+        "Native screenshots 48–50 verify purpose/icon/status rows, visible Tab focus on the first child row, and Enter expansion to real path parameters. No consecutive animation frames were captured."
+      ]
+    },
+    {
+      "id": "model-error-and-recovery",
+      "status": "real-api-and-native-quota-recovery-path-passed",
+      "acceptance": [
+        "Quota response maps to provider_quota and is not retried.",
+        "Error-adjacent model/settings actions and picker labels are clear.",
+        "Retry never replays a turn after potentially side-effecting tools without a proven safe path."
+      ]
+    },
+    {
+      "id": "cancel-and-resume-intent",
+      "status": "isolated-api-sequence-and-native-active-turn-stop-passed-via-tool-waiting",
+      "acceptance": [
+        "Cancel reaches terminal cancelled state.",
+        "Native Stop was clicked while an active turn waited at tool_waiting, and reached the expected terminal cancellation state.",
+        "Native Stop during tool_waiting clears pending approvals and sidebar indicator, marks tool rows cancelled, and leaves the unapproved target unchanged.",
+        "A new request is answered before any explicitly resumed prior task.",
+        "Explicit resume handles only the requested section.",
+        "Native Stop is tested while a turn is still running."
+      ]
+    },
+    {
+      "id": "structured-file-references",
+      "status": "real-api-payload-hydrate-and-native-clean-reference-readonly-workflow-passed; early_probe_fixture_limited",
+      "acceptance": [
+        "Original user text contains no internal reference metadata.",
+        "Same path with distinct anchors remains distinct.",
+        "The model receives and uses the intended referenced rows.",
+        "Revision is preserved as metadata; content-hash equality is not inferred unless separately measured.",
+        "Screenshot 47 shows a properly provisioned isolated Agent reading brief.md, CSV, and expense-review.md and answering the three expected IDs. Screenshot 45 is an under-provisioned fixture (no tool groups, policy, or MCP), not a product defect."
+      ]
+    },
+    {
+      "id": "workspace-preview-and-dock-inset",
+      "status": "native-resource-menu-import-csv-empty-state-and-expanded-collapsed-dock-cycle-passed",
+      "implementation_evidence": [
+        "DesktopApp resource menu is in resource-tabs after the conversation tab and uses folder-open, not a titlebar plus action.",
+        "WorkspaceFiles empty directory provides nearby create and import actions."
+      ],
+      "test_coverage": [
+        "WorkspaceFilesDesktop test covers empty-directory create/import actions and file-list collapse.",
+        "Workbench-state source-contract test covers the resource menu trigger.",
+        "Dock inset, CSV parsing, and preview data have automated tests."
+      ],
+      "acceptance": [
+        "The tested CSV remains readable with expanded Dock and numeric values right-aligned (37).",
+        "75EA575 screenshots 51–52 verify empty-workspace layout and expanded-Dock clearance; BBDDA422 screenshots 54–57 verify the complete expanded/collapsed/reopen cycle.",
+        "BBDDA422 screenshot 55 confirms collapse hides detail and input and clears obstruction; screenshots 56–57 confirm reopen restores expanded intent and unsent draft while the Markdown bottom remains visible.",
+        "Native resource menu/import flow passed (34, 36). Preview-format and DPI claims remain limited to observed cases."
+      ]
+    },
+    {
+      "id": "browser-disabled-settings-entry",
+      "status": "automated-behavior-test-and-native-settings-route-passed",
+      "implementation_evidence": [
+        "BrowserViewer disabled empty state names shared service settings and emits open-connection-settings.",
+        "DesktopApp routes the event to the capabilities settings page."
+      ],
+      "test_coverage": "WorkgroupDesktopContract.test.js verifies browser_disabled emits the shared-service settings action and the action routes to /settings/capabilities (test assertions at lines 94–101 and 146–153).",
+      "acceptance": [
+        "Native disabled-browser empty state explains the setting location.",
+        "Opening settings from the notice lands on the shared service capabilities page.",
+        "Native disabled-browser notice identifies Shared Services and opens /settings/capabilities (screenshots 39–40)."
+      ]
+    },
+    {
+      "id": "single-tool-call-limit-and-settings",
+      "status": "api-component-and-native-visual-acceptance-passed-with-environment-branch-tested-by-automation",
+      "acceptance": [
+        "Only per-turn max_tool_calls remains, default 64 and range 1..4096; invalid values and persistence are covered by API/component automated tests.",
+        "Calls count individually including rejected/failed proposals and parallel calls; ordinary chat, automation, dreaming, and child agents share the limit.",
+        "Screenshots 41–43 show the Agent field/copy, memory tab placement, and Auto rows; 58–59 show restart copy and persisted raw-history state. Screenshot 59 is not an environment override UI observation; environment-specific readonly behavior is covered by API/component tests.",
+        "Screenshots 60–61 record the output-limit fields and default control before/after the icon fix. Screenshot 61 on 1F76B550 confirms the refresh icon renders clearly and the UIA button has the expected restore-default label/description. No reset, value change, or save was performed."
+      ]
+    },
+    {
+      "id": "status-readability-accessibility",
+      "status": "native-static-readability-and-keyboard-interaction-passed; continuous-animation-and-os-reduced-motion-unverified",
+      "acceptance": [
+        "Static status readability and keyboard focus/expand interaction are verified natively.",
+        "Continuous animation frames and OS reduced-motion behavior were not sampled and are not claimed as passing.",
+        "Screenshots 48–50 cover static status readability and Tab/Enter interaction. Screenshot 46 is completed and is not an animation/waiting-state sample."
+      ]
+    }
+  ],
+  "automated_evidence": {
+    "desktop_frontend": "85 files / 593 tests passed",
+    "desktop_ui": "118 tests passed",
+    "shared_icons": "7 checks passed",
+    "desktop_lint": "passed",
+    "go_node_shared_config_clients_logfiles_update": "passed per root run records",
+    "python": "212 tests passed",
+    "node_build": "passed per root final build record",
+    "tauri_debug_custom_protocol_build": "passed per root final build record"
+  },
+  "native_validation": {
+    "status": "passed_for_required_first_round_acceptance; optional_motion_and_broader_compatibility_checks_unverified",
+    "reason": "必需的第一轮原生验收已完成。Dock问题53仅保留为75EA历史失败，54–57在BBDDA422已证明折叠/重开完整循环修复；58–59记录配置页面视觉，60记录BBDDA下图标空白的历史缺陷，61在最终候选1F76B550（PID34012、Node PID43344）确认refresh-cw图标清晰、12000/16000限额可读、UIA button label/Description正确。只读检查，未重置、改值或保存。隔离API/组件测试覆盖环境覆盖、隐藏字段保持、非法值和持久化；截图59未展示环境覆盖UI分支。1F76B550 build、2/2组件测试、lint通过。连续动画帧、OS reduced-motion、不同DPI/预览类型未覆盖，不作通过声明。",
+    "image_is_current_acceptance_evidence": true,
+    "image_evidence_scope": "Screenshots 51–53 are from 75EA575; 54–60 are from BBDDA422; 61 is from final candidate 1F76B550 (SHA-256 1F76B5502D60BDB864A5631EE4550C7F0B2EC2F99F1DFE59D934FC90CD5D07ED, Desktop PID34012, Node PID43344). Screenshot 53 is a historical 75EA failure fixed and verified by 54–57. Screenshot 57 shows the unsent draft still present while the Markdown bottom remains visible. Screenshot 59 is persisted raw-history state, not environment override. Screenshot 60 is the historical missing-icon screenshot, fixed by 61. Screenshot 61 confirms the visible refresh-cw icon and UIA label/description without modifying settings. Continuous animations and OS reduced-motion remain unverified.",
+    "required": [
+      "Native long-chat approval visibility and short-chat partial decision passed: one write approved, unchecked write ended user_rejected without changing its file, final response was truthful (21–26). Reject-all is covered by existing tests; no duplicate native rejection is required.",
+      "Native Stop during an actually active tool_waiting turn passed: turn cancelled, pending/queue/jobs cleared, sidebar indicator cleared, parent/child rows cancelled, and unapproved target file unchanged (21–23). Screenshots 27–29 are not cancellation evidence and do not create a separate phase gate.",
+      "Real quota recovery passed (30–33): visible reason/current selection, switch to DeepSeek, matching profile editor CTA, and correct new-question response without replaying old probe.",
+      "Browser-disabled notice and route to /settings/capabilities passed (39–40). Agent/Auto settings visual rows, memory tab placement, and disabled frequency/daily-learning passed (41–43); API/automated tests remain the evidence for numeric boundaries/runtime budget semantics.",
+      "Clean reference card/raw composer text passed (44). A provisioned isolated Agent read brief.md, CSV, and expense-review.md and answered the three expected IDs (47); 45 records an under-provisioned fixture, not a product failure. Tool status/child rows and keyboard Tab/Enter details passed (48–50).",
+      "Screenshot 61 on final 1F76B550 confirms the Security restore-default icon is clear and UIA label/Description are correct; no reset or save was performed. Screenshot 60 is retained as historical failure evidence, resolved by screenshot 61.",
+      "BBDDA422 Dock full state cycle passed natively (54–57). Screenshot 59 verifies the persisted raw-history configuration only; do not claim the environment-controlled readonly branch was natively exercised. Screenshot 58 verifies restart-required copy. API/component behavior evidence remains separate from visual screenshots."
+    ],
+    "available_images": [
+      "01-final-quota-error.png",
+      "02-error-model-picker.png",
+      "03-model-error-label-followed-selection.png",
+      "04-real-model-recovery-reply.png",
+      "05-native-generating.png",
+      "06-native-active-before-stop.png",
+      "07-long-chat-pending-approval.png",
+      "08-approval-details.png",
+      "09-native-stopped-pending-cleared.png",
+      "10-cancelled-tool-wrong-completed.png",
+      "11-tab-resource-entry.png",
+      "12-csv-aligned-preview.png",
+      "13-csv-dock-expanded.png",
+      "14-markdown-bottom-above-dock.png",
+      "15-clean-reference-composer.png",
+      "16-reference-response-in-dock.png",
+      "17-clean-reference-transcript.png",
+      "18-agent-settings-basic.png",
+      "19-agent-settings-memory.png",
+      "20-auto-settings-rows.png",
+      "39-disabled-browser-entry.png",
+      "40-browser-settings-destination.png",
+      "41-agent-single-tool-limit.png",
+      "42-agent-memory-tab.png",
+      "43-auto-settings-disabled.png",
+      "44-clean-reference-card.png",
+      "45-reference-read-fixture-limitation.png",
+      "46-status-waiting.png",
+      "47-real-readonly-tools-completed.png",
+      "48-real-tool-purpose-rows.png",
+      "49-tool-keyboard-focus.png",
+      "50-tool-keyboard-expanded.png",
+      "51-final-empty-directory-grouped.png",
+      "52-final-markdown-expanded-clearance.png",
+      "53-collapsed-dock-detail-remains.png",
+      "54-final-expanded-dock-bottom.png",
+      "55-final-collapsed-no-residual-panel.png",
+      "56-final-reopen-preserves-draft.png",
+      "57-final-reopened-dock-bottom-clear.png",
+      "58-final-general-restart-explanation.png",
+      "59-final-raw-history-current-setting.png",
+      "60-final-output-limits-default-control.png",
+      "61-final-output-reset-icon-visible.png"
+    ],
+    "current_candidate_images": [
+      {
+        "file": "21-final-pending-approval.png",
+        "sha256": "7CE6C9CB4D7BB42ADA924AAA8224E945D10E3508677D09FFCE8A981B6E21259C",
+        "observation": "Long agent agt-7586cd7bdf009d08, turn turn-40848a1c299430ab at tool_waiting before native Stop."
+      },
+      {
+        "file": "22-final-cancel-cleared.png",
+        "sha256": "0685E94C8A3631A74CD3270177636D363769C96893918468A60A24A24A1F65BD",
+        "observation": "Hydrated cancelled, active=false, pending=0, queue=0, jobs=0; sidebar indicator cleared."
+      },
+      {
+        "file": "23-final-cancelled-tool-details.png",
+        "sha256": "61A525A29C0E5D6A806627EE559C90AEE0E6B37B0544C1DD771DBB0B66329899",
+        "observation": "One-item parent group and child row cancelled; approval fixture target remains unchanged."
+      },
+      {
+        "file": "24-final-batch-approval.png",
+        "sha256": "9FD8892D26380C0338BEC2EDFE244B610CD4722A1D15C9D524829505F1A61A38",
+        "status": "pre_decision_state; decision_recorded_in_image_25",
+        "observation": "Agent agt-640e72ce2279582c is waiting on two write_file approvals in hitl-55c1a88ed993bb34. Provider emitted the same call_purpose for native-batch-allow.md and native-batch-deny.md; expanding details exposes the distinct target paths. Not an approval outcome or pass."
+      },
+      {
+        "file": "25-final-batch-partial-result.png",
+        "sha256": "E38AD944F8DFE8B0B2E9266E7725571080B7FA4CC779E90523537630172CB977",
+        "status": "native_short_chat_partial_approval_passed",
+        "observation": "Turn turn-d80cfa2c20a2c72d completed inactive with no pending HITL. One approved write succeeded; the unchecked write was user_rejected and non-retryable. Allowed file changed to '# 已批准的测试'; denied file remained '# Approval baseline'. Parent group shows one completed and one unapproved; sidebar indicator cleared."
+      },
+      {
+        "file": "26-final-batch-child-results.png",
+        "sha256": "1576B4AB26A6A99930C98B4FC802D37D12880164D39D92FECDF06480A2403F8A",
+        "status": "native_child_outcomes_verified",
+        "observation": "Expanded child rows match persisted outcomes: one succeeded and one denied/user_rejected."
+      },
+      {
+        "file": "27-generating-before-stop.png",
+        "sha256": "DB89F46F7524D70A004D54C0B1C4B5800B502C9F410412A3CEAB2868D78B6037",
+        "status": "not_cancellation_evidence",
+        "observation": "Captured before a Stop attempt; the turn naturally completed before the click."
+      },
+      {
+        "file": "28-active-model-before-stop.png",
+        "sha256": "75CBD4559B0E5DED26C187C19C2DF2FFC882527D0252640AB46BD2622F53630E",
+        "status": "not_cancellation_evidence",
+        "observation": "Captured before a second Stop attempt; the turn naturally completed before the click."
+      },
+      {
+        "file": "29-model-stopped.png",
+        "sha256": "4B5DCBC37FC25879B77DB3A8AC47766DC40C7B22C1DA7C7D426F3E8B3296348C",
+        "status": "not_cancellation_evidence",
+        "observation": "The ended model turn had already naturally completed at click time; active-turn Stop was already proven via tool_waiting."
+      },
+      {
+        "file": "30-final-quota-error-actions.png",
+        "sha256": "4284F44E98418924977047A8211557B988EB998B0F7DAE2FBB1A0089590FDC71",
+        "status": "native_quota_recovery_entry_passed",
+        "observation": "Real quota cause is visible in the error card with a recovery action."
+      },
+      {
+        "file": "31-final-current-model-label.png",
+        "sha256": "72542731A1680F9DE65DCD9F6E81671B9C94C25D72D98BC0480F3723FBB73379",
+        "status": "native_current_profile_label_passed",
+        "observation": "The model picker shows DeepSeek as the current selection."
+      },
+      {
+        "file": "32-error-settings-destination.png",
+        "sha256": "E53C1DD9EF0758E2D6D5801194D8745720CAD9302EB77699A53F969A4D932608",
+        "status": "native_profile_settings_destination_passed",
+        "observation": "After switching to DeepSeek, the settings CTA opened that profile editor; credential remains masked."
+      },
+      {
+        "file": "33-native-model-recovery-reply.png",
+        "sha256": "FE877A5E6AFEF38781AECB31A4034522107C60E3D1085A74F125936AA8B299E9",
+        "status": "native_new_question_recovery_passed",
+        "observation": "The new question received the expected answer without replaying the failed probe."
+      },
+      {
+        "file": "34-final-resource-menu.png",
+        "sha256": "213F3A9A54E157C8E0EB4506A4ECBB71D2752D2F00358D4361FAB2FD018725D8",
+        "status": "native_resource_entry_passed",
+        "observation": "Workspace, browser, and terminal destinations are visible from one resource menu action."
+      },
+      {
+        "file": "35-empty-workspace-actions.png",
+        "sha256": "CB5D2DAB9DD3CF2C39B659B1CD1198C129BC0B79A7E926AA4586982938080C99",
+        "status": "historical_empty_workspace_layout_defect_resolved_on_final_candidate_51",
+        "observation": "Empty-state text is near y=300 and action buttons near y=590; a spacing fix candidate exists but was not deployed for this capture. Final candidate screenshot 51 subsequently verifies the spacing fix."
+      },
+      {
+        "file": "36-native-import-success.png",
+        "sha256": "56189CC119CFC154D48D54A50963CB96800CED1DBA8E253B5716B9A538EEE54A",
+        "status": "native_file_import_passed",
+        "observation": "Native picker import succeeded; imported brief and original brief SHA-256 both equal 8298BF29C5DB65CA4F238DA780417DCF2984BAB5701520F461A5F5ECCDAABA60."
+      },
+      {
+        "file": "37-final-csv-expanded-dock.png",
+        "sha256": "F8E0A887170D494D38AFAF9740D7982ED79E910DFF94917252B46DE16FC4B413",
+        "status": "native_csv_expanded_dock_path_passed",
+        "observation": "Seven CSV rows remain visible with expanded Dock and numeric amounts right-aligned."
+      },
+      {
+        "file": "38-final-markdown-bottom-inset.png",
+        "sha256": "632BAD9ED67E71FCCCEBABA4266274948D7E2FFDA3A0788DB007BF88391DA0DD",
+        "status": "historical_expanded_dock_occlusion_resolved_on_final_candidate_52",
+        "observation": "After scrolling to the Markdown bottom, the last section remains obscured by the expanded short-reply Dock; prior screenshot 14 does not negate this reproduction. Final candidate screenshot 52 subsequently verifies expanded-Dock clearance."
+      },
+      {
+        "file": "39-disabled-browser-entry.png",
+        "sha256": "32541964E019156C8BFB2662D1AFA4702D285D2FCFEC77DF0091ECB0F82F153C",
+        "status": "native_browser_disabled_notice_passed",
+        "observation": "Disabled-browser notice names Shared Services settings.",
+        "capture_note": "Captured before Desktop candidate 75EA575 substitution; historical observation only, superseded by later current-candidate evidence where applicable."
+      },
+      {
+        "file": "40-browser-settings-destination.png",
+        "sha256": "DF36BDB1E7962A9E88C2CAF5219FF208270EBFE744E76ED8038974F7DC91B3D1",
+        "status": "native_browser_settings_route_passed",
+        "observation": "Click opens /settings/capabilities.",
+        "capture_note": "Captured before Desktop candidate 75EA575 substitution; historical observation only, superseded by later current-candidate evidence where applicable."
+      },
+      {
+        "file": "41-agent-single-tool-limit.png",
+        "sha256": "24AD43B56ADA3377ED7E252FB494FCF84906062A9DB068242C0F8E011A2F2B17",
+        "status": "native_single_tool_limit_field_and_copy_passed",
+        "observation": "One max_tool_calls numeric field, fixture value 8; copy states shared ordinary/autonomous/dreaming limit, failed/rejected calls count individually, and range 1..4096.",
+        "capture_note": "Captured before Desktop candidate 75EA575 substitution; historical observation only, superseded by later current-candidate evidence where applicable."
+      },
+      {
+        "file": "42-agent-memory-tab.png",
+        "sha256": "19C0F39521347FA745871CFDA2D4CA7519F6BA853614092205B9C7A55D94BA83",
+        "status": "native_memory_tab_position_passed",
+        "observation": "Memory subpage preserves title and tab position.",
+        "capture_note": "Captured before Desktop candidate 75EA575 substitution; historical observation only, superseded by later current-candidate evidence where applicable."
+      },
+      {
+        "file": "43-auto-settings-disabled.png",
+        "sha256": "94A2AED2B2F39E1F4BF554A1D9619703CAEF683971C47FD2FD7CAA890183F231",
+        "status": "native_auto_rows_disabled_state_passed",
+        "observation": "One setting per row; activation frequency and daily experience organization are both disabled.",
+        "capture_note": "Captured before Desktop candidate 75EA575 substitution; historical observation only, superseded by later current-candidate evidence where applicable."
+      },
+      {
+        "file": "44-clean-reference-card.png",
+        "sha256": "2F9FE731D36F1950A94A677B23D9F9118E31C5F75B3FB82B195CFF0CC2C72FC0",
+        "status": "native_clean_reference_card_passed; properly_provisioned_readonly_workflow_passed_in_screenshot_47",
+        "observation": "Chip shows expense-review.md · entire file and remove action; composer text contains no internal metadata. Screenshot 47 verifies the properly provisioned Agent read-only workflow; screenshot 45 is an under-provisioned fixture limitation.",
+        "capture_note": "Captured before Desktop candidate 75EA575 substitution; historical observation only, superseded by later current-candidate evidence where applicable."
+      },
+      {
+        "file": "45-reference-read-fixture-limitation.png",
+        "sha256": "A10370F7D2C121C75CA48FB63197BB3549786E16C8234A235D81C1ABDCC92D21",
+        "status": "fixture_limitation_not_product_failure",
+        "observation": "Agent agt-265f1e252b4525a5 had no enabled tool groups, policy, or MCP. Whole-file reference does not itself read content; a bare dagents-tool-call string is plain model text, not an executed tool call.",
+        "capture_note": "Captured before Desktop candidate 75EA575 substitution; historical observation only, superseded by later current-candidate evidence where applicable."
+      },
+      {
+        "file": "46-status-waiting.png",
+        "sha256": "B549879C64FDFC9FD424C789F2E739D797D8D17C4B7DD34E0834997A6309A976",
+        "status": "not_waiting_or_animation_evidence",
+        "observation": "Despite filename, image is the same completed turn as screenshot 47.",
+        "capture_note": "Captured before Desktop candidate 75EA575 substitution; historical observation only, superseded by later current-candidate evidence where applicable."
+      },
+      {
+        "file": "47-real-readonly-tools-completed.png",
+        "sha256": "B549879C64FDFC9FD424C789F2E739D797D8D17C4B7DD34E0834997A6309A976",
+        "status": "native_readonly_reference_workflow_passed",
+        "observation": "Agent f77fe72ed7793ff2, turn turn-ae118091768b012d, read brief.md, CSV, and expense-review.md (3 readonly calls), then completed active=false with pending=0, queue=0, jobs=0; answer correctly identifies TR-104, ME-205, SW-306.",
+        "capture_note": "Captured before Desktop candidate 75EA575 substitution; historical observation only, superseded by later current-candidate evidence where applicable."
+      },
+      {
+        "file": "48-real-tool-purpose-rows.png",
+        "sha256": "26792A6C69C6B1F61E6C11A7641C4AA0D607375819122598410B435BEA704ACE",
+        "status": "native_static_tool_status_readability_passed",
+        "observation": "Three tool rows show icon, purpose, child row, and right-side state; static readability only.",
+        "capture_note": "Captured before Desktop candidate 75EA575 substitution; historical observation only, superseded by later current-candidate evidence where applicable."
+      },
+      {
+        "file": "49-tool-keyboard-focus.png",
+        "sha256": "89820B741D7A2C483AABC33E2EA372D6FC3C8E7DA1DCD2BBDCB92521B7F67C6D",
+        "status": "native_tab_focus_passed",
+        "observation": "Tab focuses the first tool child row with visible focus.",
+        "capture_note": "Captured before Desktop candidate 75EA575 substitution; historical observation only, superseded by later current-candidate evidence where applicable."
+      },
+      {
+        "file": "50-tool-keyboard-expanded.png",
+        "sha256": "00F3830A86DD61F1425B20BC5FEE99278041756095EADAE47D59B1D67EACA129",
+        "status": "native_enter_expand_details_passed",
+        "observation": "Enter expands details and reveals the actual path parameters.",
+        "capture_note": "Captured before Desktop candidate 75EA575 substitution; historical observation only, superseded by later current-candidate evidence where applicable."
+      },
+      {
+        "file": "51-final-empty-directory-grouped.png",
+        "sha256": "0206603EA781D781FD722C1970E444E1A922148D69881ADD9785EB28DD973515",
+        "status": "native_final_empty_directory_layout_passed",
+        "observation": "Final candidate 75EA575: empty-state explanation and create/import actions are adjacent and centered.",
+        "candidate_sha256": "75EA575B17D599FA524B5EB6E83770BECC57D2E28D3F542804665A27900413A3",
+        "desktop_pid": 33248,
+        "node_pid": 43344
+      },
+      {
+        "file": "52-final-markdown-expanded-clearance.png",
+        "sha256": "1707198A45277B8F118261AB11A1EB11CFB19C209CCB2F5CF7D40E6555AAC3C3",
+        "status": "native_final_expanded_dock_markdown_clearance_passed",
+        "observation": "Final candidate 75EA575: with chat panel expanded, the Markdown bottom remains fully above the panel.",
+        "candidate_sha256": "75EA575B17D599FA524B5EB6E83770BECC57D2E28D3F542804665A27900413A3",
+        "desktop_pid": 33248,
+        "node_pid": 43344
+      },
+      {
+        "file": "53-collapsed-dock-detail-remains.png",
+        "sha256": "46819BD415E31956FCA93F1E6ADAD81393C8D5390C034632C024EB727C666553",
+        "status": "historical_75ea_failure_fixed_by_bbdd_native_screenshots_54_57",
+        "observation": "Historical 75EA575 failure: detail remained after collapsing at occupancy 0 and obscured the document. BBDDA422 screenshots 54–57 subsequently verified the complete cycle and showed the obstruction fixed.",
+        "candidate_sha256": "75EA575B17D599FA524B5EB6E83770BECC57D2E28D3F542804665A27900413A3",
+        "desktop_pid": 33248,
+        "node_pid": 43344
+      },
+      {
+        "file": "61-final-output-reset-icon-visible.png",
+        "sha256": "d46478ba8ef6528d540ae15d4bfb4c235ff658631dce145559cdc649ade2546d",
+        "status": "native_1f76_security_restore_icon_and_uia_label_description_passed",
+        "observation": "On 1F76B550, refresh-cw restore icon is clear; output limits show 12000/16000; UIA button label and Description identify restore-default limits. Read-only inspection only: no reset, value change, or save.",
+        "candidate_sha256": "1F76B5502D60BDB864A5631EE4550C7F0B2EC2F99F1DFE59D934FC90CD5D07ED",
+        "node_sha256": "3CB60BCA335D21516EED4C79CCDF30B69ACFAE4FE5879B16A86C200575D7056C",
+        "desktop_pid": 34012,
+        "node_pid": 43344
+      }
+    ],
+    "observed_old_candidate_sha256": {
+      "node": "21CB7AA0AF1F81356CB3FD5068E1951AEA2F9DFD4B1EE38DAF43742BB1E350E5",
+      "desktop": "B1474431E150AE06156EED7279D28AB17CDA7D731169F0E4622F942BEA86CE7D"
+    },
+    "latest_candidate_sha256": {
+      "node": "3CB60BCA335D21516EED4C79CCDF30B69ACFAE4FE5879B16A86C200575D7056C",
+      "desktop": "1F76B5502D60BDB864A5631EE4550C7F0B2EC2F99F1DFE59D934FC90CD5D07ED"
+    },
+    "optional_boundaries": [
+      "Optional small polish only: when provider-generated call_purpose labels duplicate, consider showing the target filename as a disambiguating hint while preserving the purpose-first design; screenshot 24 is not evidence of a UI mapping defect.",
+      "Do not claim all PDF/image/SVG preview formats or multiple DPI/window sizes passed from CSV/Markdown evidence.",
+      "Full screen-reader audit, Manage, dark theme, large-file-volume behavior, other provider error formats, and paid-quota behavior are outside this round.",
+      "Continuous tool/footer animation frames and OS reduced-motion behavior were not natively sampled. Do not claim these passed; they are not among the remaining mandatory native rechecks for this round."
+    ],
+    "last_updated": "2026-11-06",
+    "additional_evidence": [
+      {
+        "file": "54-final-expanded-dock-bottom.png",
+        "sha256": "ededc4cda58d441c7c05971927283a0ff54054fb657aa8dfe0666daaf3f32c14",
+        "status": "native_bbdd_expanded_dock_bottom_clearance_passed",
+        "observation": "BBDDA422: expanded resource Dock leaves the Markdown bottom visible.",
+        "candidate_sha256": "BBDDA422D217322A21D895DD13408458DD25D63EE2FD4C1668CD97F043A407F8",
+        "node_sha256": "3CB60BCA335D21516EED4C79CCDF30B69ACFAE4FE5879B16A86C200575D7056C",
+        "desktop_pid": 45588,
+        "node_pid": 43344
+      },
+      {
+        "file": "55-final-collapsed-no-residual-panel.png",
+        "sha256": "174a6a548d5f0afa4fcadd817b5e4e599538ed41ba5d6967c83fbb2810598514",
+        "status": "native_bbdd_collapsed_details_hidden_and_clearance_passed",
+        "observation": "BBDDA422: collapsing the quick-message bar hides both details and input, restoring document clearance.",
+        "candidate_sha256": "BBDDA422D217322A21D895DD13408458DD25D63EE2FD4C1668CD97F043A407F8",
+        "node_sha256": "3CB60BCA335D21516EED4C79CCDF30B69ACFAE4FE5879B16A86C200575D7056C",
+        "desktop_pid": 45588,
+        "node_pid": 43344
+      },
+      {
+        "file": "56-final-reopen-preserves-draft.png",
+        "sha256": "22f416554e191f722a18afc382e363fb4558a00dc901e496e62b20c0ce7c1e21",
+        "status": "native_bbdd_reopen_preserves_expanded_intent_and_draft_passed",
+        "observation": "BBDDA422: reopening restores the expanded panel and unsent draft.",
+        "candidate_sha256": "BBDDA422D217322A21D895DD13408458DD25D63EE2FD4C1668CD97F043A407F8",
+        "node_sha256": "3CB60BCA335D21516EED4C79CCDF30B69ACFAE4FE5879B16A86C200575D7056C",
+        "desktop_pid": 45588,
+        "node_pid": 43344
+      },
+      {
+        "file": "57-final-reopened-dock-bottom-clear.png",
+        "sha256": "92ff6d58dd0ca7ac85772ce26fec2bdc252bd7f4cb0c70ed089b414ba4cdea34",
+        "status": "native_bbdd_reopened_dock_bottom_clearance_passed",
+        "observation": "BBDDA422: after reopening, the unsent draft was still present while scrolling to the bottom; the Markdown ending remained visible.",
+        "candidate_sha256": "BBDDA422D217322A21D895DD13408458DD25D63EE2FD4C1668CD97F043A407F8",
+        "node_sha256": "3CB60BCA335D21516EED4C79CCDF30B69ACFAE4FE5879B16A86C200575D7056C",
+        "desktop_pid": 45588,
+        "node_pid": 43344
+      },
+      {
+        "file": "58-final-general-restart-explanation.png",
+        "sha256": "7e03e544564d7812d8140c4ff75b8eb09f2e2c8c15a6dcf95837e0c1294028b7",
+        "status": "native_settings_general_restart_explanation_passed",
+        "observation": "Native settings page shows the startup configuration and restart-required explanation.",
+        "candidate_sha256": "BBDDA422D217322A21D895DD13408458DD25D63EE2FD4C1668CD97F043A407F8",
+        "node_sha256": "3CB60BCA335D21516EED4C79CCDF30B69ACFAE4FE5879B16A86C200575D7056C",
+        "desktop_pid": 45588,
+        "node_pid": 43344
+      },
+      {
+        "file": "59-final-raw-history-current-setting.png",
+        "sha256": "839c344990ae12e03dc876bc2eb41d324838b80e55d78341a2667a563cfc40e2",
+        "status": "native_raw_history_persisted_setting_visual_passed_environment_branch_not_shown",
+        "observation": "Native raw-history setting is visibly enabled from the persisted settings source; this screenshot does not exercise the environment-controlled read-only branch.",
+        "candidate_sha256": "BBDDA422D217322A21D895DD13408458DD25D63EE2FD4C1668CD97F043A407F8",
+        "node_sha256": "3CB60BCA335D21516EED4C79CCDF30B69ACFAE4FE5879B16A86C200575D7056C",
+        "desktop_pid": 45588,
+        "node_pid": 43344
+      },
+      {
+        "file": "60-final-output-limits-default-control.png",
+        "sha256": "138a2115ca26c1a4d030df316672389fae24ffff785a444c88712f3c82579b05",
+        "status": "historical_bbdd_missing_restore_icon_fixed_by_final_candidate_61",
+        "observation": "Historical BBDDA422 screenshot showed a blank refresh icon. Final 1F76B550 screenshot 61 confirms the icon and accessible button label/description.",
+        "candidate_sha256": "BBDDA422D217322A21D895DD13408458DD25D63EE2FD4C1668CD97F043A407F8",
+        "node_sha256": "3CB60BCA335D21516EED4C79CCDF30B69ACFAE4FE5879B16A86C200575D7056C",
+        "desktop_pid": 45588,
+        "node_pid": 43344
+      },
+      {
+        "file": "61-final-output-reset-icon-visible.png",
+        "sha256": "d46478ba8ef6528d540ae15d4bfb4c235ff658631dce145559cdc649ade2546d",
+        "status": "native_1f76_security_restore_icon_and_uia_label_description_passed",
+        "observation": "On 1F76B550, refresh-cw restore icon is clear; output limits show 12000/16000; UIA button label and Description identify restore-default limits. Read-only inspection only: no reset, value change, or save.",
+        "candidate_sha256": "1F76B5502D60BDB864A5631EE4550C7F0B2EC2F99F1DFE59D934FC90CD5D07ED",
+        "node_sha256": "3CB60BCA335D21516EED4C79CCDF30B69ACFAE4FE5879B16A86C200575D7056C",
+        "desktop_pid": 34012,
+        "node_pid": 43344
+      }
+    ],
+    "final_candidate": {
+      "desktop_sha256": "1F76B5502D60BDB864A5631EE4550C7F0B2EC2F99F1DFE59D934FC90CD5D07ED",
+      "desktop_pid": 34012,
+      "qa_node_sha256": "3CB60BCA335D21516EED4C79CCDF30B69ACFAE4FE5879B16A86C200575D7056C",
+      "qa_node_pid": 43344,
+      "status": "required_native_acceptance_passed"
+    }
+  },
+  "api_evidence": [
+    "../../../../../.runtime-test-real-ux/round-one-api-followup-review.json",
+    "../../../../../.runtime-test-real-ux/round-one-api-final-evidence.json",
+    "../../../../../.runtime-test-real-ux/failed-recovery-real-model.json",
+    "../../../../../.runtime-test-real-ux/native-batch-partial-result.json"
+  ],
+  "api_evidence_note": "The .runtime-test-* paths are gitignored local QA evidence and are not included in a PR. Inline summaries and screenshots in the report are the reviewable record; these paths are only available in the local workspace.",
+  "source_reports": [
+    "../2026-11-04-ui-polish/index.html",
+    "../2026-11-05-real-llm-workflow/index.html",
+    "../2026-11-05-config-governance/index.html"
+  ],
+  "last_updated": "2026-11-09",
+  "targeted_evidence": {
+    "resource_agent_dock": "1 test file / 9 tests passed; log .runtime-test-real-ux/final-dock-tests-2026-11-06.log; BBDDA422 targeted run only.",
+    "historical_frontend_full_suite": "85 files / 593 tests passed in the earlier full run; no full frontend suite was rerun for the BBDDA422 or 1F76B550 targeted changes.",
+    "frontend_lint": "passed for BBDDA422 per root build record; no full frontend suite claim is inferred from this targeted run.",
+    "security_restore_control": "Final candidate 1F76B5502D60BDB864A5631EE4550C7F0B2EC2F99F1DFE59D934FC90CD5D07ED built; 2/2 component tests passed, lint/build passed, and screenshot 61 native UIA/icon review passed.",
+    "pre_submit_verification_2026_11_09": "scripts/verify.ps1 exited 0 ([verify] passed). This final-source quality gate is separate from the 2026-11-06 native candidate evidence; the native Desktop SHA-256 remains 1F76B5502D60BDB864A5631EE4550C7F0B2EC2F99F1DFE59D934FC90CD5D07ED. Desktop Vitest 85 files / 595 tests; icons 7 and UI 118; Python 212; all Go modules vet/staticcheck/tests/build; Rustfmt and 77 tests; frontend/Manage lint/build, Ruff/Pyright, branding/API/OpenAPI checks passed. Backend setup.ApplyPatch now copies the LLM.Profiles map before mutation so a failed multi-field PATCH cannot leak partial profile changes into the live config; its setup/API regression tests passed. Log .runtime-test-real-ux/pr-verify-2026-11-09.log is gitignored local evidence, not included in the PR."
+  }
+}

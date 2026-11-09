@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -443,6 +444,14 @@ func linuxCredentialRecordFromRequest(req linuxCredentialRequest, fallbackID str
 		}
 		if strings.TrimSpace(*req.SecretValue) == "" {
 			return store.LinuxCredentialRecord{}, fmt.Errorf("secret_value is required for direct credentials")
+		}
+		if authType == "private_key" {
+			if err := tools.ValidateLinuxPrivateKeySecret(*req.SecretValue); err != nil {
+				if errors.Is(err, tools.ErrLinuxPrivateKeyEncrypted) {
+					return store.LinuxCredentialRecord{}, err
+				}
+				return store.LinuxCredentialRecord{}, fmt.Errorf("private_key secret_value must contain an unencrypted PEM/OpenSSH private key; file paths are not accepted")
+			}
 		}
 		if encodeLiteral == nil {
 			return store.LinuxCredentialRecord{}, fmt.Errorf("direct secret storage is unavailable")

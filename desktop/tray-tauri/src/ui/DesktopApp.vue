@@ -4,18 +4,18 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { RouterView, useRoute, useRouter } from 'vue-router'
-import { agentErrorFor, agentSelectionViewTransition, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, hasPersistedPartialMessage, isAgentBusy, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, switchDraft, tabForRoute, turnErrorSummary, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
+import { agentErrorFor, agentSelectionViewTransition, cancelledTurnSummary, canCancelTurnPhase, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, handleAgentNotificationEvent, hasPersistedPartialMessage, isAgentBusy, mergeAgentNotificationSummaries, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, shouldShowTurnStopAction, switchDraft, tabForRoute, turnErrorSummary, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
 import { ResourceRenderContextKey, validateWorkspacePath } from '@desktop-ui/utils/resourceContext.js'
 import { closeTerminalFlow } from './terminal-close.js'
 import { composerPageFadeOutCompletion, composerPageHandoffNeedsFade, composerPageHandoffReady, composerPageSettlementMatches, composerPageVisibility, createComposerPageHandoff } from './composer-surface-motion.js'
 import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, isWindowsPlatform, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
-import { agentMediaId, cancelWorkspaceAttachmentBatch, createWorkspaceAttachmentBatch, isWorkspaceAttachmentBatchCurrent, isWorkspaceRequestCurrent, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceImageBlob } from './workspace-files-state.js'
+import { agentMediaId, cancelWorkspaceAttachmentBatch, createWorkspaceAttachmentBatch, isWorkspaceAttachmentBatchCurrent, isWorkspaceRequestCurrent, shouldClearWorkspaceUploadError, workspaceImageBlob } from './workspace-files-state.js'
 import { restoreTranscriptMedia } from './utils/agentMediaRestore.js'
 import { onConfigurationChanged } from './utils/configurationEvents.js'
 import { createWorkspaceReference, dispatchWorkspaceMessage, hasWorkspaceMessageContent, settleWorkspaceReferences, workspaceReferencesForAgent } from './workspace-references.js'
 import { agentStore } from '@desktop-ui/stores/agent.js'
 import { applyRemoteWorkerEvent, currentRemoteWorkerEventVersion, replaceChildrenFromHydrate, setRemoteWorkerParent } from '@desktop-ui/stores/remoteWorkers.js'
-import { expandHitlRequired, extractToolApprovals, buildApprovalOneResume, buildApprovalResume, buildMemoryConflictResume, buildUserInfoSubmitResume } from '@desktop-ui/stores/hitl.js'
+import { expandHitlRequired, approvalRequestKey, buildApprovalSelectionResume, buildMemoryConflictResume, buildUserInfoSubmitResume } from '@desktop-ui/stores/hitl.js'
 import { applyDesktopTurnEvent, applyHydrateTurnState, resetTurnState, turnStateStore } from '@desktop-ui/stores/turnState.js'
 import { createTurnWatchdog } from '@desktop-ui/stores/turnWatchdog.js'
 import MainChatPanel from '@desktop-ui/components/MainChatPanel.vue'
@@ -32,6 +32,7 @@ import TerminalEndDialog from './components/TerminalEndDialog.vue'
 import ScreenshotRegionDialog from './components/ScreenshotRegionDialog.vue'
 import ComposerSurface from './components/ComposerSurface.vue'
 import ResourceAgentDock from './components/ResourceAgentDock.vue'
+import ApprovalBubble from '@desktop-ui/components/ApprovalBubble.vue'
 import WorkspaceReferenceAttachments from './components/WorkspaceReferenceAttachments.vue'
 import WorkspaceFiles from './components/WorkspaceFiles.vue'
 import BrowserViewer from './components/BrowserViewer.vue'
@@ -87,10 +88,12 @@ const status = ref({ online: false, setup_required: false, version: '', error: '
 const manageSettings = ref(null)
 const workgroupSettingsLoaded = ref(false)
 const agents = ref([])
+const agentNotificationProjections = ref({})
 const activeId = ref('')
 const hydrate = ref(null)
 const llmSettings = ref(null)
 const llmProfileCatalog = ref([])
+const composerToolbar = ref(null)
 const input = ref('')
 const busyByAgent = ref({})
 const cancellingByAgent = ref({})
@@ -175,7 +178,8 @@ const failedSendDrafts = ref({})
 const pendingUserByAgent = ref({})
 const dockExpanded = ref(false)
 const dockCollapsed = ref(false)
-const dockStatus = computed(() => !status.value.online || status.value.setup_required ? 'offline' : pending.value ? 'pending' : agentGenerating.value ? 'generating' : 'idle')
+const dockOccupiedHeight = ref(0)
+const dockStatus = computed(() => !status.value.online || status.value.setup_required ? 'offline' : pending.value || turnStateStore.phase === 'waiting_user' ? 'pending' : turnInProgress.value ? 'generating' : 'idle')
 const isTauri = !!window.__TAURI_INTERNALS__
 const startupReady = ref(false)
 const startupTimedOut = ref(false)
@@ -294,6 +298,8 @@ let sendSequence = 0
 let modelRequestSequence = 0
 let pollTimer = null
 let summaryRefreshTimer = 0
+let agentListRefreshSequence = 0
+let agentNotificationChangeVersion = 0
 let resourceRefreshTimer = 0
 let activeHydrateTimer = 0
 let workspaceConnectionState = ''
@@ -337,32 +343,32 @@ watch([activeId, fullTranscript], ([id, transcript]) => {
   pendingUserByAgent.value = next
 }, { flush: 'post' })
 const approvalQueueIndex = computed(() => hitlQueue.value.findIndex(item => item.kind === 'approval'))
-const approvalCalls = computed(() => {
-  const data = hitlQueue.value[approvalQueueIndex.value]?.data
-  return extractToolApprovals(data).map(call => ({
-    id: call.callId,
-    name: call.name,
-    reason: call.reason,
-    argumentsText: formatApprovalArguments({ arguments: call.arguments, raw_arguments: call.rawArgs }),
-  }))
+const dockPendingKind = computed(() => {
+  if (turnStateStore.phase === 'waiting_user' || hitlQueue.value.some(item => item.kind === 'user_information')) return 'user_input'
+  if (approvalQueueIndex.value >= 0) return 'approval'
+  return 'request'
 })
-const canCancelTurn = computed(() => ['queued', 'model_generating', 'tool_executing'].includes(turnStateStore.phase))
-const agentGenerating = computed(() => busy.value || cancellingTurn.value || canCancelTurn.value)
+const canCancelTurn = computed(() => canCancelTurnPhase(turnStateStore.phase))
+const turnInProgress = computed(() => busy.value || cancellingTurn.value || canCancelTurn.value)
+const agentGenerating = computed(() => shouldShowTurnStopAction(turnStateStore.phase, busy.value, cancellingTurn.value))
+const canStopFromComposer = computed(() => canCancelTurn.value && turnStateStore.phase !== 'waiting_user')
 const composerRuntimeStatus = computed(() => desktopComposerStatus({
-  generating: agentGenerating.value,
+  generating: turnInProgress.value,
   cancelling: cancellingTurn.value,
   streamingText: streamingText.value,
   turnState: turnStateStore,
 }))
-const turnError = computed(() => turnStateStore.error
-  ? turnErrorSummary(turnStateStore.error, {
+const turnError = computed(() => cancelledTurnSummary(turnStateStore)
+  || (turnStateStore.error
+    ? turnErrorSummary(turnStateStore.error, {
       partial: Boolean(streamingText.value) || (turnStateStore.error.incomplete && hasPersistedPartialMessage(hydrate.value?.transcript)),
       retryCount: Math.max(0, (turnStateStore.modelAttempt?.attempt || 1) - 1),
     })
-  : '')
+    : ''))
+const modelRecoveryAvailable = computed(() => Boolean(turnStateStore.error?.code?.startsWith('provider_')))
 const turnWatchdog = createTurnWatchdog({
   isAwaiting: () => Boolean(activeId.value && status.value.online),
-  hasStuckStatus: () => agentGenerating.value || (Boolean(streamingText.value) && !turnStateStore.terminal),
+  hasStuckStatus: () => turnInProgress.value || (Boolean(streamingText.value) && !turnStateStore.terminal),
   onStuck: async () => {
     const id = activeId.value
     if (!id) return
@@ -387,7 +393,7 @@ const menuEntries = computed(() => createDesktopMenuModel({
   activeAgentName: activeAgent.value?.display_name || '尚未选择智能体',
   isWorkgroup: isWorkgroupView.value,
   activeTab: activeTab.value,
-  generating: agentGenerating.value,
+  generating: turnInProgress.value,
   hasPendingApproval: approvalQueueIndex.value >= 0,
   hasPendingHitl: Boolean(pending.value),
   sidebarCollapsed: sidebarCollapsed.value,
@@ -602,18 +608,24 @@ async function loadAgents() {
   await refreshHealth()
   if (!status.value.online) return
   if (status.value.setup_required) { error.value = '请先在桌面应用设置中完成本地服务的首次初始化。'; return }
+  const requestSequence = ++agentListRefreshSequence
+  const notificationVersionAtStart = agentNotificationChangeVersion
   try {
     const latest = await invoke('desktop_list_agents')
-    agents.value = Array.isArray(latest) ? latest : []
+    if (requestSequence !== agentListRefreshSequence) return
+    agents.value = mergeAgentNotificationSummaries(Array.isArray(latest) ? latest : [], agentNotificationProjections.value, notificationVersionAtStart)
     await selectAgent(chooseActiveAgentId(agents.value, activeId.value))
   } catch (e) { error.value = String(e) }
 }
 async function refreshAgentSummaries() {
   if (!status.value.online) return
+  const requestSequence = ++agentListRefreshSequence
+  const notificationVersionAtStart = agentNotificationChangeVersion
   try {
     const latest = await invoke('desktop_list_agents')
+    if (requestSequence !== agentListRefreshSequence) return
     if (!Array.isArray(latest)) return
-    agents.value = latest
+    agents.value = mergeAgentNotificationSummaries(latest, agentNotificationProjections.value, notificationVersionAtStart)
     if (!latest.some(agent => agent?.agent_id === activeId.value)) {
       await selectAgent(chooseActiveAgentId(latest, activeId.value))
     }
@@ -693,7 +705,7 @@ function scheduleActiveAgentHydrate(id, delay = 100) {
 }
 async function switchLLMProfile(profileId) {
   const id = activeId.value
-  if (!id || !profileId || agentGenerating.value) return
+  if (!id || !profileId || turnInProgress.value) return
   error.value = ''
   try {
     const response = await patchAgent(id, { defaults: { llm: { active: profileId } } })
@@ -721,6 +733,13 @@ function openModelSettings(profileId) {
   const profile = String(profileId || agentActiveProfile(activeAgent.value) || '').trim()
   if (!profile) return
   void router.push({ path: '/settings/connection', query: { profile } })
+}
+async function openModelPicker() {
+  if (activeTab.value !== 'chat') {
+    showChat()
+    await nextTick()
+  }
+  composerToolbar.value?.openPicker?.()
 }
 async function selectAgent(id, { clearError = true, openChat = false } = {}) {
   const changed = activeId.value !== id
@@ -817,7 +836,7 @@ async function sendMessageToActiveAgent(text, images = [], files = [], reference
         kind: 'user',
         text: message.text,
         images: message.images.map(image => image.url),
-        file_refs: message.files.map(toNodeFileReference),
+        file_refs: message.files.map(file => ({ ...file })),
         baseTranscriptLength: fullTranscript.value.length,
       }
       pendingUserByAgent.value = { ...pendingUserByAgent.value, [agentId]: pendingUser }
@@ -856,7 +875,7 @@ async function executeSlashCommand(text, agentId) {
     compressContext: async id => {
       if (!status.value.online || status.value.setup_required) throw new Error('本地服务未就绪，无法压缩上下文')
       if (activeId.value !== id || isWorkgroupView.value) throw new Error('请先选择一个智能体')
-      if (agentGenerating.value) throw new Error('请等待当前生成结束后再压缩上下文')
+      if (turnInProgress.value) throw new Error('请等待当前生成结束后再压缩上下文')
       if (pending.value || approvalQueueIndex.value >= 0) throw new Error('请先处理待审批请求')
       return compressContext(id)
     },
@@ -1113,7 +1132,7 @@ async function stopCurrentTurn() {
 async function clearContextWithConfirmation(id) {
   if (!id || id !== activeId.value) throw new Error('请先选择一个智能体')
   if (!status.value.online || status.value.setup_required) throw new Error('本地服务未就绪，无法清空对话')
-  if (agentGenerating.value) throw new Error('请等待当前回合结束后再清空对话')
+  if (turnInProgress.value) throw new Error('请等待当前回合结束后再清空对话')
   if (pending.value || approvalQueueIndex.value >= 0) throw new Error('请先处理待审批请求后再清空对话')
   if (!await confirmDesktopAction('清空当前 Agent 的对话上下文？此操作会从当前会话移除消息。')) return false
   await clearContext(id)
@@ -1134,7 +1153,7 @@ async function clearCurrentContext() {
 async function deleteAgentById(agentId) {
   const id = String(agentId || '').trim()
   const agent = agents.value.find(item => item.agent_id === id)
-  if (!agent || !status.value.online || status.value.setup_required || deletingAgentId.value || agent.state === 'working' || (activeId.value === id && agentGenerating.value)) return
+  if (!agent || !status.value.online || status.value.setup_required || deletingAgentId.value || agent.state === 'working' || (activeId.value === id && turnInProgress.value)) return
   const kind = agent.agent_type === 'auto' ? '自主智能体' : '智能体'
   const name = agent.display_name || id
   if (!await confirmDesktopAction(`删除${kind}「${name}」？\n该操作会在本地服务归档此智能体并移除其运行时。`)) return
@@ -1172,7 +1191,7 @@ function openAgentContextMenu(event, agent, anchor = event?.currentTarget) {
   const id = String(agent?.agent_id || '').trim()
   if (!id) return
   const kind = agent.agent_type === 'auto' ? '自主智能体' : '智能体'
-  const isWorking = agent.state === 'working' || (activeId.value === id && agentGenerating.value)
+  const isWorking = agent.state === 'working' || (activeId.value === id && turnInProgress.value)
   const disabledReason = !status.value.online ? '请先连接本地服务' : status.value.setup_required ? '请先完成本地服务初始化' : deletingAgentId.value ? '正在删除智能体' : isWorking ? '智能体工作中，暂不能删除' : ''
   void openEntryContextMenu(event, {
     title: agent.display_name || id,
@@ -1649,10 +1668,11 @@ async function resumeHitl(index, resumeValue) {
   if (resumed && activeId.value === agentId) await selectAgent(agentId)
   return resumed
 }
-function approveAll(index) { const item = hitlQueue.value[index]; if (item?.kind === 'approval') void resumeHitl(index, buildApprovalResume(item.data, { approveAll: true })) }
-function rejectAll(index) { const item = hitlQueue.value[index]; if (item?.kind === 'approval') void resumeHitl(index, buildApprovalResume(item.data, { approveAll: false })) }
-function approveOne({ index, callId }) { const item = hitlQueue.value[index]; if (item?.kind === 'approval') void resumeHitl(index, buildApprovalOneResume(item.data, callId, true)) }
-function rejectOne({ index, callId }) { const item = hitlQueue.value[index]; if (item?.kind === 'approval') void resumeHitl(index, buildApprovalOneResume(item.data, callId, false)) }
+function approveSelection({ index, approvedCallIds }) {
+  const item = hitlQueue.value[index]
+  if (item?.kind === 'approval') void resumeHitl(index, buildApprovalSelectionResume(item.data, approvedCallIds))
+}
+function rejectAll(index) { approveSelection({ index, approvedCallIds: [] }) }
 async function submitUserInfo(index = hitlQueue.value.findIndex(item => item.kind === 'user_information'), source = 'chat') {
   const item = hitlQueue.value[index]
   if (!item) return false
@@ -1679,7 +1699,10 @@ async function jumpToApproval() {
   const approvals = document.querySelectorAll('.desktop-chat-wrapper .msg--approval')
   approvals[approvals.length - 1]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
-function topMenuTriggers() { return [...document.querySelectorAll('[data-menubar-trigger]')] }
+function topMenuTriggers() {
+  return [...document.querySelectorAll('[data-menubar-trigger]')]
+    .sort((left, right) => desktopMenuNames.indexOf(left.dataset.menubarTrigger) - desktopMenuNames.indexOf(right.dataset.menubarTrigger))
+}
 let hoverOpenedMenu = ''
 function toggleTopMenu(name) {
   if (hoverOpenedMenu === name) { hoverOpenedMenu = ''; openMenu.value = name; return }
@@ -1708,10 +1731,10 @@ function focusMenuItem(menuName, key = 'ArrowDown') {
 function handleMenubarKeydown(event) {
   const trigger = event.target.closest?.('[data-menubar-trigger]')
   const menu = event.target.closest?.('.menu-anchor [role="menu"]')
-  const menuNames = desktopMenuNames
+  const visibleTriggers = topMenuTriggers()
   if (trigger) {
     const name = trigger.dataset.menubarTrigger
-    const index = menuNames.indexOf(name)
+    const index = visibleTriggers.indexOf(trigger)
     if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
       event.preventDefault()
       focusTopMenu(index + (event.key === 'ArrowRight' ? 1 : -1))
@@ -1719,7 +1742,7 @@ function handleMenubarKeydown(event) {
     }
     if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault()
-      focusTopMenu(event.key === 'Home' ? 0 : menuNames.length - 1, Boolean(openMenu.value))
+      focusTopMenu(event.key === 'Home' ? 0 : visibleTriggers.length - 1, Boolean(openMenu.value))
       return true
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter' || event.key === ' ') {
@@ -1747,7 +1770,7 @@ function handleMenubarKeydown(event) {
     }
     if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
       event.preventDefault()
-      focusTopMenu(menuNames.indexOf(name) + (event.key === 'ArrowRight' ? 1 : -1))
+      focusTopMenu(visibleTriggers.findIndex(item => item.dataset.menubarTrigger === name) + (event.key === 'ArrowRight' ? 1 : -1))
       return true
     }
     if (event.key === 'Escape') {
@@ -1880,6 +1903,22 @@ onMounted(async () => {
       if (summaryRefreshTimer) clearTimeout(summaryRefreshTimer)
       summaryRefreshTimer = window.setTimeout(() => { summaryRefreshTimer = 0; void refreshAgentSummaries() }, 0)
       if (activeId.value) scheduleActiveAgentHydrate(activeId.value, 0)
+      return
+    }
+    if (event.event_type === 'notification_changed') {
+      const projection = handleAgentNotificationEvent(
+        agents.value,
+        agentNotificationProjections.value,
+        event,
+        agentNotificationChangeVersion,
+      )
+      agents.value = projection.agents
+      agentNotificationProjections.value = projection.projectionsByAgent
+      agentNotificationChangeVersion = projection.version
+      if (projection.shouldRefreshSummaries) {
+        if (summaryRefreshTimer) clearTimeout(summaryRefreshTimer)
+        summaryRefreshTimer = window.setTimeout(() => { summaryRefreshTimer = 0; void refreshAgentSummaries() }, 0)
+      }
       return
     }
     if (event.agent_id !== activeId.value) {
@@ -2023,7 +2062,7 @@ onUnmounted(() => {
               <template v-for="(item, i) in menuEntries.DAgents" :key="i"><div v-if="item.separator" class="menu-separator" role="separator"></div><button v-else class="menu-item" type="button" role="menuitem" :disabled="item.disabled" tabindex="-1" @click="runMenuAction(item.action)"><span>{{ item.label }}</span><small v-if="item.hint">{{ item.hint }}</small></button></template>
             </div>
           </div>
-          <div v-for="name in desktopMenuNames.slice(1)" :key="name" class="menu-anchor" :data-menu-anchor="name" @mouseenter="setTopMenuFromHover(name)">
+          <div v-for="name in desktopMenuNames.slice(1).filter(item => item !== '资源')" :key="name" class="menu-anchor" :data-menu-anchor="name" @mouseenter="setTopMenuFromHover(name)">
             <button class="menu-trigger" :class="{ active: openMenu === name }" type="button" role="menuitem" :data-menubar-trigger="name" aria-haspopup="menu" :aria-expanded="openMenu === name" @click.stop="toggleTopMenu(name)">{{ name }}</button>
             <div v-if="openMenu === name" class="menu-popover" role="menu" :aria-label="`${name}菜单`">
               <template v-for="(item, i) in menuEntries[name]" :key="i"><div v-if="item.separator" class="menu-separator" role="separator"></div><div v-else-if="item.header" class="menu-section-label" role="presentation">{{ item.label }}</div><button v-else class="menu-item" type="button" role="menuitem" :disabled="item.disabled" tabindex="-1" @click="runMenuAction(item.action)"><span>{{ item.label }}</span><small v-if="item.hint">{{ item.hint }}</small></button></template>
@@ -2078,13 +2117,19 @@ onUnmounted(() => {
       <div class="resource-tabs">
         <button v-if="activeTab !== 'workgroups'" class="conversation-tab" :class="{ active: activeTab === 'chat' }" :title="activeAgent?.display_name || '当前智能体'" @click="showChat"><span class="icon-mask tab-icon" :style="maskStyle(activeAgent?.agent_type === 'auto' ? autoAgentIcon : normalAgentIcon)"></span><b>{{ activeAgent?.display_name || '当前智能体' }}</b></button>
         <div v-else class="conversation-tab active workgroup-conversation-tab" :title="activeWorkgroupName"><span class="icon-mask tab-icon" :style="maskStyle(navWorkgroupsIcon)"></span><b>{{ activeWorkgroupName }}</b></div>
+        <div v-if="activeTab !== 'workgroups'" class="menu-anchor resource-menu-anchor" data-menu-anchor="资源" @mouseenter="setTopMenuFromHover('资源')">
+          <button class="resource-menu-trigger" :class="{ active: openMenu === '资源' }" type="button" role="menuitem" data-menubar-trigger="资源" aria-label="资源" title="资源" aria-haspopup="menu" :aria-expanded="openMenu === '资源'" @click.stop="toggleTopMenu('资源')"><UiIcon name="folder-open" :size="16" /></button>
+          <div v-if="openMenu === '资源'" class="menu-popover" role="menu" aria-label="资源菜单">
+            <template v-for="(item, i) in menuEntries.资源" :key="i"><div v-if="item.separator" class="menu-separator" role="separator"></div><button v-else class="menu-item" type="button" role="menuitem" :disabled="item.disabled" tabindex="-1" @click="runMenuAction(item.action)"><span>{{ item.label }}</span><small v-if="item.hint">{{ item.hint }}</small></button></template>
+          </div>
+        </div>
         <div v-if="activeTab !== 'workgroups'" class="open-resource-tabs"><div v-if="workspaceOpened" class="open-resource-tab" :class="{ active: activeTab === 'file' }"><button class="resource-tab-main" :title="workspaceName" @click="showWorkspace"><span class="icon-mask tab-icon" :style="maskStyle(folderOpenIcon)"></span><span class="resource-tab-label">{{ workspaceName }}</span></button><button class="tab-close" aria-label="关闭工作区" title="关闭工作区" @click="workspaceOpened = false; showChat()"><UiIcon name="close" :size="14" /></button></div><div v-if="browserOpened" class="open-resource-tab" :class="{ active: activeTab === 'browser' }"><button class="resource-tab-main" :title="browserName" @click="showBrowser"><span class="icon-mask tab-icon" :style="maskStyle(browserIcon)"></span><span class="resource-tab-label">{{ browserName }}</span></button><button class="tab-close" aria-label="关闭浏览器" title="关闭浏览器" @click="browserOpened = false; showChat()"><UiIcon name="close" :size="14" /></button></div><div v-for="terminal in terminalInstances.filter(item => item.agentId === activeId)" :key="terminal.id" class="open-resource-tab" :class="{ active: activeTab === 'terminal' && activeTerminalInstanceId === terminal.id }"><button class="resource-tab-main" :title="terminal.name" @click="activateTerminal(terminal.id)"><span class="icon-mask tab-icon" :style="maskStyle(terminalIcon)"></span><span class="resource-tab-label">{{ terminal.name }}</span></button><button class="tab-close" :aria-label="`关闭 ${terminal.name}`" :title="`关闭 ${terminal.name}`" @click="closeTerminal('view-close', terminal.id)"><UiIcon name="close" :size="14" /></button></div></div>
       </div>
       <div v-if="status.setup_required" class="notice setup"><span>本地服务需要首次配置</span><button @click="showSettings">打开设置</button></div>
-      <div v-if="error && status.online && !status.setup_required && displayedTab !== 'chat'" class="desktop-error-hint desktop-error-hint--resource" role="alert" tabindex="0" aria-describedby="desktop-resource-error-detail" aria-label="操作未完成；聚焦或悬浮查看详细错误">
+      <div v-if="error && status.online && !status.setup_required && displayedTab !== 'chat'" class="desktop-error-hint desktop-error-hint--visible desktop-error-hint--resource" role="alert">
         <UiIcon name="alert" :size="14" aria-hidden="true" />
         <span>操作未完成</span>
-        <span id="desktop-resource-error-detail" class="desktop-error-hint__detail" role="tooltip">{{ error }}</span>
+        <span class="desktop-error-hint__message">{{ error }}</span>
       </div>
       <div v-if="resourceNavigationError" class="notice resource-navigation-notice" role="alert"><span>{{ resourceNavigationError }}</span><button type="button" aria-label="关闭资源提示" @click="resourceNavigationError = ''">关闭</button></div>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('chat')" @after-leave="onComposerPageAfterLeave('chat', $event)" @after-enter="onComposerPageAfterEnter('chat', $event)">
@@ -2093,16 +2138,16 @@ onUnmounted(() => {
         <div v-else-if="status.setup_required" class="empty-state"><div class="empty-icon"><i></i></div><h2>完成本地服务首次配置</h2><p>设置本地服务名称与模型后即可开始使用。</p><button class="quiet" @click="showSettings">打开设置</button></div>
         <div v-else-if="!activeAgent" class="empty-state"><h2>选择一个 Agent</h2><p>从左侧列表选择 Agent 开始对话。</p></div>
         <template v-else>
-          <div v-if="!chatEntries.length && !streamingText && !hitlQueue.length && !turnError" class="welcome"><div class="welcome-mark"><span class="icon-mask" :style="maskStyle(activeAgent?.agent_type === 'auto' ? autoAgentIcon : normalAgentIcon)"></span></div><h1>{{ activeAgent.display_name }}</h1><p>与此 Agent 的真实对话会保存在已连接的本地服务中。</p><span class="real-tag">真实会话</span></div>
+          <div v-if="!chatEntries.length && !streamingText && !hitlQueue.length && !turnError" class="welcome"><div class="welcome-mark"><span class="icon-mask" :style="maskStyle(activeAgent?.agent_type === 'auto' ? autoAgentIcon : normalAgentIcon)"></span></div><h1>{{ activeAgent.display_name }}</h1><p>输入任务开始；也可以从资源菜单打开工作区、浏览器或终端。</p></div>
           <div v-else class="desktop-chat-wrapper app__body--chat-v61">
-            <MainChatPanel ref="chatPanel" :key="activeId" :agent-id="activeId" :entries="chatEntries" :streaming-text="streamingText" :turn-error="turnError" :hitl-queue="hitlQueue" :agent-title="activeAgent.display_name" :show-workspace-switcher="false" :sending="busy || agentGenerating" :hitl-busy="busy" :hitl-busy-index="hitlBusyIndex" @approve-all="approveAll" @reject-all="rejectAll" @approve-one="approveOne" @reject-one="rejectOne" @user-info-submit="submitUserInfo" @user-info-selected="userInfoSelected = $event" @memory-conflict-decide="decideMemoryConflict" @memory-conflict-cancel="cancelMemoryConflict" />
+            <MainChatPanel ref="chatPanel" :key="activeId" :agent-id="activeId" :entries="chatEntries" :streaming-text="streamingText" :turn-error="turnError" :model-recovery-available="modelRecoveryAvailable" :model-name="llmSettings?.model || ''" :model-profile="llmSettings?.active_profile || agentActiveProfile(activeAgent)" :hitl-queue="hitlQueue" :agent-title="activeAgent.display_name" :show-workspace-switcher="false" :sending="busy || agentGenerating" :hitl-busy="busy" :hitl-busy-index="hitlBusyIndex" @approve-selection="approveSelection" @reject-all="rejectAll" @open-model-picker="openModelPicker" @open-model-settings="openModelSettings(llmSettings?.active_profile || agentActiveProfile(activeAgent))" @user-info-submit="submitUserInfo" @user-info-selected="userInfoSelected = $event" @memory-conflict-decide="decideMemoryConflict" @memory-conflict-cancel="cancelMemoryConflict" />
           </div>
         </template>
-        <div v-if="error && status.online && !status.setup_required" class="desktop-error-hint" role="alert" tabindex="0" aria-describedby="desktop-chat-error-detail" aria-label="操作未完成；聚焦或悬浮查看详细错误">
+        <div v-if="error && status.online && !status.setup_required" class="desktop-error-hint desktop-error-hint--visible" role="alert">
           <UiIcon name="alert" :size="14" aria-hidden="true" />
           <span>操作未完成</span>
           <button v-if="isTauri && !activeAgent" class="desktop-error-hint__retry" type="button" aria-label="重试连接" title="重试" @click.stop="loadAgents"><UiIcon name="refresh-cw" :size="13" /></button>
-          <span id="desktop-chat-error-detail" class="desktop-error-hint__detail" role="tooltip">{{ error }}</span>
+          <span class="desktop-error-hint__message">{{ error }}</span>
         </div>
       </section>
       </Transition>
@@ -2113,7 +2158,7 @@ onUnmounted(() => {
       </section>
       </Transition>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('file')" @after-leave="onComposerPageAfterLeave('file', $event)" @after-enter="onComposerPageAfterEnter('file', $event)">
-      <section v-if="visitedTabs.has('file') && (displayedTab === 'file' || workspaceOpened)" v-show="composerPageVisible('file')" data-composer-page="file" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><WorkspaceFiles ref="workspaceFilesPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :workspace-location="activeAgent?.workspace?.path || activeAgent?.workspace_path || ''" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('file')" :dock-collapsed="dockCollapsed" :dock-status="dockStatus" :dock-agent-name="activeAgent?.display_name || '当前智能体'" :attachment-limit-reached="attachmentLimitReached" @resource-name="workspaceName = $event" @annotation-update="handleWorkspaceReference" @annotation-remove="onWorkspaceAnnotationRemove" @expand-agent-dock="dockCollapsed = false" /></section>
+      <section v-if="visitedTabs.has('file') && (displayedTab === 'file' || workspaceOpened)" v-show="composerPageVisible('file')" data-composer-page="file" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><WorkspaceFiles ref="workspaceFilesPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :workspace-location="activeAgent?.workspace?.path || activeAgent?.workspace_path || ''" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('file')" :dock-collapsed="dockCollapsed" :dock-occupied-height="dockOccupiedHeight" :dock-status="dockStatus" :dock-agent-name="activeAgent?.display_name || '当前智能体'" :attachment-limit-reached="attachmentLimitReached" @resource-name="workspaceName = $event" @annotation-update="handleWorkspaceReference" @annotation-remove="onWorkspaceAnnotationRemove" @expand-agent-dock="dockCollapsed = false" /></section>
       </Transition>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('browser')" @after-leave="onComposerPageAfterLeave('browser', $event)" @after-enter="onComposerPageAfterEnter('browser', $event)">
       <section v-if="visitedTabs.has('browser') && (displayedTab === 'browser' || browserOpened)" v-show="composerPageVisible('browser')" data-composer-page="browser" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><BrowserViewer ref="browserViewerPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('browser')" @resource-name="browserName = $event" @open-connection-settings="openBrowserCapabilitySettings" /></section>
@@ -2137,8 +2182,8 @@ onUnmounted(() => {
     </div>
     <div class="composer-toolbar-right">
       <button v-if="failedSendDraft" type="button" class="restore-failed-draft composer-restore" :disabled="!!input.trim()" @click="restoreFailedSendDraft('chat')">恢复失败消息</button>
-      <ComposerToolbar class="desktop-composer-toolbar" :llm-settings="llmSettings" :settings-profile-id="agentActiveProfile(activeAgent)" :desktop-compact="true" :disabled="agentGenerating || !activeId" :status-label="composerRuntimeStatus" @switch-profile="switchLLMProfile" @open-model-settings="openModelSettings"/>
-      <button class="send-button composer-action" type="button" :class="{ 'is-stop': agentGenerating }" :disabled="agentGenerating ? !canCancelTurn || cancellingTurn : !canSendMessage || !hasComposerContent || !activeId" :aria-label="agentGenerating ? (cancellingTurn ? '正在停止本轮' : '停止本轮') : '发送消息'" :title="agentGenerating ? (cancellingTurn ? '正在停止本轮…' : '停止本轮') : '发送消息'" :aria-busy="cancellingTurn" @click="agentGenerating ? stopCurrentTurn() : send()"><span class="icon-mask send-icon composer-action__send" :style="maskStyle(sendIcon)" aria-hidden="true"></span><span class="icon-mask send-icon composer-action__stop" :style="maskStyle(stopIcon)" aria-hidden="true"></span></button>
+      <ComposerToolbar ref="composerToolbar" class="desktop-composer-toolbar" :llm-settings="llmSettings" :profile-catalog="llmProfileCatalog" :settings-profile-id="agentActiveProfile(activeAgent)" :desktop-compact="true" :disabled="turnInProgress || !activeId" :status-label="composerRuntimeStatus" @switch-profile="switchLLMProfile" @open-model-settings="openModelSettings"/>
+      <button class="send-button composer-action" type="button" :class="{ 'is-stop': agentGenerating }" :disabled="agentGenerating ? !canStopFromComposer || cancellingTurn : !canSendMessage || !hasComposerContent || !activeId" :aria-label="agentGenerating ? (cancellingTurn ? '正在停止本轮' : '停止本轮') : '发送消息'" :title="agentGenerating ? (cancellingTurn ? '正在停止本轮…' : '停止本轮') : '发送消息'" :aria-busy="cancellingTurn" @click="agentGenerating ? stopCurrentTurn() : send()"><span class="icon-mask send-icon composer-action__send" :style="maskStyle(sendIcon)" aria-hidden="true"></span><span class="icon-mask send-icon composer-action__stop" :style="maskStyle(stopIcon)" aria-hidden="true"></span></button>
     </div>
   </div>
 </form><Transition name="composer-notice"><p v-if="commandNotice" class="composer-notice" role="status" aria-live="polite">{{ commandNotice }}</p></Transition><div class="composer-foot"><span>内容发送到当前 Agent</span></div></footer>
@@ -2150,12 +2195,16 @@ onUnmounted(() => {
         v-model:collapsed="dockCollapsed"
         :collapsed-in-toolbar="activeTab === 'file'"
         :status="dockStatus"
+        :pending-kind="dockPendingKind"
         :turn-error="turnError"
+        :model-recovery-available="modelRecoveryAvailable"
+        :model-name="llmSettings?.model || ''"
+        :model-profile="llmSettings?.active_profile || agentActiveProfile(activeAgent)"
         :agent-name="activeAgent?.display_name || '当前智能体'"
         :can-send="canSendMessage"
         :references="pendingWorkspaceReferences"
-        :disabled="!activeId || !status.online || status.setup_required"
-        :can-stop="canCancelTurn"
+        :disabled="!activeId || !status.online || status.setup_required || busy || cancellingTurn"
+        :can-stop="canStopFromComposer"
         :cancelling="cancellingTurn"
         :failed-draft="Boolean(failedSendDraft)"
         :restore-disabled="Boolean(dockDraft.trim())"
@@ -2164,13 +2213,17 @@ onUnmounted(() => {
         @restore="restoreFailedSendDraft('dock')"
         @remove-reference="removeWorkspaceReferenceById"
         @back-to-chat="showChat"
+        @open-model-picker="openModelPicker"
+        @open-model-settings="openModelSettings(llmSettings?.active_profile || agentActiveProfile(activeAgent))"
+        @occupied-height="dockOccupiedHeight = $event"
       >
         <template #details>
           <div class="dock-details">
             <p v-if="commandNotice" class="dock-command-notice" role="status" aria-live="polite">{{ commandNotice }}</p>
             <div v-if="dockLatestMessage" class="dock-detail-row dock-detail-row--message"><ResourceMarkdown :entry="dockLatestMessage" :agent-id="activeId" source="dock" /></div>
-            <div v-if="lastToolActivity" class="dock-detail-row"><small>最近工具</small><span>{{ lastToolActivity.summary || lastToolActivity.data?.tool_name || '工具活动' }}</span></div>
-            <div v-if="pending" class="dock-approval"><strong>{{ pending.message || '有待处理的请求' }}</strong><div v-for="call in approvalCalls" :key="call.id" class="dock-approval-call"><code>{{ call.name }}</code><span>{{ call.reason }}</span><pre v-if="call.argumentsText" class="approval-arguments">{{ call.argumentsText }}</pre></div><div v-if="approvalCalls.length" class="approval-actions"><button class="quiet" :disabled="busy" @click.prevent="rejectAll(approvalQueueIndex)">拒绝</button><button class="approve" :disabled="busy" @click.prevent="approveAll(approvalQueueIndex)">批准并继续</button></div><p v-else>请使用右上角按钮返回完整对话处理此请求。</p></div>
+            <div v-if="lastToolActivity && approvalQueueIndex < 0" class="dock-detail-row"><small>最近工具</small><span>{{ lastToolActivity.summary || lastToolActivity.data?.tool_name || '工具活动' }}</span></div>
+            <div v-if="approvalQueueIndex >= 0" class="dock-approval"><ApprovalBubble :data="hitlQueue[approvalQueueIndex].data" :request-key="approvalRequestKey(hitlQueue[approvalQueueIndex].data)" :busy="hitlBusyIndex === approvalQueueIndex" @approve-selection="approvedCallIds => approveSelection({ index: approvalQueueIndex, approvedCallIds })" @reject-all="rejectAll(approvalQueueIndex)" /></div>
+            <div v-else-if="pending" class="dock-approval dock-approval-fallback"><strong>{{ pending.message || '有待处理的请求' }}</strong><p>请返回完整对话处理此请求。</p></div>
           </div>
         </template>
       </ResourceAgentDock>

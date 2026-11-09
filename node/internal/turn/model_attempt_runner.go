@@ -52,15 +52,6 @@ func (o *Orchestrator) runModelRequest(
 			return result, context.Canceled
 		}
 		if attempt > 0 {
-			if o.modelRetryCheck != nil {
-				allowed, reason := o.modelRetryCheck(sessionID)
-				if !allowed {
-					if strings.TrimSpace(reason) == "" {
-						reason = "turn_budget"
-					}
-					return result, fmt.Errorf("%w: %s", ErrBudgetExhausted, reason)
-				}
-			}
 			if retryErr := waitModelRetry(ctx, attempt, nextRetryDelay); retryErr != nil {
 				return result, retryErr
 			}

@@ -15,11 +15,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
-// DefaultMaxSteps 为新建 Agent 未指定时的 defaults.llm.max_steps。
-const DefaultMaxSteps = 32
-
-// DefaultMaxToolCalls 为 Agent 单个聊天 Turn 未指定时的工具调用上限。
-// 模型可以在一个步骤中并行提出多个工具，因此该值独立于 max_steps。
+// DefaultMaxToolCalls 为 Agent 每个 Turn 未指定时的工具调用上限。
 const DefaultMaxToolCalls = 64
 
 // MaxConfiguredToolCalls 限制可配置范围，避免无效或意外的超大值。

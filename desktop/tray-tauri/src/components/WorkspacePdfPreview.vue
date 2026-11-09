@@ -6,7 +6,7 @@ import UiIcon from '@desktop-ui/components/UiIcon.vue'
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
-const props = defineProps({ bytes: { type: Uint8Array, default: () => new Uint8Array() } })
+const props = defineProps({ bytes: { type: Uint8Array, default: () => new Uint8Array() }, bottomInset: { type: Number, default: 12 } })
 const emit = defineEmits(['selection', 'reference-contextmenu'])
 const canvas = ref(null)
 const loading = ref(false)
@@ -189,7 +189,7 @@ onUnmounted(() => { loadSequence++; void destroyDocument() })
       <span>{{ Math.round(zoom * 100) }}%</span>
       <button type="button" class="desktop-icon-button" title="放大" aria-label="放大" :disabled="zoom >= 2.2" @click="setZoom(0.1)"><UiIcon name="plus" :size="15" /></button>
     </div>
-    <div class="workspace-pdf-preview__viewport">
+    <div class="workspace-pdf-preview__viewport" :style="{ '--workspace-pdf-bottom-inset': `${Math.max(12, bottomInset)}px` }">
       <div v-if="loading" class="workspace-pdf-preview__empty">正在载入 PDF…</div>
       <div v-else-if="error" class="workspace-pdf-preview__empty">无法预览此 PDF：{{ error }}</div>
       <div v-else-if="pageCount" class="workspace-pdf-preview__page" :style="{ width: `${pageWidth}px`, height: `${pageHeight}px` }" @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointercancel="onPointerUp" @contextmenu.prevent="emit('reference-contextmenu', $event)">
@@ -209,7 +209,7 @@ onUnmounted(() => { loadSequence++; void destroyDocument() })
 .workspace-pdf-preview__toolbar .desktop-icon-button:disabled{opacity:.4;cursor:default}
 .workspace-pdf-preview__minus{width:10px;height:1.5px;background:currentColor}
 .workspace-pdf-preview__spacer{flex:1}
-.workspace-pdf-preview__viewport{display:flex;flex:1;min-width:0;min-height:0;justify-content:center;overflow:auto;padding:18px}
+.workspace-pdf-preview__viewport{display:flex;flex:1;min-width:0;min-height:0;justify-content:center;overflow:auto;scroll-padding-bottom:var(--workspace-pdf-bottom-inset, 12px);padding:18px 18px calc(18px + var(--workspace-pdf-bottom-inset, 12px))}
 .workspace-pdf-preview__page{position:relative;flex:none;box-shadow:0 3px 16px #1721262b;touch-action:none;user-select:none}
 .workspace-pdf-preview__page canvas{display:block;background:#fff}
 .workspace-pdf-preview__selection{position:absolute;border:2px solid #506873;background:#78909c38;pointer-events:none}

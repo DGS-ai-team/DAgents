@@ -8,11 +8,13 @@ import MemoryConflictBubble from "./MemoryConflictBubble.vue";
 import ScrollToTailButton from "./ScrollToTailButton.vue";
 import ToolSummaryRow from "./ToolSummaryRow.vue";
 import ToolGroupRow from "./ToolGroupRow.vue";
+import UiIcon from "./UiIcon.vue";
 import { buildStream } from "../composables/useStream.js";
 import { groupConsecutiveToolSteps } from "../utils/streamDisplay.js";
 import { toolJobsStore } from "../stores/toolJobs.js";
 import { turnStateStore } from "../stores/turnState.js";
 import { countNewStreamItems } from "../utils/streamUnread.js";
+import { approvalRequestKey } from "../stores/hitl.js";
 import {
   measureSync,
   updateRuntimeMetrics,
@@ -22,6 +24,9 @@ const props = defineProps({
   entries: { type: Array, default: () => [] },
   streamingText: { type: String, default: "" },
   turnError: { type: String, default: "" },
+  modelRecoveryAvailable: { type: Boolean, default: false },
+  modelName: { type: String, default: "" },
+  modelProfile: { type: String, default: "" },
   hitlQueue: { type: Array, default: () => [] },
   toolVerbose: { type: Boolean, default: false },
   sending: { type: Boolean, default: false },
@@ -36,10 +41,10 @@ const props = defineProps({
 });
 
 const emit = defineEmits([
-  "approve-all",
+  "approve-selection",
   "reject-all",
-  "approve-one",
-  "reject-one",
+  "open-model-picker",
+  "open-model-settings",
   "user-info-submit",
   "user-info-selected",
   "memory-conflict-decide",
@@ -369,6 +374,7 @@ defineExpose({
           :call-entry="item.callEntry"
           :result-entry="item.resultEntry"
           :execution-hint="item.executionHint"
+          :lifecycle-status="item.lifecycleStatus"
           :verbose="toolVerbose"
         />
         <ToolGroupRow
@@ -379,11 +385,10 @@ defineExpose({
         <ApprovalBubble
           v-else-if="item.kind === 'approval'"
           :data="item.hitl.data"
+          :request-key="approvalRequestKey(item.hitl.data)"
           :busy="hitlBusy && hitlBusyIndex === item.hitlIndex"
-          @approve-all="emit('approve-all', item.hitlIndex)"
+          @approve-selection="(approvedCallIds) => emit('approve-selection', { index: item.hitlIndex, approvedCallIds })"
           @reject-all="emit('reject-all', item.hitlIndex)"
-          @approve-one="(id) => emit('approve-one', { index: item.hitlIndex, callId: id })"
-          @reject-one="(id) => emit('reject-one', { index: item.hitlIndex, callId: id })"
         />
         <UserInfoBubble
           v-else-if="item.kind === 'user_information'"
@@ -401,7 +406,18 @@ defineExpose({
           @cancel="emit('memory-conflict-cancel', item.hitlIndex)"
         />
       </template>
-      <p v-if="turnError" class="chat__turn-error" role="alert">{{ turnError }}</p>
+      <div v-if="turnError" class="chat__turn-error">
+        <p role="alert">{{ turnError }}</p>
+        <div v-if="modelRecoveryAvailable" class="chat__turn-error-meta">
+          <span v-if="modelName || modelProfile" class="chat__turn-error-model">
+            当前选择 · {{ modelName ? `模型：${modelName}` : "" }}{{ modelName && modelProfile ? " · " : "" }}{{ modelProfile ? `配置：${modelProfile}` : "" }}
+          </span>
+          <div class="chat__turn-error-actions">
+            <button type="button" class="chat__turn-error-action" title="切换模型配置" aria-label="切换模型配置" @click="emit('open-model-picker')"><UiIcon name="arrow-left-right" :size="14" /></button>
+            <button v-if="modelProfile" type="button" class="chat__turn-error-action" title="打开模型设置" aria-label="打开模型设置" @click="emit('open-model-settings')"><UiIcon name="settings" :size="14" /></button>
+          </div>
+        </div>
+      </div>
       </div>
       <ScrollToTailButton
         :visible="showScrollToTail"

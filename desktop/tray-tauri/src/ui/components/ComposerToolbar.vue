@@ -4,6 +4,7 @@ import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   llmSettings: { type: Object, default: null },
+  profileCatalog: { type: Array, default: () => [] },
   settingsProfileId: { type: String, default: "" },
   disabled: { type: Boolean, default: false },
   desktopCompact: { type: Boolean, default: false },
@@ -20,22 +21,31 @@ const profiles = computed(() => {
   const list = props.llmSettings?.profiles;
   return Array.isArray(list) ? list.map((id) => String(id || "").trim()).filter(Boolean) : [];
 });
+const profileById = computed(() => new Map(
+  props.profileCatalog
+    .filter(profile => profile?.id)
+    .map(profile => [String(profile.id), profile]),
+));
 const activeProfile = computed(() => String(props.llmSettings?.active_profile || props.settingsProfileId || "").trim());
 const showProfileSwitch = computed(() => profiles.value.length > 0 || Boolean(activeProfile.value));
 const canSwitch = computed(() => !props.disabled && showProfileSwitch.value);
 const hasProfileChoice = computed(() => profiles.value.length > 1);
 const canOpenSettings = computed(() => Boolean(activeProfile.value));
-const activeLabel = computed(() => activeProfile.value || props.llmSettings?.model || "Auto");
-const displayLabel = computed(() => props.desktopCompact
-  ? String(props.llmSettings?.model || "Auto").trim()
-  : activeLabel.value);
+const displayLabel = computed(() => String(props.llmSettings?.model || "Auto").trim());
 const titleText = computed(() => {
   const provider = String(props.llmSettings?.provider || "").trim();
   const model = String(props.llmSettings?.model || displayLabel.value).trim();
-  const profile = props.desktopCompact && activeProfile.value ? `配置: ${activeProfile.value}` : "";
+  const profile = activeProfile.value ? `配置: ${activeProfile.value}` : "";
   const providerModel = provider && model ? `${provider} / ${model}` : model || provider || displayLabel.value;
   return profile ? `${providerModel} · ${profile}` : providerModel;
 });
+
+function profileModelLabel(id) {
+  const catalogModel = String(profileById.value.get(id)?.model || "").trim();
+  if (catalogModel) return catalogModel;
+  if (id === activeProfile.value) return String(props.llmSettings?.model || "").trim() || id;
+  return id;
+}
 
 function closeMenu() {
   open.value = false;
@@ -48,6 +58,15 @@ function toggleMenu() {
     nextTick(() => menuRef.value?.querySelector('[aria-selected="true"]')?.focus?.());
   }
 }
+
+function openPicker() {
+  if (!canSwitch.value) return false;
+  open.value = true;
+  nextTick(() => menuRef.value?.querySelector('[aria-selected="true"]')?.focus?.());
+  return true;
+}
+
+defineExpose({ openPicker });
 
 function pickProfile(id) {
   closeMenu();
@@ -119,7 +138,9 @@ onBeforeUnmount(() => {
         aria-haspopup="listbox"
         @click="toggleMenu"
       >
-        <span class="composer-toolbar__trigger-label">{{ displayLabel }}</span>
+        <span class="composer-toolbar__trigger-label">
+          <span>{{ displayLabel }}</span>
+        </span>
         <UiIcon v-if="hasProfileChoice || canOpenSettings" class="composer-toolbar__chevron" name="chevron-down" :size="14" />
       </button>
 
@@ -139,7 +160,10 @@ onBeforeUnmount(() => {
             :class="{ 'composer-toolbar__option--active': id === activeProfile }"
             @click="pickProfile(id)"
           >
-            <span class="composer-toolbar__option-label">{{ id }}</span>
+            <span class="composer-toolbar__option-copy">
+              <span class="composer-toolbar__option-model">{{ profileModelLabel(id) }}</span>
+              <small class="composer-toolbar__option-profile">{{ id }}</small>
+            </span>
             <UiIcon v-if="id === activeProfile" class="composer-toolbar__option-check" name="check" :size="14" />
           </button>
         </div>

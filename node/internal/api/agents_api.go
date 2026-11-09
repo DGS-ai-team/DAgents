@@ -91,7 +91,6 @@ func defaultAgentCreationDefaults() map[string]any {
 			"description": "",
 		},
 		"llm": map[string]any{
-			"max_steps":      agentruntime.DefaultMaxSteps,
 			"max_tool_calls": agentruntime.DefaultMaxToolCalls,
 		},
 		"tools": map[string]any{
@@ -143,7 +142,7 @@ func agentViewFromRecord(rec store.AgentRecord) agentView {
 		DisplayName:    rec.DisplayName,
 		TemplateID:     rec.TemplateID,
 		AgentType:      "normal",
-		ConfigSnapshot: rec.ConfigSnapshot,
+		ConfigSnapshot: agentruntime.SanitizeSnapshotJSON(rec.ConfigSnapshot),
 		CreatedAt:      rec.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:      rec.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}

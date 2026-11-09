@@ -202,7 +202,7 @@ handleInputMessage
 
 - `StepIndex`：当前 Turn 内的 Step 序号，由 Coordinator 分配并通过 `TurnExecutionContext` 传递。
 - 新 `handleHumanMessage` 时创建新的 Turn；不再由 runtime 归零和递增独立计数器。
-- 达到 `max_steps`（默认 32）→ 由 TurnBudget 结束当前 Turn，并在 `turn_finished` 中报告预算耗尽；下一条 user 消息会创建新的 Turn。
+- 达到 Agent 的 `max_tool_calls`（默认 64，范围 1–4096）→ 阻止本轮继续提出工具调用，但仍允许一次不带工具的最终回复。普通聊天、自动激活、每日经验整理和子 Agent 均遵循所属 Agent 的每轮上限；并行调用逐个计数，失败或拒绝也计入。
 
 ### 2.7 源码索引（§2）
 

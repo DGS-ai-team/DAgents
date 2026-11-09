@@ -14,6 +14,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
+	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
 
@@ -99,8 +100,9 @@ func TestTriggerOriginApprovalFinalSummaryPromptIsToolFree(t *testing.T) {
 	mgr := NewManager("agent-1", stream.NewHub(16, logx.Discard()), client, reg, pol, nil, TurnOptions{
 		AutoAgent:     true,
 		WorkspaceRoot: workspace,
-		TriggerToolRoundProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
-			return 1, agentID == "agent-1" && triggerID == "default-trigger" && deliveryID == "delivery-1", nil
+		Budget:        turn.TurnBudget{MaxToolCalls: 1, ReserveFinalSummary: true},
+		TriggerActivationProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (bool, error) {
+			return agentID == "agent-1" && triggerID == "default-trigger" && deliveryID == "delivery-1", nil
 		},
 	}, logx.Discard())
 	defer mgr.Stop()
@@ -157,8 +159,8 @@ func TestTrustedSystemAutoIdlePublishesNoWorkWithoutNotificationBump(t *testing.
 	client := &autoIdleClient{}
 	mgr := NewManager("agent-1", hub, client, reg, policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"auto_idle": policy.ModeNever}}), nil, TurnOptions{
 		AutoAgent: true,
-		TriggerToolRoundProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
-			return 1, agentID == "agent-1" && triggerID == "auto_idle" && deliveryID == "idle-1", nil
+		TriggerActivationProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (bool, error) {
+			return agentID == "agent-1" && triggerID == "auto_idle" && deliveryID == "idle-1", nil
 		},
 	}, logx.Discard())
 	defer mgr.Stop()
@@ -228,8 +230,8 @@ func TestTrustedSystemAutoIdleSurvivesReadOnlyContinuation(t *testing.T) {
 	}
 	mgr := NewManager("agent-1", hub, client, reg, policy.NewDefaultEngine(), nil, TurnOptions{
 		AutoAgent: true, WorkspaceRoot: workspace,
-		TriggerToolRoundProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
-			return 2, agentID == "agent-1" && triggerID == "auto-idle" && deliveryID == "read-1", nil
+		TriggerActivationProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (bool, error) {
+			return agentID == "agent-1" && triggerID == "auto-idle" && deliveryID == "read-1", nil
 		},
 	}, logx.Discard())
 	defer mgr.Stop()

@@ -143,7 +143,7 @@ func TestAgentTemplatesAPI_list(t *testing.T) {
 	cfg.Onboarding.NodeProfileCompleted = true
 	userDir := cfg.AgentTemplatesDir()
 	_ = os.MkdirAll(userDir, 0o755)
-	_ = os.WriteFile(filepath.Join(userDir, "demo.yaml"), []byte("id: demo\ndisplay_name: Demo\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(userDir, "demo.yaml"), []byte("id: demo\ndisplay_name: Demo\ndefaults:\n  llm:\n    max_steps: 32\n    max_tool_calls: 64\n    future_llm: keep\n"), 0o644)
 
 	srv := NewServer(cfg, nil, WithLLM(&llm.MockClient{}), WithSkipStore())
 	req := httptest.NewRequest(http.MethodGet, "/v1/agent-templates", nil)
@@ -160,6 +160,33 @@ func TestAgentTemplatesAPI_list(t *testing.T) {
 	}
 	if len(out.Templates) < 1 {
 		t.Fatalf("templates = %+v", out.Templates)
+	}
+	var demo map[string]any
+	for _, item := range out.Templates {
+		if item["id"] == "demo" {
+			demo = item
+		}
+	}
+	defaults := demo["defaults"].(map[string]any)
+	llmDefaults := defaults["llm"].(map[string]any)
+	if _, exists := llmDefaults["max_steps"]; exists || llmDefaults["max_tool_calls"] != float64(64) || llmDefaults["future_llm"] != "keep" {
+		t.Fatalf("template API did not sanitize retired quota while preserving defaults: %#v", demo)
+	}
+}
+
+func TestAgentViewSanitizesRetiredSnapshotKeysWithoutDroppingUnknownFields(t *testing.T) {
+	rec := store.AgentRecord{ConfigSnapshot: json.RawMessage(`{"template_id":"legacy","future_top_level":{"keep":true},"defaults":{"llm":{"max_steps":32,"max_tool_calls":64,"future_llm":"keep"}}}`)}
+	view := agentViewFromRecord(rec)
+	var snapshot map[string]any
+	if err := json.Unmarshal(view.ConfigSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot["future_top_level"] == nil {
+		t.Fatalf("unknown snapshot field lost: %s", view.ConfigSnapshot)
+	}
+	llmDefaults := snapshot["defaults"].(map[string]any)["llm"].(map[string]any)
+	if _, exists := llmDefaults["max_steps"]; exists || llmDefaults["max_tool_calls"] != float64(64) || llmDefaults["future_llm"] != "keep" {
+		t.Fatalf("agent view snapshot = %s", view.ConfigSnapshot)
 	}
 }
 
@@ -186,7 +213,7 @@ func TestAgentsAPI_createWithoutTemplate(t *testing.T) {
 		"display_name": "空白 Agent",
 		"workspace":    map[string]any{"mode": "custom", "path": customRoot},
 		"defaults": map[string]any{
-			"llm": map[string]any{"max_steps": 16},
+			"llm": map[string]any{"max_tool_calls": 16},
 		},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/v1/agents", bytes.NewReader(body))

@@ -163,7 +163,7 @@ func TestCloneContextMessagesDetachesNestedHistory(t *testing.T) {
 	messages := []llm.Message{{
 		Role:           "user",
 		ContentParts:   []llm.ContentPart{{Type: "image_url", ImageURL: &llm.ImageURLPart{URL: "data:image/png;base64,abc"}}},
-		FileReferences: []llm.FileReference{{Path: "C:/tmp/source.png", Name: "source.png"}},
+		FileReferences: []llm.FileReference{{Path: "C:/tmp/source.png", Name: "source.png", Anchor: &llm.FileReferenceAnchor{Type: "pdf-region", Label: "第 2 页", Location: map[string]any{"page": 2}}}},
 		ToolCalls:      []llm.ToolCall{{ID: "call-1", Function: llm.ToolCallFunction{Name: "bash_run"}}},
 		Source:         &llm.MessageSource{Kind: llm.MessageSourceUser},
 		Provenance:     &llm.MessageProvenance{Producer: "human"},
@@ -174,11 +174,13 @@ func TestCloneContextMessagesDetachesNestedHistory(t *testing.T) {
 	clone := cloneContextMessages(messages)
 	clone[0].ContentParts[0].ImageURL.URL = "changed"
 	clone[0].FileReferences[0].Name = "changed"
+	clone[0].FileReferences[0].Anchor.Label = "changed"
+	clone[0].FileReferences[0].Anchor.Location["page"] = 9
 	clone[0].ToolCalls[0].Function.Name = "changed"
 	clone[0].Source.Kind = llm.MessageSourceRuntime
 	clone[0].Provenance.Producer = "changed"
 	clone[0].ToolResultMetadata.Error.Message = "changed"
-	if messages[0].ContentParts[0].ImageURL.URL != "data:image/png;base64,abc" || messages[0].FileReferences[0].Name != "source.png" || messages[0].ToolCalls[0].Function.Name != "bash_run" || messages[0].Source.Kind != llm.MessageSourceUser || messages[0].Provenance.Producer != "human" || messages[0].ToolResultMetadata.Error.Message != "original" {
+	if messages[0].ContentParts[0].ImageURL.URL != "data:image/png;base64,abc" || messages[0].FileReferences[0].Name != "source.png" || messages[0].FileReferences[0].Anchor.Label != "第 2 页" || messages[0].FileReferences[0].Anchor.Location["page"] != 2 || messages[0].ToolCalls[0].Function.Name != "bash_run" || messages[0].Source.Kind != llm.MessageSourceUser || messages[0].Provenance.Producer != "human" || messages[0].ToolResultMetadata.Error.Message != "original" {
 		t.Fatalf("context clone mutated runtime message: %#v", messages[0])
 	}
 }

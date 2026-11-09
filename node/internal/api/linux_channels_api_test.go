@@ -2,13 +2,17 @@ package api
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
+	"golang.org/x/crypto/ssh"
 )
 
 func TestLinuxChannelRoutesPersistAndReplaceBindings(t *testing.T) {
@@ -64,7 +68,7 @@ func TestLinuxChannelRoutesPersistAndReplaceBindings(t *testing.T) {
 	if got, err := linuxStore.ResolveSecret(t.Context(), directCredential.SecretRef); err != nil || got != directPassword {
 		t.Fatalf("resolved direct password=%q err=%v", got, err)
 	}
-	privateKey := "-----BEGIN OPENSSH PRIVATE KEY-----\nnot-a-real-key\n-----END OPENSSH PRIVATE KEY-----"
+	privateKey := testLinuxPrivateKey(t)
 	if status, body := postJSON(http.MethodPost, "/v1/linux/credentials", map[string]any{
 		"auth_type": "private_key", "secret_value": privateKey,
 	}); status != http.StatusCreated || body["secret_source"] != "direct" {
@@ -75,6 +79,29 @@ func TestLinuxChannelRoutesPersistAndReplaceBindings(t *testing.T) {
 		t.Fatalf("private key direct credential=%+v err=%v", stored, err)
 	} else if got, err := linuxStore.ResolveSecret(t.Context(), stored.SecretRef); err != nil || got != privateKey {
 		t.Fatalf("resolved private key=%q err=%v", got, err)
+	}
+	pathLikeSecret := `C:\Users\operator\.ssh\id_ed25519`
+	if status, body := postJSON(http.MethodPost, "/v1/linux/credentials", map[string]any{
+		"auth_type": "private_key", "secret_value": pathLikeSecret,
+	}); status != http.StatusBadRequest {
+		t.Fatalf("path-like private key status=%d body=%v, want 400", status, body)
+	} else if encoded, _ := json.Marshal(body); bytes.Contains(encoded, []byte(pathLikeSecret)) {
+		t.Fatal("private key validation error leaked submitted path")
+	}
+	encryptedKey := testLinuxEncryptedPrivateKey(t)
+	if status, body := postJSON(http.MethodPost, "/v1/linux/credentials", map[string]any{
+		"auth_type": "private_key", "secret_value": encryptedKey,
+	}); status != http.StatusBadRequest {
+		t.Fatalf("encrypted private key status=%d body=%v, want 400", status, body)
+	} else if encoded, _ := json.Marshal(body); !bytes.Contains(bytes.ToLower(encoded), []byte("encrypted")) || bytes.Contains(encoded, []byte(encryptedKey)) {
+		t.Fatalf("encrypted private key response lacks safe actionable error or exposes key: %s", encoded)
+	}
+	credentials, err := linuxStore.ListCredentials(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(credentials) != 3 {
+		t.Fatalf("invalid direct private key was persisted; credential count=%d", len(credentials))
 	}
 	var channelBody map[string]any
 	if status, body := postJSON(http.MethodPost, "/v1/linux/channels", map[string]any{
@@ -117,6 +144,32 @@ func TestLinuxChannelRoutesPersistAndReplaceBindings(t *testing.T) {
 	if status, body := postJSON(http.MethodGet, "/v1/agents/agent-a/linux-channels", nil); status != http.StatusOK || body["agent_id"] != "agent-a" {
 		t.Fatalf("agent binding read status=%d body=%v", status, body)
 	}
+}
+
+func testLinuxPrivateKey(t *testing.T) string {
+	t.Helper()
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(private, "api-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(block))
+}
+
+func testLinuxEncryptedPrivateKey(t *testing.T) string {
+	t.Helper()
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKeyWithPassphrase(private, "api-test", []byte("test-passphrase"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(block))
 }
 
 func bodyCredentialID(body map[string]any) string {

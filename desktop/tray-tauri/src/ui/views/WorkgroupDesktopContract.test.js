@@ -97,7 +97,7 @@ describe('Desktop browser viewer API contract', () => {
     wrapper = mount(BrowserViewer, { props: { agentId: 'agent-1', active: true } })
     await flushPromises()
     expect(wrapper.find('[role="status"]').text()).toContain('启用浏览器，开始浏览')
-    await wrapper.find('[aria-label="前往浏览器能力设置"]').trigger('click')
+    await wrapper.find('[aria-label="前往共享服务设置"]').trigger('click')
     expect(wrapper.emitted('open-connection-settings')).toHaveLength(1)
     wrapper.unmount(); wrapper = null
     api.getAgentBrowserView.mockRejectedValueOnce(Object.assign(new Error('browser session is not started'), { status: 409, data: { error: { code: 'browser_not_started' } } }))

@@ -249,14 +249,14 @@ describe("turnState", () => {
     expect(applyTurnFinishedEvent({
       turn_complete: true,
       finish_reason: "budget_exhausted",
-      budget_reason: "max_steps",
+      budget_reason: "max_tool_calls",
       turn_id: "turn-current",
       turn_generation: 4,
     })).toBe(true);
     expect(isTurnTerminal()).toBe(true);
     expect(isTurnProcessing()).toBe(false);
     expect(turnStateStore.phase).toBe("budget_exhausted");
-    expect(turnStateStore.endReason).toBe("max_steps");
+    expect(turnStateStore.endReason).toBe("max_tool_calls");
   });
 
   it("does not let incomplete or stale turn_finished events end the active turn", () => {
@@ -273,9 +273,11 @@ describe("turnState", () => {
     expect(turnStateStore.turnId).toBe("turn-new");
   });
 
-  it("shows the concrete budget limit when the backend provides one", () => {
-    expect(budgetExhaustionMessage("max_steps")).toContain("模型步骤数上限");
-    expect(budgetExhaustionMessage("max_tool_rounds")).toContain("工具轮次上限");
+  it("shows the tool-call limit and does not map retired budget reasons", () => {
+    expect(budgetExhaustionMessage("max_tool_calls")).toContain("工具调用数上限");
+    expect(budgetExhaustionMessage("max_input_tokens")).toContain("运行预算上限");
+    expect(budgetExhaustionMessage("max_steps")).toContain("运行预算上限");
+    expect(budgetExhaustionMessage("max_tool_rounds")).toContain("运行预算上限");
     expect(budgetExhaustionMessage("unexpected_reason")).toContain("运行预算上限");
   });
 

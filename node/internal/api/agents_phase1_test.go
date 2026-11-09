@@ -91,7 +91,7 @@ func TestCreateAgent_fullSettingsWithoutTemplateMerge(t *testing.T) {
 		"display_name": "完整助手",
 		"template_id":  "general", // 仅溯源
 		"defaults": map[string]any{
-			"llm":   map[string]any{"active": "default", "max_steps": 8},
+			"llm":   map[string]any{"active": "default", "max_tool_calls": 8},
 			"tools": map[string]any{"enabled_groups": []any{"fs"}},
 			"prompt_context": map[string]any{
 				"memory_enabled": false,

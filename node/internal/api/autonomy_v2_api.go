@@ -74,7 +74,7 @@ func (s *Server) handleAutonomyV2SettingsGet(w http.ResponseWriter, r *http.Requ
 	}
 	profile, exists := s.autonomyStore.GetProfile(id)
 	if !exists {
-		profile = autonomy.Profile{AgentID: id, MaxToolRounds: 32, DreamingTime: "03:00", Timezone: "Asia/Shanghai"}
+		profile = autonomy.Profile{AgentID: id, DreamingTime: "03:00", Timezone: "Asia/Shanghai"}
 	}
 	writeJSON(w, http.StatusOK, s.autonomySettingsSnapshot(id, profile))
 }
@@ -121,7 +121,7 @@ func (s *Server) handleAutonomyV2ConfigGet(w http.ResponseWriter, r *http.Reques
 	}
 	p, exists := s.autonomyStore.GetProfile(id)
 	if !exists {
-		writeJSON(w, http.StatusOK, autonomy.Profile{AgentID: id, Responsibility: "", WakeIntervalSeconds: 0, MaxToolRounds: 32, DreamingEnabled: false, DreamingTime: "03:00", Timezone: "Asia/Shanghai"})
+		writeJSON(w, http.StatusOK, autonomy.Profile{AgentID: id, Responsibility: "", WakeIntervalSeconds: 0, DreamingEnabled: false, DreamingTime: "03:00", Timezone: "Asia/Shanghai"})
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
@@ -136,7 +136,6 @@ func (s *Server) handleAutonomyV2ConfigPut(w http.ResponseWriter, r *http.Reques
 		ExpectedRevision    int64  `json:"expected_revision"`
 		Responsibility      string `json:"responsibility"`
 		WakeIntervalSeconds int64  `json:"wake_interval_seconds"`
-		MaxToolRounds       int    `json:"max_tool_rounds"`
 		DreamingEnabled     bool   `json:"dreaming_enabled"`
 		DreamingTime        string `json:"dreaming_time"`
 		Timezone            string `json:"timezone"`
@@ -151,7 +150,7 @@ func (s *Server) handleAutonomyV2ConfigPut(w http.ResponseWriter, r *http.Reques
 	}
 	s.autoConfigMu.Lock()
 	defer s.autoConfigMu.Unlock()
-	p := autonomy.Profile{AgentID: id, Responsibility: in.Responsibility, WakeIntervalSeconds: in.WakeIntervalSeconds, MaxToolRounds: in.MaxToolRounds, DreamingEnabled: in.DreamingEnabled, DreamingTime: in.DreamingTime, Timezone: in.Timezone}
+	p := autonomy.Profile{AgentID: id, Responsibility: in.Responsibility, WakeIntervalSeconds: in.WakeIntervalSeconds, DreamingEnabled: in.DreamingEnabled, DreamingTime: in.DreamingTime, Timezone: in.Timezone}
 	if err := s.autonomyStore.PutProfile(p, in.ExpectedRevision); err != nil {
 		writeAPIError(w, statusForAutonomyError(err), "config_update_failed", err.Error(), nil)
 		return
@@ -183,7 +182,7 @@ func (s *Server) handleAutonomyV2ConfigReconcile(w http.ResponseWriter, r *http.
 	defer s.autoConfigMu.Unlock()
 	profile, exists := s.autonomyStore.GetProfile(id)
 	if !exists {
-		profile = autonomy.Profile{AgentID: id, MaxToolRounds: 32, DreamingTime: "03:00", Timezone: "Asia/Shanghai"}
+		profile = autonomy.Profile{AgentID: id, DreamingTime: "03:00", Timezone: "Asia/Shanghai"}
 	}
 	_, err := s.triggerStore.EnsureAutoDefault(id, profile.WakeIntervalSeconds, time.Now().UTC())
 	if err != nil {

@@ -87,25 +87,29 @@ func TestAutonomyV2ConfigDefaultsPutCASAndStrictInput(t *testing.T) {
 		t.Fatalf("aggregate settings=%d %s", settings.Code, settings.Body)
 	}
 	w := autonomyV2Request(s, http.MethodGet, "/v1/agents/auto-v2/auto-config", "")
-	if w.Code != 200 || !bytes.Contains(w.Body.Bytes(), []byte(`"max_tool_rounds":32`)) {
+	if w.Code != 200 || bytes.Contains(w.Body.Bytes(), []byte(`"max_tool_rounds"`)) {
 		t.Fatalf("default=%d %s", w.Code, w.Body)
 	}
-	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":0,"responsibility":"keep","wake_interval_seconds":60,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
+	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":0,"responsibility":"keep","wake_interval_seconds":60,"max_tool_rounds":2,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
+	if w.Code != 400 {
+		t.Fatalf("retired max_tool_rounds must be rejected: %d %s", w.Code, w.Body)
+	}
+	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":0,"responsibility":"keep","wake_interval_seconds":60,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
 	if w.Code != 200 {
 		t.Fatalf("put=%d %s", w.Code, w.Body)
 	}
 	if !bytes.Contains(w.Body.Bytes(), []byte(`"needs_reconcile"`)) || !bytes.Contains(w.Body.Bytes(), []byte(`"dreaming_status"`)) {
 		t.Fatalf("put should return the refreshed aggregate state=%s", w.Body)
 	}
-	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":0,"responsibility":"stale","wake_interval_seconds":60,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
+	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":0,"responsibility":"stale","wake_interval_seconds":60,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
 	if w.Code != 409 {
 		t.Fatalf("stale=%d %s", w.Code, w.Body)
 	}
-	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":1,"experience":"forbidden","responsibility":"x","wake_interval_seconds":0,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
+	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":1,"experience":"forbidden","responsibility":"x","wake_interval_seconds":0,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
 	if w.Code != 400 {
 		t.Fatalf("strict=%d %s", w.Code, w.Body)
 	}
-	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":1,"responsibility":"x","wake_interval_seconds":0,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"} {}`)
+	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":1,"responsibility":"x","wake_interval_seconds":0,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"} {}`)
 	if w.Code != 400 {
 		t.Fatalf("trailing JSON=%d %s", w.Code, w.Body)
 	}
@@ -148,7 +152,7 @@ func TestAutonomyV2TodoAgentIsolationCASDeleteAndExperienceReadOnly(t *testing.T
 	if w.Code != 200 {
 		t.Fatalf("experience=%d", w.Code)
 	}
-	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":0,"responsibility":"x","wake_interval_seconds":0,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC","experience":"bad"}`)
+	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":0,"responsibility":"x","wake_interval_seconds":0,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC","experience":"bad"}`)
 	if w.Code != 400 {
 		t.Fatalf("experience write=%d", w.Code)
 	}
@@ -282,7 +286,7 @@ func TestAutonomyV2SavedResponsibilityReachesMainSession(t *testing.T) {
 	})
 
 	put := func(rev int64, responsibility string) {
-		body := fmt.Sprintf(`{"expected_revision":%d,"responsibility":%q,"wake_interval_seconds":0,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`, rev, responsibility)
+		body := fmt.Sprintf(`{"expected_revision":%d,"responsibility":%q,"wake_interval_seconds":0,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`, rev, responsibility)
 		w := autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2-main/auto-config", body)
 		if w.Code != http.StatusOK {
 			t.Fatalf("put responsibility=%q: %d %s", responsibility, w.Code, w.Body)
@@ -363,7 +367,7 @@ func TestAutonomyV2TodoToolRunsThroughMainSession(t *testing.T) {
 		s.sessions.Stop()
 		_ = as.Close()
 	})
-	w := autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2-tools/auto-config", `{"expected_revision":0,"responsibility":"session todo owner","wake_interval_seconds":0,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
+	w := autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2-tools/auto-config", `{"expected_revision":0,"responsibility":"session todo owner","wake_interval_seconds":0,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("put=%d %s", w.Code, w.Body)
 	}

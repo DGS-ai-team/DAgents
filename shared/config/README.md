@@ -19,7 +19,7 @@ Agent Node 与 Client 共用的 YAML 配置加载与校验。
 |----|------|
 | `listen` | Node bootstrap 监听地址；Node bootstrap YAML 仅保存此配置 |
 | `local` | 独立 Go/Python Client 的 Node 连接 endpoint，不随 Node bootstrap 写入 |
-| `llm` | 模型连接快照；工具步数上限见 Agent snapshot |
+| `llm` | 模型连接快照；每轮唯一工具调用上限由 Agent snapshot 的 `defaults.llm.max_tool_calls` 控制（默认 64，范围 1–4096） |
 | `runtime_root` | **不可配置**；固定 `./.runtime`。Node 的 `memory/`、`skills/`、`policy/` 等控制面目录相对此根；Agent workspace 另由创建时绑定 |
 | `skills` | 技能开关与 prompt 上限（目录固定为 `{runtime_root}/skills`；不属于 Agent workspace） |
 | `compression` | 上下文压缩 token 阈值 |

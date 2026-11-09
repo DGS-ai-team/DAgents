@@ -24,6 +24,15 @@ import (
 
 const executionTargetLinuxChannel = "linux_channel"
 
+// ErrLinuxPrivateKeyInvalid classifies credential material that cannot be
+// parsed as an unencrypted PEM/OpenSSH private key. The error intentionally
+// never contains the supplied credential bytes.
+var ErrLinuxPrivateKeyInvalid = errors.New("linux private key is invalid; expected PEM/OpenSSH private-key contents, not a file path")
+
+// ErrLinuxPrivateKeyEncrypted indicates that a private key needs a passphrase,
+// which Linux channel credentials do not currently accept.
+var ErrLinuxPrivateKeyEncrypted = errors.New("encrypted SSH private keys are not supported; provide an unencrypted PEM/OpenSSH private key")
+
 // LinuxChannelConfig contains non-secret connection settings. SecretRef is
 // resolved only inside the provider and is never copied into execution events
 // or tool results.
@@ -535,8 +544,12 @@ func (p *LinuxShellProvider) Test(ctx context.Context, target ExecutionTarget) (
 	}
 	auth, agentConn, err := p.authMethod(ctx, cred)
 	if err != nil {
-		recordLinuxTestStageError(&stages, "authentication", "authentication_failed", err)
-		return linuxTestFailure(stages, "authentication_failed", err), nil
+		code := "authentication_failed"
+		if errors.Is(err, ErrLinuxPrivateKeyInvalid) || errors.Is(err, ErrLinuxPrivateKeyEncrypted) {
+			code = "private_key_invalid"
+		}
+		recordLinuxTestStageError(&stages, "authentication", code, err)
+		return linuxTestFailure(stages, code, err), nil
 	}
 	recordLinuxTestStage(&stages, "authentication", func() error { return nil })
 	if agentConn != nil {
@@ -709,9 +722,9 @@ func (p *LinuxShellProvider) authMethod(ctx context.Context, cred LinuxCredentia
 		if err != nil {
 			return nil, nil, err
 		}
-		signer, err := ssh.ParsePrivateKey([]byte(secret))
+		signer, err := parseLinuxPrivateKey(secret)
 		if err != nil {
-			return nil, nil, fmt.Errorf("linux private key is invalid: %w", err)
+			return nil, nil, err
 		}
 		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil, nil
 	case "ssh_agent":
@@ -727,6 +740,38 @@ func (p *LinuxShellProvider) authMethod(ctx context.Context, cred LinuxCredentia
 	default:
 		return nil, nil, fmt.Errorf("unsupported linux credential auth type %q", cred.AuthType)
 	}
+}
+
+func normalizeLinuxPrivateKeySecret(secret string) string {
+	secret = strings.TrimPrefix(secret, "\uFEFF")
+	trimmed := strings.TrimSpace(secret)
+	if !strings.ContainsAny(secret, "\r\n") &&
+		strings.HasPrefix(trimmed, "-----BEGIN ") &&
+		strings.Contains(trimmed, "PRIVATE KEY-----") &&
+		strings.Contains(trimmed, `\n-----END `) {
+		secret = strings.ReplaceAll(secret, `\r\n`, "\n")
+		secret = strings.ReplaceAll(secret, `\n`, "\n")
+	}
+	return secret
+}
+
+func parseLinuxPrivateKey(secret string) (ssh.Signer, error) {
+	signer, err := ssh.ParsePrivateKey([]byte(normalizeLinuxPrivateKeySecret(secret)))
+	if err != nil {
+		var passphraseMissing *ssh.PassphraseMissingError
+		if errors.As(err, &passphraseMissing) {
+			return nil, ErrLinuxPrivateKeyEncrypted
+		}
+		return nil, fmt.Errorf("%w: %v", ErrLinuxPrivateKeyInvalid, err)
+	}
+	return signer, nil
+}
+
+// ValidateLinuxPrivateKeySecret validates direct API input before it is saved.
+// Environment-backed values are validated later, when the connection is tested.
+func ValidateLinuxPrivateKeySecret(secret string) error {
+	_, err := parseLinuxPrivateKey(secret)
+	return err
 }
 
 func (p *LinuxShellProvider) resolveSecret(ctx context.Context, cred LinuxCredential) (string, error) {

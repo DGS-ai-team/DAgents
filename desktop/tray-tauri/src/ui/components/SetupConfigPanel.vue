@@ -164,10 +164,14 @@ function llmPayload() {
 }
 
 function managePayload() {
-  return {
-    ...form.manage,
+  const payload = {
+    enabled: !!form.manage.enabled,
+    url: form.manage.url || "",
     workgroup_enabled: form.manage.workgroup_enabled ?? true,
+    clear_node_token: !!form.manage.clear_node_token,
   };
+  if (form.manage.node_token) payload.node_token = form.manage.node_token;
+  return payload;
 }
 
 async function saveConnection() {

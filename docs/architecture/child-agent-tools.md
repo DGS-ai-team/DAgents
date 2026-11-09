@@ -16,7 +16,7 @@
 
 必填：`task`、`purpose`。
 
-可选：`allowed_tools`、`skill_names`、`ttl_seconds`、`max_turns`。
+可选：`allowed_tools`、`skill_names`、`ttl_seconds`。子 Agent 沿用所属 Agent 的每轮 `max_tool_calls` 上限（默认 64，范围 1–4096）；每个新提出的工具调用计一次，失败或拒绝也计入，并行调用逐个计数。
 
 `task` 必须自包含，`purpose` 是 UI/日志摘要。`skill_names` 在子 runtime 创建时预加载，子运行期间不能修改 skills。
 
@@ -34,7 +34,7 @@
 }
 ```
 
-不存在 `wait` 参数，也不存在通过模型二次查询结果的等待/状态工具。TTL 到期、父 Turn 取消、子 runtime 异常都会直接收敛为终态并返回结果。
+`turn_count` 是兼容历史命名的步骤计数（对应 `step_index`），不代表轮次上限或工具调用额度。不存在 `wait` 参数，也不存在通过模型二次查询结果的等待/状态工具。TTL 到期、父 Turn 取消、子 runtime 异常都会直接收敛为终态并返回结果。
 
 ### `cancel_temporary_agent`
 
@@ -77,7 +77,7 @@ creating → active → completed
 
 `session.Manager.SpawnChild` 使用 `RestrictedRegistry` 创建子 runtime。`allowed_tools` 必须是父 Agent 可下放工具的子集；管理工具、skills 变更、询问工具以及 trigger 等 parent-only 工具不能下放。
 
-子 runtime 的首条输入由 `FormatChildTask` 包装。完成条件是：当前 Turn 空闲、没有 pending HITL、输入队列为空，且最后一条消息是 assistant 文本。LLM、工具链、生命周期或回合上限错误走 `OnChildFailed`，不得依赖某个正常 assistant 事件才能回收。
+子 runtime 的首条输入由 `FormatChildTask` 包装。完成条件是：当前 Turn 空闲、没有 pending HITL、输入队列为空，且最后一条消息是 assistant 文本。LLM、工具链、生命周期或工具调用额度耗尽错误走 `OnChildFailed`，不得依赖某个正常 assistant 事件才能回收。
 
 ## 6. 审批
 
@@ -106,7 +106,7 @@ creating → active → completed
 
 ## 8. 持久化、刷新与重启
 
-`child_runs` 表保存以下控制面字段：父子 ID、工具调用 ID、purpose、权限、预加载 skills、状态、phase、Progress JSON、回合数、TTL、摘要/错误、时间戳和 revision。
+`child_runs` 表保存以下控制面字段：父子 ID、工具调用 ID、purpose、权限、预加载 skills、状态、phase、Progress JSON、步骤数（API 兼容字段名 `turn_count`）、TTL、摘要/错误、时间戳和 revision。
 
 `childagent` 依赖 `RunRepository` 接口，SQLite 适配位于 `node/internal/session/child_run_repository.go`。保存以 `child_agent_id` 幂等 upsert，读取按父 ID 和更新时间排序。
 

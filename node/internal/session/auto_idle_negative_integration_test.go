@@ -73,8 +73,8 @@ func negativeAutoIdleFixture(t *testing.T, mode string) (*Manager, *negativeAuto
 	}})
 	mgr := NewManager("agent-negative", hub, client, reg, pol, nil, TurnOptions{
 		AutoAgent: true, WorkspaceRoot: workspace,
-		TriggerToolRoundProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
-			return 3, agentID == "agent-negative" && triggerID == "auto-idle-test" && deliveryID == "delivery-1", nil
+		TriggerActivationProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (bool, error) {
+			return agentID == "agent-negative" && triggerID == "auto-idle-test" && deliveryID == "delivery-1", nil
 		},
 	}, logx.Discard())
 	hub.SetEventListener(mgr.OnStreamEvent)
@@ -224,8 +224,8 @@ func TestTrustedAutoIdleSuppressesNotifyButPersistsHistory(t *testing.T) {
 	hub := stream.NewHub(32, logx.Discard())
 	pol := policy.NewEngineFromMaps(policy.Maps{Tools: map[string]policy.ApprovalMode{"auto_idle": policy.ModeNever}})
 	mgr := NewManager("agent-positive", hub, client, reg, pol, st, TurnOptions{AutoAgent: true, WorkspaceRoot: workspace,
-		TriggerToolRoundProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
-			return 3, agentID == "agent-positive" && triggerID == "auto-default:agent-positive" && deliveryID == "delivery-1", nil
+		TriggerActivationProvider: func(_ context.Context, agentID, triggerID, deliveryID string) (bool, error) {
+			return agentID == "agent-positive" && triggerID == "auto-default:agent-positive" && deliveryID == "delivery-1", nil
 		},
 	}, logx.Discard())
 	t.Cleanup(func() {

@@ -56,13 +56,21 @@ function userImageThumb(src) {
           <span class="msg__file-refs-count">{{ userFileRefs.length }}</span>
         </div>
         <div class="msg__file-refs-list">
-          <div v-for="file in userFileRefs" :key="file.path" class="msg__file-ref" :title="file.path">
+          <div
+            v-for="(file, index) in userFileRefs"
+            :key="file.id || `${file.path}:${file.anchor?.label || index}:${index}`"
+            class="msg__file-ref"
+            :title="file.displayPath || file.path"
+          >
             <span class="msg__file-ref-icon" aria-hidden="true">
               <UiIcon name="file" :size="16" />
             </span>
             <span class="msg__file-ref-info">
               <strong>{{ file.name || file.path }}</strong>
-              <small>{{ file.displayPath || file.path }}</small>
+              <small>
+                {{ file.displayPath || file.path }}
+                <template v-if="file.anchor?.label && file.anchor.label !== '整个文件'"> · {{ file.anchor.label }}</template>
+              </small>
             </span>
           </div>
         </div>

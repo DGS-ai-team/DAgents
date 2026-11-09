@@ -9,77 +9,77 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
 )
 
-func (s *Server) triggerToolRoundProvider(ctx context.Context, agentID, triggerID, deliveryID string) (int, bool, error) {
+// triggerActivationProvider validates that a trigger delivery is an authorized
+// Auto activation. The turn budget itself always comes from the Agent's LLM
+// defaults and is not overridden here.
+func (s *Server) triggerActivationProvider(ctx context.Context, agentID, triggerID, deliveryID string) (bool, error) {
 	if err := ctx.Err(); err != nil {
-		return 0, false, err
+		return false, err
 	}
 	agentID, triggerID, deliveryID = strings.TrimSpace(agentID), strings.TrimSpace(triggerID), strings.TrimSpace(deliveryID)
 	if agentID == "" || triggerID == "" {
-		return 0, false, nil
+		return false, nil
 	}
 	isDefault := triggerID == triggers.AutoDefaultTriggerID(agentID)
-	if !isDefault {
-		if strings.HasPrefix(triggerID, "auto-default:") {
-			return 0, false, fmt.Errorf("auto trigger identity mismatch")
-		}
+	if !isDefault && strings.HasPrefix(triggerID, "auto-default:") {
+		return false, fmt.Errorf("auto trigger identity mismatch")
 	}
 	if s == nil || s.triggerStore == nil {
 		if isDefault {
-			return 0, false, fmt.Errorf("trusted auto trigger unavailable")
+			return false, fmt.Errorf("trusted auto trigger unavailable")
 		}
-		return 0, false, nil
+		return false, nil
 	}
 	d, ok := s.triggerStore.GetTrigger(triggerID)
 	if !ok {
 		if isDefault {
-			return 0, false, fmt.Errorf("untrusted auto trigger delivery")
+			return false, fmt.Errorf("untrusted auto trigger delivery")
 		}
-		return 0, false, nil
+		return false, nil
 	}
 	if deliveryID == "" || s.autonomyStore == nil {
-		return 0, false, fmt.Errorf("trusted auto trigger unavailable")
+		return false, fmt.Errorf("trusted auto trigger unavailable")
 	}
 	if s.agents == nil {
-		return 0, false, fmt.Errorf("agent registry unavailable")
+		return false, fmt.Errorf("agent registry unavailable")
 	}
 	record, err := s.agents.Get(ctx, agentID)
 	if err != nil || record == nil || record.Archived {
-		return 0, false, fmt.Errorf("agent is unavailable for auto trigger")
+		return false, fmt.Errorf("agent is unavailable for auto trigger")
 	}
 	snapshot, err := agentruntime.ParseSnapshot(record.ConfigSnapshot)
 	if err != nil || !strings.EqualFold(strings.TrimSpace(snapshot.AgentType), "auto") {
 		if !isDefault {
-			return 0, false, nil
+			return false, nil
 		}
-		return 0, false, fmt.Errorf("agent is not an auto runtime")
+		return false, fmt.Errorf("agent is not an auto runtime")
 	}
 	if !isDefault {
-		// User-owned triggers targeting an Auto Agent's canonical main session
-		// are still Auto activations and use the Agent-owned round cap. Other
-		// other user-owned triggers retain their existing behavior.
+		// Only user-owned triggers targeting the Auto Agent's canonical main
+		// session receive trusted activation capabilities.
 		if d.Controller != "user" || d.TargetSessionID == nil {
-			return 0, false, nil
+			return false, nil
 		}
 		if d.OwnerAgentID != agentID || d.TargetAgentID != agentID || *d.TargetSessionID != agentID || d.SessionTargetMode != triggers.SessionTargetFixed {
-			return 0, false, fmt.Errorf("user trigger is not owned by auto main session")
+			return false, fmt.Errorf("user trigger is not owned by auto main session")
 		}
 	}
 	if !d.Enabled || d.RecoveryRequired || d.PendingDeliveryID == nil || *d.PendingDeliveryID != deliveryID || !s.triggerStore.IsPendingDelivery(triggerID, deliveryID) {
-		return 0, false, fmt.Errorf("untrusted auto trigger delivery")
+		return false, fmt.Errorf("untrusted auto trigger delivery")
 	}
 	if isDefault && (d.Controller != "auto" || d.ControllerID != agentID || d.OwnerAgentID != agentID || d.TargetAgentID != agentID || d.TargetSessionID == nil || *d.TargetSessionID != agentID || d.SessionTargetMode != triggers.SessionTargetFixed) {
-		return 0, false, fmt.Errorf("untrusted auto trigger delivery")
+		return false, fmt.Errorf("untrusted auto trigger delivery")
 	}
 	p, ok := s.autonomyStore.GetProfile(agentID)
 	if !isDefault {
-		if !ok || p.MaxToolRounds <= 0 {
-			return 0, false, fmt.Errorf("auto trigger configuration is unavailable")
+		if !ok {
+			return false, fmt.Errorf("auto trigger configuration is unavailable")
 		}
-		return p.MaxToolRounds, true, nil
+		return true, nil
 	}
 	interval, validInterval := triggers.ConfiguredIntervalSeconds(d.Condition)
-	if !ok || p.WakeIntervalSeconds <= 0 || p.MaxToolRounds <= 0 || !validInterval || interval != p.WakeIntervalSeconds {
-		return 0, false, fmt.Errorf("auto trigger configuration is stale")
+	if !ok || p.WakeIntervalSeconds <= 0 || !validInterval || interval != p.WakeIntervalSeconds {
+		return false, fmt.Errorf("auto trigger configuration is stale")
 	}
-	return p.MaxToolRounds, true, nil
+	return true, nil
 }

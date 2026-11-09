@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
 func lastAssistantIndex(messages []llm.Message) int {
@@ -71,7 +72,18 @@ func (o *Orchestrator) insertMissingToolResponsesAfterAssistant(
 			continue
 		}
 		o.publishToolResult(sessionID, tc, content, false, extra)
-		o.insertHistory(sessionID, history, insertAt, llm.ToolResultMessage(tc.ID, tc.Function.Name, content))
+		result := llm.ToolResultMessage(tc.ID, tc.Function.Name, content)
+		if status, ok := extra["async_status"].(string); ok && tools.NormalizeResultStatus(status) == tools.ResultStatusCancelled {
+			result = llm.ToolResultMessageWithMetadata(tc.ID, tc.Function.Name, content, tools.ResultMetadata{
+				Status: tools.ResultStatusCancelled,
+				Error: &tools.ResultError{
+					Code:      "tool_cancelled",
+					Message:   content,
+					Retryable: false,
+				},
+			})
+		}
+		o.insertHistory(sessionID, history, insertAt, result)
 		insertAt++
 		answered[tc.ID] = struct{}{}
 		added = true
