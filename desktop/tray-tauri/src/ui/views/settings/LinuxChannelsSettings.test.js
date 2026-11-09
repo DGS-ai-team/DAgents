@@ -24,19 +24,26 @@ beforeEach(() => {
   api.createLinuxCredential.mockResolvedValue({ credential_id: "credential-b", secret_source: "direct" });
 });
 
-const mountSettings = () => mount(LinuxChannelsSettings, {
-  global: {
-    stubs: {
-      SettingsPageHeader: true,
-      UiIcon: true,
-      UiSelect: {
-        props: ["modelValue", "options"],
-        emits: ["update:modelValue", "change"],
-        template: '<select :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value); $emit(\'change\', $event.target.value)"><option v-for="option in options" :key="option.value" :value="option.value">{{ option.label }}</option></select>',
-      },
-    },
-  },
-});
+const mountSettings = ({ stubSelect = true } = {}) => {
+  const stubs = { SettingsPageHeader: true, UiIcon: true };
+  if (stubSelect) {
+    stubs.UiSelect = {
+      props: ["modelValue", "options"],
+      emits: ["update:modelValue", "change"],
+      template: '<select :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value); $emit(\'change\', $event.target.value)"><option v-for="option in options" :key="option.value" :value="option.value">{{ option.label }}</option></select>',
+    };
+  }
+  return mount(LinuxChannelsSettings, { global: { stubs } });
+};
+
+async function chooseRealSelectOption(wrapper, label) {
+  await wrapper.get(`[aria-label="认证方式"]`).trigger("click");
+  await flushPromises();
+  const option = [...document.body.querySelectorAll('[role="option"]')].find(item => item.textContent.trim() === label);
+  expect(option, `real UiSelect option ${label}`).toBeTruthy();
+  option.click();
+  await flushPromises();
+}
 
 describe("Linux channel return flow", () => {
   it("creates a global SSH channel and returns to the originating agent resource section", async () => {
@@ -71,7 +78,7 @@ describe("Linux channel return flow", () => {
     await flushPromises();
     await wrapper.get('button').trigger("click");
     await flushPromises();
-    await wrapper.get('select[aria-label="凭据来源"]').setValue("direct");
+    await wrapper.get('select[aria-label="认证方式"]').setValue("private_key");
 
     const privateKeyFixture = "-----BEGIN OPENSSH PRIVATE KEY-----\nfixture-line-one\nfixture-line-two\n-----END OPENSSH PRIVATE KEY-----\n";
     await wrapper.get("textarea").setValue(privateKeyFixture);
@@ -81,6 +88,38 @@ describe("Linux channel return flow", () => {
     expect(api.createLinuxCredential).toHaveBeenCalledWith(expect.objectContaining({
       auth_type: "private_key",
       secret_value: privateKeyFixture,
+    }));
+    expect(api.createLinuxCredential.mock.calls[0][0]).not.toHaveProperty("secret_ref");
+    wrapper.unmount();
+  });
+
+  it("uses the selected password type through the real UiSelect and keeps direct mode on type changes", async () => {
+    const wrapper = mountSettings({ stubSelect: false });
+    await flushPromises();
+    await wrapper.get('.settings-section--standalone .settings-section__actions button').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('button[aria-label="认证方式"]').text()).toContain("密码");
+    expect(wrapper.get('button[aria-label="凭据来源"]').text()).toContain("直接输入");
+    await wrapper.get('input[type="password"]').setValue("clear-this-on-type-change");
+
+    await chooseRealSelectOption(wrapper, "SSH 私钥");
+    expect(wrapper.get('button[aria-label="认证方式"]').text()).toContain("SSH 私钥");
+    expect(wrapper.get('button[aria-label="凭据来源"]').text()).toContain("直接输入");
+    expect(wrapper.find("textarea[placeholder='粘贴 SSH 私钥内容']").exists()).toBe(true);
+    expect(wrapper.get("textarea").element.value).toBe("");
+
+    await chooseRealSelectOption(wrapper, "密码");
+    expect(wrapper.get('button[aria-label="认证方式"]').text()).toContain("密码");
+    expect(wrapper.get('button[aria-label="凭据来源"]').text()).toContain("直接输入");
+    const password = wrapper.get('input[type="password"]');
+    expect(password.element.value).toBe("");
+    await password.setValue("fixture-only-password");
+    await wrapper.get('.linux-settings__modal-actions .btn--primary').trigger("click");
+    await flushPromises();
+
+    expect(api.createLinuxCredential).toHaveBeenCalledWith(expect.objectContaining({
+      auth_type: "password",
+      secret_value: "fixture-only-password",
     }));
     expect(api.createLinuxCredential.mock.calls[0][0]).not.toHaveProperty("secret_ref");
     wrapper.unmount();

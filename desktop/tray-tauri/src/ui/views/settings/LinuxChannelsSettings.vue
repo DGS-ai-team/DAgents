@@ -34,7 +34,7 @@ const showCredentialForm = ref(false);
 const showChannelForm = ref(false);
 const editingChannelId = ref("");
 
-const credential = reactive({ display_name: "", auth_type: "private_key", secret_mode: "environment", secret_ref: "", secret_value: "", username_hint: "" });
+const credential = reactive({ display_name: "", auth_type: "password", secret_mode: "direct", secret_ref: "", secret_value: "", username_hint: "" });
 const channel = reactive({
   display_name: "", host: "", port: 22, username: "", credential_id: "",
   host_key_policy: "known_hosts", host_key_ref: "", remote_shell: "bash", default_cwd: "", max_sessions: 4,
@@ -101,11 +101,10 @@ function credentialStatusLabel(item) {
 }
 
 function resetCredentialForm() {
-  Object.assign(credential, { display_name: "", auth_type: "private_key", secret_mode: "environment", secret_ref: "", secret_value: "", username_hint: "" });
+  Object.assign(credential, { display_name: "", auth_type: "password", secret_mode: "direct", secret_ref: "", secret_value: "", username_hint: "" });
 }
 
 function onCredentialAuthTypeChange() {
-  credential.secret_mode = "environment";
   credential.secret_ref = "";
   credential.secret_value = "";
 }
@@ -446,7 +445,7 @@ onMounted(() => {
         <div class="linux-settings__editor">
           <div class="linux-settings__field">
             <label>显示名称 <span>可选</span></label>
-            <input v-model="credential.display_name" class="settings-field__input" placeholder="例如：生产环境部署密钥" />
+            <input v-model="credential.display_name" class="settings-field__input" placeholder="例如：生产环境登录凭据" />
           </div>
           <div class="linux-settings__field">
             <label>认证方式 <span>必选</span></label>
