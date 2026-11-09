@@ -15,6 +15,11 @@ export function canCancelTurnPhase(phase) {
   return ['queued', 'model_generating', 'tool_executing', 'tool_waiting', 'waiting_user'].includes(String(phase || ''))
 }
 
+export function shouldShowTurnStopAction(phase, busy = false, cancelling = false) {
+  if (busy || cancelling) return true
+  return canCancelTurnPhase(phase) && String(phase || '') !== 'waiting_user'
+}
+
 export function applyAgentNotificationProjection(agents, event) {
   if (event?.event_type !== 'notification_changed' || !event?.agent_id || !Array.isArray(agents)) return agents
   const projection = event.data || {}

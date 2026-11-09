@@ -169,14 +169,27 @@ func TestChildRuntimeInheritsParentToolCallBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Mirror the production path: NewManager is built with process-wide options,
+	// then the Agent API replaces the parent runtime with Agent-specific options.
 	manager := NewManager("agent-1", hub, &llm.MockClient{}, registry, policy.NewDefaultEngine(), nil,
-		TurnOptions{Budget: turn.TurnBudget{MaxToolCalls: 7, ReserveFinalSummary: true}}, logx.Discard())
+		TurnOptions{}, logx.Discard())
 	t.Cleanup(manager.Stop)
 	children := childagent.NewManager(childagent.Config{Enabled: true}, hub, "agent-1", nil)
 	manager.SetChildAgentManager(children)
 	parent, _, err := manager.Create("")
 	if err != nil {
 		t.Fatal(err)
+	}
+	parentOptions := TurnOptions{Budget: turn.TurnBudget{MaxToolCalls: 7, ReserveFinalSummary: true}}
+	if _, _, err := manager.ReplaceWithOptionsAndLLM(parent.ID, parentOptions, registry, policy.NewDefaultEngine(), &llm.MockClient{}, "agent-1"); err != nil {
+		t.Fatalf("replace parent with Agent-specific runtime: %v", err)
+	}
+	parentRuntime := manager.getRuntime(parent.ID)
+	if parentRuntime == nil {
+		t.Fatal("parent runtime is missing after replacement")
+	}
+	if parentRuntime.turnBudget.MaxToolCalls != 7 {
+		t.Fatalf("parent runtime budget = %+v, want Agent max_tool_calls=7", parentRuntime.turnBudget)
 	}
 	if err := manager.SpawnChild(childagent.SpawnSpec{
 		ChildAgentID: "child-budget-test", ParentAgentID: parent.ID,

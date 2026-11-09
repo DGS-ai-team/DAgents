@@ -40,6 +40,14 @@ func (m *Manager) SpawnChild(spec childagent.SpawnSpec) error {
 		return err
 	}
 	childOpts := m.turn
+	// Agent runtimes are installed with Agent-specific TurnOptions after the
+	// Manager is created, so m.turn may still contain only process defaults.
+	// Child work must inherit the parent's effective limit, or a zero manager
+	// default would silently disable max_tool_calls for the child.
+	parent := m.sessions[spec.ParentAgentID]
+	parent.lifecycleMu.Lock()
+	childOpts.Budget = parent.turnBudget
+	parent.lifecycleMu.Unlock()
 	rt := newChildRuntime(
 		spec.ChildAgentID,
 		spec.ParentAgentID,

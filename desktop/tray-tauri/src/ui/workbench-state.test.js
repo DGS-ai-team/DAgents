@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { topSlotState } from './top-slot-state.js'
 import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
-import { agentErrorFor, agentSelectionViewTransition, applyAgentNotificationProjection, canCancelTurnPhase, cancelledTurnSummary, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, handleAgentNotificationEvent, hasPersistedPartialMessage, isAgentBusy, mergeAgentNotificationSummaries, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, switchDraft, tabForRoute, turnErrorSummary, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
+import { agentErrorFor, agentSelectionViewTransition, applyAgentNotificationProjection, canCancelTurnPhase, cancelledTurnSummary, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, handleAgentNotificationEvent, hasPersistedPartialMessage, isAgentBusy, mergeAgentNotificationSummaries, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowTurnStopAction, shouldShowWorkgroupSidebar, switchDraft, tabForRoute, turnErrorSummary, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
 
 test('notification_changed uses notify_seq, preserves integer counts, and ignores stale per-Agent events', () => {
   const agents = [{ agent_id: 'agent-a', has_pending_hitl: true, pending_hitl_items: 2, notify_seq: 5 }]
@@ -91,6 +91,21 @@ test('turn-level stop remains available while awaiting tool approval or user inp
   for (const phase of ['idle', 'completed', 'failed', 'cancelled']) {
     assert.equal(canCancelTurnPhase(phase), false, `${phase} should be terminal or idle`)
   }
+})
+
+test('waiting_user remains cancellable without switching the composer from send to stop', () => {
+  assert.equal(canCancelTurnPhase('waiting_user'), true)
+  assert.equal(shouldShowTurnStopAction('waiting_user'), false)
+  assert.equal(shouldShowTurnStopAction('waiting_user', true), true, 'a request already being submitted stays locked')
+  assert.equal(shouldShowTurnStopAction('tool_waiting'), true, 'approval wait still exposes stop')
+  assert.equal(shouldShowTurnStopAction('tool_executing'), true, 'tool execution still exposes stop')
+
+  const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
+  assert.match(source, /const agentGenerating = computed\(\(\) => shouldShowTurnStopAction\(turnStateStore\.phase, busy\.value, cancellingTurn\.value\)\)/)
+  assert.match(source, /const canCancelTurn = computed\(\(\) => canCancelTurnPhase\(turnStateStore\.phase\)\)/)
+  assert.match(source, /if \(hitlQueue\.value\.some\(item => item\.kind === 'user_information'\)\) \{ void submitUserInfo\(undefined, 'chat'\); return \}/)
+  assert.match(source, /const dockPendingKind = computed\(\(\) => \{[\s\S]*?turnStateStore\.phase === 'waiting_user'[\s\S]*?return 'user_input'[\s\S]*?return 'approval'[\s\S]*?return 'request'/)
+  assert.match(source, /:pending-kind="dockPendingKind"/)
 })
 
 test('Desktop menubar groups actions by user task and disables unavailable operations', () => {
@@ -235,6 +250,7 @@ test('DesktopApp renders composer status in the visible footer and follows Turn 
   assert.equal(desktopComposerStatus({ generating: true, streamingText: '首个 token', turnState: { phase: 'model_generating' } }), '正在生成回复')
   assert.equal(desktopComposerStatus({ generating: true, streamingText: 'reasoning', turnState: { phase: 'model_generating', outputChannel: 'reasoning' } }), '思考中')
   assert.equal(desktopComposerStatus({ generating: true, turnState: { phase: 'tool_executing' } }), '工具执行中')
+  assert.equal(desktopComposerStatus({ generating: true, turnState: { phase: 'waiting_user' } }), '等待你的输入')
   assert.equal(desktopComposerStatus({ generating: true, turnState: { phase: 'model_generating', modelAttempt: { status: 'retrying', attempt: 1, maxAttempts: 3 } } }), '正在重试 1/2')
   assert.equal(desktopComposerStatus({ generating: true, turnState: { phase: 'completed', terminal: true } }), '')
   assert.equal(desktopComposerStatus({ generating: false, streamingText: 'late text' }), '')

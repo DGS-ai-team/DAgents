@@ -5,6 +5,7 @@ import { nextTick, reactive } from "vue";
 import MainChatPanel from "./MainChatPanel.vue";
 import MessageBubble from "./MessageBubble.vue";
 import ApprovalBubble from "./ApprovalBubble.vue";
+import UserInfoBubble from "./UserInfoBubble.vue";
 import ToolGroupRow from "./ToolGroupRow.vue";
 import { applyTurnState, resetTurnState } from "../stores/turnState.js";
 import * as streamBuilder from "../composables/useStream.js";
@@ -229,5 +230,24 @@ describe("MainChatPanel incremental history rendering", () => {
     expect(wrapper.emitted("reject-all")).toEqual([[0]]);
     expect(wrapper.emitted("approve-one")).toBeUndefined();
     expect(wrapper.emitted("approve-all")).toBeUndefined();
+  });
+});
+
+describe("MainChatPanel user input requests", () => {
+  it("forwards the user-answer action to the Desktop composer flow", async () => {
+    wrapper = shallowMount(MainChatPanel, {
+      props: {
+        hitlQueue: [{
+          kind: "user_information",
+          data: { request_id: "ask-1", user_information_args: { question: "Which date range?", options: [{ id: "q1", label: "This quarter" }] } },
+        }],
+      },
+    });
+    await flushFrames();
+
+    const request = wrapper.findComponent(UserInfoBubble);
+    expect(request.exists()).toBe(true);
+    request.vm.$emit("submit", "");
+    expect(wrapper.emitted("user-info-submit")).toEqual([[0]]);
   });
 });

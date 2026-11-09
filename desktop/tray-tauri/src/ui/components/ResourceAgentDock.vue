@@ -17,6 +17,7 @@ const props = defineProps({
   collapsed: { type: Boolean, default: false },
   collapsedInToolbar: { type: Boolean, default: false },
   status: { type: String, default: 'offline', validator: value => ['offline', 'pending', 'generating', 'idle'].includes(value) },
+  pendingKind: { type: String, default: 'request', validator: value => ['approval', 'user_input', 'request'].includes(value) },
   turnError: { type: String, default: '' },
   modelRecoveryAvailable: { type: Boolean, default: false },
   modelName: { type: String, default: '' },
@@ -41,8 +42,16 @@ const collapsed = computed(() => props.collapsed)
 const detailsVisible = computed(() => props.expanded && !props.collapsed)
 const draft = computed(() => String(props.modelValue || ''))
 const statusCopy = computed(() => ({
-  offline: '离线', pending: '有待处理的审批', generating: props.cancelling ? '正在停止' : '生成中', idle: '空闲',
+  offline: '离线',
+  pending: props.pendingKind === 'user_input' ? '等待你补充信息' : props.pendingKind === 'approval' ? '等待工具审批' : '有待处理的请求',
+  generating: props.cancelling ? '正在停止' : '生成中',
+  idle: '空闲',
 }[props.status]))
+const pendingExpandTitle = computed(() => props.pendingKind === 'user_input'
+  ? '展开消息区，查看待补充信息'
+  : props.pendingKind === 'approval'
+    ? '展开消息区，查看待审批请求'
+    : '展开消息区，查看待处理请求')
 const statusIcon = computed(() => ({ offline: errorIcon, pending: warningIcon, generating: loadingIcon, idle: agentIcon }[props.status]))
 const statusLabel = computed(() => props.turnError
   ? `${props.agentName || '当前智能体'}：${props.turnError}`
@@ -205,7 +214,7 @@ onBeforeUnmount(() => {
           @input="emit('update:modelValue', $event.target.value)"
         >
         <button v-if="failedDraft" type="button" class="dock-restore" :disabled="restoreDisabled" aria-label="恢复失败消息" title="恢复失败消息" @click="emit('restore')">恢复</button>
-        <button ref="toggleButton" type="button" class="dock-expand-toggle" :aria-label="expanded ? '收起智能体消息区' : '展开智能体消息区'" :title="expanded ? '收起消息区' : status === 'pending' ? '展开消息区，查看待审批请求' : '展开消息区'" aria-controls="resource-agent-dock-details" :aria-expanded="expanded" @click="setExpanded(!expanded)"><span class="icon-mask" :style="iconStyle(expanded ? chevronDownIcon : chevronUpIcon)" aria-hidden="true"></span></button>
+        <button ref="toggleButton" type="button" class="dock-expand-toggle" :aria-label="expanded ? '收起智能体消息区' : '展开智能体消息区'" :title="expanded ? '收起消息区' : status === 'pending' ? pendingExpandTitle : '展开消息区'" aria-controls="resource-agent-dock-details" :aria-expanded="expanded" @click="setExpanded(!expanded)"><span class="icon-mask" :style="iconStyle(expanded ? chevronDownIcon : chevronUpIcon)" aria-hidden="true"></span></button>
         <button type="button" class="dock-collapse-toggle" aria-label="收起快速消息栏" title="收起消息栏" aria-expanded="true" @click="setCollapsed(true)"><span class="icon-mask" :style="iconStyle(chevronDownIcon)" aria-hidden="true"></span></button>
         <button :type="showStop ? 'button' : 'submit'" class="dock-action composer-action" :class="{ 'is-stop': showStop }" :disabled="actionDisabled" :aria-label="actionLabel" :title="actionLabel" :aria-busy="cancelling" @click="showStop && stop()"><span class="icon-mask composer-action__send" :style="iconStyle(sendIcon)" aria-hidden="true"></span><span class="icon-mask composer-action__stop" :style="iconStyle(stopIcon)" aria-hidden="true"></span></button>
       </form>

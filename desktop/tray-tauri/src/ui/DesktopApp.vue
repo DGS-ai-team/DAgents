@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { RouterView, useRoute, useRouter } from 'vue-router'
-import { agentErrorFor, agentSelectionViewTransition, cancelledTurnSummary, canCancelTurnPhase, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, handleAgentNotificationEvent, hasPersistedPartialMessage, isAgentBusy, mergeAgentNotificationSummaries, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, switchDraft, tabForRoute, turnErrorSummary, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
+import { agentErrorFor, agentSelectionViewTransition, cancelledTurnSummary, canCancelTurnPhase, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, handleAgentNotificationEvent, hasPersistedPartialMessage, isAgentBusy, mergeAgentNotificationSummaries, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, shouldShowTurnStopAction, switchDraft, tabForRoute, turnErrorSummary, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
 import { ResourceRenderContextKey, validateWorkspacePath } from '@desktop-ui/utils/resourceContext.js'
 import { closeTerminalFlow } from './terminal-close.js'
 import { composerPageFadeOutCompletion, composerPageHandoffNeedsFade, composerPageHandoffReady, composerPageSettlementMatches, composerPageVisibility, createComposerPageHandoff } from './composer-surface-motion.js'
@@ -179,7 +179,7 @@ const pendingUserByAgent = ref({})
 const dockExpanded = ref(false)
 const dockCollapsed = ref(false)
 const dockOccupiedHeight = ref(0)
-const dockStatus = computed(() => !status.value.online || status.value.setup_required ? 'offline' : pending.value ? 'pending' : agentGenerating.value ? 'generating' : 'idle')
+const dockStatus = computed(() => !status.value.online || status.value.setup_required ? 'offline' : pending.value || turnStateStore.phase === 'waiting_user' ? 'pending' : turnInProgress.value ? 'generating' : 'idle')
 const isTauri = !!window.__TAURI_INTERNALS__
 const startupReady = ref(false)
 const startupTimedOut = ref(false)
@@ -343,10 +343,17 @@ watch([activeId, fullTranscript], ([id, transcript]) => {
   pendingUserByAgent.value = next
 }, { flush: 'post' })
 const approvalQueueIndex = computed(() => hitlQueue.value.findIndex(item => item.kind === 'approval'))
+const dockPendingKind = computed(() => {
+  if (turnStateStore.phase === 'waiting_user' || hitlQueue.value.some(item => item.kind === 'user_information')) return 'user_input'
+  if (approvalQueueIndex.value >= 0) return 'approval'
+  return 'request'
+})
 const canCancelTurn = computed(() => canCancelTurnPhase(turnStateStore.phase))
-const agentGenerating = computed(() => busy.value || cancellingTurn.value || canCancelTurn.value)
+const turnInProgress = computed(() => busy.value || cancellingTurn.value || canCancelTurn.value)
+const agentGenerating = computed(() => shouldShowTurnStopAction(turnStateStore.phase, busy.value, cancellingTurn.value))
+const canStopFromComposer = computed(() => canCancelTurn.value && turnStateStore.phase !== 'waiting_user')
 const composerRuntimeStatus = computed(() => desktopComposerStatus({
-  generating: agentGenerating.value,
+  generating: turnInProgress.value,
   cancelling: cancellingTurn.value,
   streamingText: streamingText.value,
   turnState: turnStateStore,
@@ -361,7 +368,7 @@ const turnError = computed(() => cancelledTurnSummary(turnStateStore)
 const modelRecoveryAvailable = computed(() => Boolean(turnStateStore.error?.code?.startsWith('provider_')))
 const turnWatchdog = createTurnWatchdog({
   isAwaiting: () => Boolean(activeId.value && status.value.online),
-  hasStuckStatus: () => agentGenerating.value || (Boolean(streamingText.value) && !turnStateStore.terminal),
+  hasStuckStatus: () => turnInProgress.value || (Boolean(streamingText.value) && !turnStateStore.terminal),
   onStuck: async () => {
     const id = activeId.value
     if (!id) return
@@ -386,7 +393,7 @@ const menuEntries = computed(() => createDesktopMenuModel({
   activeAgentName: activeAgent.value?.display_name || '尚未选择智能体',
   isWorkgroup: isWorkgroupView.value,
   activeTab: activeTab.value,
-  generating: agentGenerating.value,
+  generating: turnInProgress.value,
   hasPendingApproval: approvalQueueIndex.value >= 0,
   hasPendingHitl: Boolean(pending.value),
   sidebarCollapsed: sidebarCollapsed.value,
@@ -698,7 +705,7 @@ function scheduleActiveAgentHydrate(id, delay = 100) {
 }
 async function switchLLMProfile(profileId) {
   const id = activeId.value
-  if (!id || !profileId || agentGenerating.value) return
+  if (!id || !profileId || turnInProgress.value) return
   error.value = ''
   try {
     const response = await patchAgent(id, { defaults: { llm: { active: profileId } } })
@@ -868,7 +875,7 @@ async function executeSlashCommand(text, agentId) {
     compressContext: async id => {
       if (!status.value.online || status.value.setup_required) throw new Error('本地服务未就绪，无法压缩上下文')
       if (activeId.value !== id || isWorkgroupView.value) throw new Error('请先选择一个智能体')
-      if (agentGenerating.value) throw new Error('请等待当前生成结束后再压缩上下文')
+      if (turnInProgress.value) throw new Error('请等待当前生成结束后再压缩上下文')
       if (pending.value || approvalQueueIndex.value >= 0) throw new Error('请先处理待审批请求')
       return compressContext(id)
     },
@@ -1125,7 +1132,7 @@ async function stopCurrentTurn() {
 async function clearContextWithConfirmation(id) {
   if (!id || id !== activeId.value) throw new Error('请先选择一个智能体')
   if (!status.value.online || status.value.setup_required) throw new Error('本地服务未就绪，无法清空对话')
-  if (agentGenerating.value) throw new Error('请等待当前回合结束后再清空对话')
+  if (turnInProgress.value) throw new Error('请等待当前回合结束后再清空对话')
   if (pending.value || approvalQueueIndex.value >= 0) throw new Error('请先处理待审批请求后再清空对话')
   if (!await confirmDesktopAction('清空当前 Agent 的对话上下文？此操作会从当前会话移除消息。')) return false
   await clearContext(id)
@@ -1146,7 +1153,7 @@ async function clearCurrentContext() {
 async function deleteAgentById(agentId) {
   const id = String(agentId || '').trim()
   const agent = agents.value.find(item => item.agent_id === id)
-  if (!agent || !status.value.online || status.value.setup_required || deletingAgentId.value || agent.state === 'working' || (activeId.value === id && agentGenerating.value)) return
+  if (!agent || !status.value.online || status.value.setup_required || deletingAgentId.value || agent.state === 'working' || (activeId.value === id && turnInProgress.value)) return
   const kind = agent.agent_type === 'auto' ? '自主智能体' : '智能体'
   const name = agent.display_name || id
   if (!await confirmDesktopAction(`删除${kind}「${name}」？\n该操作会在本地服务归档此智能体并移除其运行时。`)) return
@@ -1184,7 +1191,7 @@ function openAgentContextMenu(event, agent, anchor = event?.currentTarget) {
   const id = String(agent?.agent_id || '').trim()
   if (!id) return
   const kind = agent.agent_type === 'auto' ? '自主智能体' : '智能体'
-  const isWorking = agent.state === 'working' || (activeId.value === id && agentGenerating.value)
+  const isWorking = agent.state === 'working' || (activeId.value === id && turnInProgress.value)
   const disabledReason = !status.value.online ? '请先连接本地服务' : status.value.setup_required ? '请先完成本地服务初始化' : deletingAgentId.value ? '正在删除智能体' : isWorking ? '智能体工作中，暂不能删除' : ''
   void openEntryContextMenu(event, {
     title: agent.display_name || id,
@@ -2175,8 +2182,8 @@ onUnmounted(() => {
     </div>
     <div class="composer-toolbar-right">
       <button v-if="failedSendDraft" type="button" class="restore-failed-draft composer-restore" :disabled="!!input.trim()" @click="restoreFailedSendDraft('chat')">恢复失败消息</button>
-      <ComposerToolbar ref="composerToolbar" class="desktop-composer-toolbar" :llm-settings="llmSettings" :profile-catalog="llmProfileCatalog" :settings-profile-id="agentActiveProfile(activeAgent)" :desktop-compact="true" :disabled="agentGenerating || !activeId" :status-label="composerRuntimeStatus" @switch-profile="switchLLMProfile" @open-model-settings="openModelSettings"/>
-      <button class="send-button composer-action" type="button" :class="{ 'is-stop': agentGenerating }" :disabled="agentGenerating ? !canCancelTurn || cancellingTurn : !canSendMessage || !hasComposerContent || !activeId" :aria-label="agentGenerating ? (cancellingTurn ? '正在停止本轮' : '停止本轮') : '发送消息'" :title="agentGenerating ? (cancellingTurn ? '正在停止本轮…' : '停止本轮') : '发送消息'" :aria-busy="cancellingTurn" @click="agentGenerating ? stopCurrentTurn() : send()"><span class="icon-mask send-icon composer-action__send" :style="maskStyle(sendIcon)" aria-hidden="true"></span><span class="icon-mask send-icon composer-action__stop" :style="maskStyle(stopIcon)" aria-hidden="true"></span></button>
+      <ComposerToolbar ref="composerToolbar" class="desktop-composer-toolbar" :llm-settings="llmSettings" :profile-catalog="llmProfileCatalog" :settings-profile-id="agentActiveProfile(activeAgent)" :desktop-compact="true" :disabled="turnInProgress || !activeId" :status-label="composerRuntimeStatus" @switch-profile="switchLLMProfile" @open-model-settings="openModelSettings"/>
+      <button class="send-button composer-action" type="button" :class="{ 'is-stop': agentGenerating }" :disabled="agentGenerating ? !canStopFromComposer || cancellingTurn : !canSendMessage || !hasComposerContent || !activeId" :aria-label="agentGenerating ? (cancellingTurn ? '正在停止本轮' : '停止本轮') : '发送消息'" :title="agentGenerating ? (cancellingTurn ? '正在停止本轮…' : '停止本轮') : '发送消息'" :aria-busy="cancellingTurn" @click="agentGenerating ? stopCurrentTurn() : send()"><span class="icon-mask send-icon composer-action__send" :style="maskStyle(sendIcon)" aria-hidden="true"></span><span class="icon-mask send-icon composer-action__stop" :style="maskStyle(stopIcon)" aria-hidden="true"></span></button>
     </div>
   </div>
 </form><Transition name="composer-notice"><p v-if="commandNotice" class="composer-notice" role="status" aria-live="polite">{{ commandNotice }}</p></Transition><div class="composer-foot"><span>内容发送到当前 Agent</span></div></footer>
@@ -2188,6 +2195,7 @@ onUnmounted(() => {
         v-model:collapsed="dockCollapsed"
         :collapsed-in-toolbar="activeTab === 'file'"
         :status="dockStatus"
+        :pending-kind="dockPendingKind"
         :turn-error="turnError"
         :model-recovery-available="modelRecoveryAvailable"
         :model-name="llmSettings?.model || ''"
@@ -2195,8 +2203,8 @@ onUnmounted(() => {
         :agent-name="activeAgent?.display_name || '当前智能体'"
         :can-send="canSendMessage"
         :references="pendingWorkspaceReferences"
-        :disabled="!activeId || !status.online || status.setup_required"
-        :can-stop="canCancelTurn"
+        :disabled="!activeId || !status.online || status.setup_required || busy || cancellingTurn"
+        :can-stop="canStopFromComposer"
         :cancelling="cancellingTurn"
         :failed-draft="Boolean(failedSendDraft)"
         :restore-disabled="Boolean(dockDraft.trim())"

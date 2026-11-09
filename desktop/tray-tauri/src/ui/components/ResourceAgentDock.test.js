@@ -7,12 +7,12 @@ import ResourceAgentDock from './ResourceAgentDock.vue'
 describe('ResourceAgentDock', () => {
   it('renders one compact input row with status, expansion, and a single send action', () => {
     const wrapper = mount(ResourceAgentDock, {
-      props: { modelValue: 'hello', status: 'pending', canSend: true },
+      props: { modelValue: 'hello', status: 'pending', pendingKind: 'approval', canSend: true },
     })
     expect(wrapper.find('.dock-input-surface').exists()).toBe(true)
     expect(wrapper.find('.dock-status-icon').classes()).toContain('icon-mask')
-    expect(wrapper.find('.dock-status-icon').attributes('aria-label')).toContain('有待处理的审批')
-    expect(wrapper.find('.dock-status-icon').attributes('title')).toContain('待处理')
+    expect(wrapper.find('.dock-status-icon').attributes('aria-label')).toContain('等待工具审批')
+    expect(wrapper.find('.dock-status-icon').attributes('title')).toContain('等待工具审批')
     expect(wrapper.findAll('.dock-action')).toHaveLength(1)
     expect(wrapper.find('.dock-action').attributes('aria-label')).toBe('发送消息')
     expect(wrapper.find('.dock-details-panel').exists()).toBe(false)
@@ -28,6 +28,28 @@ describe('ResourceAgentDock', () => {
     await wrapper.setProps({ collapsed: true, collapsedInToolbar: true })
     expect(wrapper.find('.dock-error-compact').text()).toBe('本轮失败')
     expect(wrapper.find('.dock-collapsed-placeholder').attributes('aria-label')).toContain('模型服务暂时不可用')
+    wrapper.unmount()
+  })
+
+  it('keeps send mode for a user-answer wait while preserving stop mode for approval waits', async () => {
+    const wrapper = mount(ResourceAgentDock, {
+      props: { modelValue: 'answer', status: 'pending', pendingKind: 'user_input', canSend: true, canStop: false },
+    })
+    const action = wrapper.find('.dock-action')
+    expect(action.attributes('aria-label')).toBe('发送消息')
+    expect(action.attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.dock-status-icon').attributes('aria-label')).toContain('等待你补充信息')
+    expect(wrapper.find('.dock-expand-toggle').attributes('title')).toBe('展开消息区，查看待补充信息')
+    await wrapper.find('.dock-input-surface').trigger('submit')
+    expect(wrapper.emitted('send')).toHaveLength(1)
+    expect(wrapper.emitted('stop')).toBeUndefined()
+
+    await wrapper.setProps({ canSend: false, canStop: true, pendingKind: 'approval' })
+    expect(wrapper.find('.dock-action').attributes('aria-label')).toBe('停止本轮')
+    expect(wrapper.find('.dock-status-icon').attributes('aria-label')).toContain('等待工具审批')
+    expect(wrapper.find('.dock-expand-toggle').attributes('title')).toBe('展开消息区，查看待审批请求')
+    await wrapper.find('.dock-action').trigger('click')
+    expect(wrapper.emitted('stop')).toHaveLength(1)
     wrapper.unmount()
   })
 
