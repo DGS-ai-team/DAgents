@@ -41,7 +41,7 @@ const channel = reactive({
 });
 
 const credentialAuthMeta = {
-  private_key: { label: "SSH 私钥", description: "可直接输入私钥或引用环境变量，Node 不会把私钥放进工具参数。" },
+  private_key: { label: "SSH 私钥", description: "可粘贴完整私钥，或引用值为完整私钥内容的环境变量；不能填私钥文件路径。" },
   password: { label: "密码", description: "可直接输入密码，也可以通过环境变量引用。" },
 };
 const authTypeOptions = [
@@ -95,7 +95,7 @@ function onHostKeyPolicyChange() {
 }
 
 function credentialStatusLabel(item) {
-  if (item.secret_source === "direct") return "已配置直接密码";
+  if (item.secret_source === "direct") return "已配置直接输入";
   if (item.secret_source === "environment") return "已配置环境变量";
   return item.has_secret ? "已配置凭据" : "未配置凭据";
 }
@@ -366,7 +366,7 @@ onMounted(() => {
       <div class="settings-section__head">
         <div>
           <h2 class="settings-section__title">凭据</h2>
-          <p class="settings-section__desc">ID由系统自动生成。密码和 SSH 私钥都可直接输入或使用 <code>env:变量名</code> 引用；直接输入内容会加密存储。</p>
+          <p class="settings-section__desc">ID由系统自动生成。密码和 SSH 私钥都可直接输入或使用 <code>env:变量名</code> 引用；私钥环境变量必须包含完整密钥文本，不能是文件路径。</p>
         </div>
         <div class="settings-section__actions">
           <button type="button" class="btn btn--primary btn--sm" @click="openCredentialForm">新增凭据</button>
@@ -473,12 +473,13 @@ onMounted(() => {
               <label>{{ credential.auth_type === "private_key" ? "SSH 私钥" : "登录密码" }} <span>必选</span></label>
               <textarea v-if="credential.auth_type === 'private_key'" v-model="credential.secret_value" rows="6" class="settings-field__input" placeholder="粘贴 SSH 私钥内容" />
               <input v-else v-model="credential.secret_value" type="password" autocomplete="new-password" class="settings-field__input" placeholder="输入 SSH 登录密码" />
-              <small>只会在建立 SSH 连接时使用，不会通过凭据列表接口返回。</small>
+              <small v-if="credential.auth_type === 'private_key'">请粘贴完整私钥内容（含 BEGIN/END 行）；内容会加密保存，不会通过凭据列表接口返回。</small>
+              <small v-else>密码会加密保存，不会通过凭据列表接口返回。</small>
             </template>
             <template v-else>
-              <label>环境变量引用 <span>必选</span></label>
+              <label>{{ credential.auth_type === "private_key" ? "保存完整私钥内容的环境变量" : "环境变量引用" }} <span>必选</span></label>
               <input v-model="credential.secret_ref" class="settings-field__input" :placeholder="credential.auth_type === 'private_key' ? '例如：env:SSH_KEY' : '例如：env:SSH_PASSWORD'" />
-              <small>这里只保存引用名称，Node 会在连接时从进程环境变量解析；修改环境变量后仍需重启 Node 才能让进程看到新值。</small>
+              <small>{{ credential.auth_type === "private_key" ? "变量值必须是完整私钥文本，不是文件路径。" : "这里只保存引用名称，Node 会在连接时从进程环境变量解析。" }} 修改环境变量后需重启 Node 才能读取新值。</small>
             </template>
           </div>
         </div>

@@ -21,24 +21,27 @@ beforeEach(() => {
   api.listLinuxChannels.mockResolvedValue({ channels: [] });
   api.listLinuxCredentials.mockResolvedValue({ credentials: [savedCredential] });
   api.createLinuxChannel.mockResolvedValue({ channel_id: "channel-a" });
+  api.createLinuxCredential.mockResolvedValue({ credential_id: "credential-b", secret_source: "direct" });
+});
+
+const mountSettings = () => mount(LinuxChannelsSettings, {
+  global: {
+    stubs: {
+      SettingsPageHeader: true,
+      UiIcon: true,
+      UiSelect: {
+        props: ["modelValue", "options"],
+        emits: ["update:modelValue", "change"],
+        template: '<select :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value); $emit(\'change\', $event.target.value)"><option v-for="option in options" :key="option.value" :value="option.value">{{ option.label }}</option></select>',
+      },
+    },
+  },
 });
 
 describe("Linux channel return flow", () => {
   it("creates a global SSH channel and returns to the originating agent resource section", async () => {
     route.query = { create: "1", returnAgentId: "agent-a", returnSection: "resources" };
-    const wrapper = mount(LinuxChannelsSettings, {
-      global: {
-        stubs: {
-          SettingsPageHeader: true,
-          UiIcon: true,
-          UiSelect: {
-            props: ["modelValue", "options"],
-            emits: ["update:modelValue", "change"],
-            template: '<select :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value); $emit(\'change\', $event.target.value)"><option v-for="option in options" :key="option.value" :value="option.value">{{ option.label }}</option></select>',
-          },
-        },
-      },
-    });
+    const wrapper = mountSettings();
     await flushPromises();
 
     expect(wrapper.get("#channel-form-title").text()).toBe("新增 SSH 通道");
@@ -62,4 +65,25 @@ describe("Linux channel return flow", () => {
     });
     wrapper.unmount();
   });
+
+  it("preserves multiline private-key text in the direct credential payload", async () => {
+    const wrapper = mountSettings();
+    await flushPromises();
+    await wrapper.get('button').trigger("click");
+    await flushPromises();
+    await wrapper.get('select[aria-label="凭据来源"]').setValue("direct");
+
+    const privateKeyFixture = "-----BEGIN OPENSSH PRIVATE KEY-----\nfixture-line-one\nfixture-line-two\n-----END OPENSSH PRIVATE KEY-----\n";
+    await wrapper.get("textarea").setValue(privateKeyFixture);
+    await wrapper.get('.linux-settings__modal-actions .btn--primary').trigger("click");
+    await flushPromises();
+
+    expect(api.createLinuxCredential).toHaveBeenCalledWith(expect.objectContaining({
+      auth_type: "private_key",
+      secret_value: privateKeyFixture,
+    }));
+    expect(api.createLinuxCredential.mock.calls[0][0]).not.toHaveProperty("secret_ref");
+    wrapper.unmount();
+  });
+
 });

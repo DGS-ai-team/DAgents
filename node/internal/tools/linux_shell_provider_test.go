@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -396,6 +398,58 @@ func TestLinuxShellProviderReportsUnknownHostKeyFingerprint(t *testing.T) {
 	last := status.Stages[len(status.Stages)-1]
 	if last.Name != "ssh_handshake" || last.Code != "host_key_unknown" {
 		t.Fatalf("unexpected failed stage: %+v", last)
+	}
+}
+
+func TestLinuxPrivateKeyParserAcceptsEscapedNewlinesAndClassifiesInvalidMaterial(t *testing.T) {
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(private, "linux-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := string(pem.EncodeToMemory(block))
+	for name, encoded := range map[string]string{
+		"multiline":        key,
+		"escaped newlines": strings.ReplaceAll(key, "\n", `\n`),
+		"windows newlines": strings.ReplaceAll(key, "\n", "\r\n"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			signer, err := parseLinuxPrivateKey(encoded)
+			if err != nil || signer == nil {
+				t.Fatalf("private key parse failed: signer=%v err=%v", signer, err)
+			}
+		})
+	}
+	encryptedBlock, err := ssh.MarshalPrivateKeyWithPassphrase(private, "linux-test", []byte("test-passphrase"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptedErr := ValidateLinuxPrivateKeySecret(string(pem.EncodeToMemory(encryptedBlock)))
+	if !errors.Is(encryptedErr, ErrLinuxPrivateKeyEncrypted) || strings.Contains(encryptedErr.Error(), "test-passphrase") {
+		t.Fatalf("encrypted key error=%v, want safe unsupported-encrypted-key error", encryptedErr)
+	}
+
+	pathLike := `C:\Users\operator\.ssh\id_ed25519`
+	invalidErr := ValidateLinuxPrivateKeySecret(pathLike)
+	if !errors.Is(invalidErr, ErrLinuxPrivateKeyInvalid) {
+		t.Fatalf("path-like input error = %v, want ErrLinuxPrivateKeyInvalid", invalidErr)
+	}
+	if strings.Contains(invalidErr.Error(), pathLike) {
+		t.Fatal("private key error should not echo submitted material")
+	}
+	provider := NewLinuxShellProvider(testLinuxResolver{
+		channel: LinuxChannelConfig{
+			ID: "test", Host: "127.0.0.1", Port: 22, Username: "test-user",
+			CredentialID: "cred", HostKeyPolicy: "pinned", HostKeyRef: "test-fingerprint", Enabled: true,
+		},
+		credential: LinuxCredential{ID: "cred", AuthType: "private_key", SecretRef: "env:SSH_KEY", Enabled: true},
+	}, func(context.Context, string) (string, error) { return pathLike, nil })
+	status, err := provider.Test(context.Background(), ExecutionTarget{Kind: executionTargetLinuxChannel, ID: "test"})
+	if err != nil || status.ErrorCode != "private_key_invalid" {
+		t.Fatalf("invalid key status=%+v err=%v, want private_key_invalid", status, err)
 	}
 }
 
