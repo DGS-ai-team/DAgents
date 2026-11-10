@@ -3,10 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { confirm as confirmNative, message as showNativeMessage, open as openNativeDialog } from "@tauri-apps/plugin-dialog";
 import App from "./App.vue";
 import router from "./settings-router.js";
-import "@desktop-ui/styles/tokens.css";
-import "@desktop-ui/styles/layout.css";
-import "@desktop-ui/styles/workbench.css";
-import "@desktop-ui/styles/overrides.css";
+import "@desktop-ui/styles/index.css";
 
 // The Desktop workbench and its settings use the same semantic theme tokens.
 document.documentElement.dataset.theme = "light";

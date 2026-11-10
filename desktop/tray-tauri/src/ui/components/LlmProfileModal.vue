@@ -331,11 +331,11 @@ watch(
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="llm-profile-overlay" @click="onBackdropClick">
-      <section class="llm-profile-modal" role="dialog" aria-modal="true" :aria-labelledby="'llm-profile-title'">
+    <div v-if="open" class="ui-dialog-backdrop llm-profile-overlay" @click="onBackdropClick">
+      <section class="ui-dialog llm-profile-modal" role="dialog" aria-modal="true" :aria-labelledby="'llm-profile-title'">
         <header class="llm-profile-modal__header">
           <h2 id="llm-profile-title" class="llm-profile-modal__title">{{ title }}</h2>
-          <button type="button" class="llm-profile-modal__close" aria-label="关闭" @click="emit('close')"><UiIcon name="close" :size="18" /></button>
+          <button type="button" class="btn btn--ghost btn--sm desktop-icon-button" aria-label="关闭" @click="emit('close')"><UiIcon name="close" :size="18" /></button>
         </header>
 
         <div class="llm-profile-modal__body">
@@ -451,7 +451,7 @@ watch(
             </label>
 
             <label v-if="capability.can_disable_thinking" class="settings-toggle llm-profile-modal__toggle-row">
-              <input v-model="draft.thinking" type="checkbox" :true-value="'enabled'" :false-value="'disabled'" />
+              <input v-model="draft.thinking" class="settings-switch-input" type="checkbox" :true-value="'enabled'" :false-value="'disabled'" />
               <span>{{ capability.thinking_label || "思考" }}</span>
             </label>
             <p v-else-if="capability.allowed_efforts?.includes('none')" class="settings-field__hint">
@@ -464,17 +464,17 @@ watch(
           <p v-else-if="draft.model" class="settings-field__hint">此模型暂无可配置的思考参数。</p>
 
           <label v-if="draft.has_api_key" class="settings-toggle llm-profile-modal__toggle-row">
-            <input v-model="draft.clear_api_key" type="checkbox" />
+            <input v-model="draft.clear_api_key" class="settings-switch-input" type="checkbox" />
             <span>清除已保存的 API Key</span>
           </label>
 
-          <div class="setup-config-panel__toggles llm-profile-modal__toggles">
+          <div class="llm-profile-modal__toggles">
             <label class="settings-toggle llm-profile-modal__toggle-row">
-              <input v-model="draft.mock" type="checkbox" />
+              <input v-model="draft.mock" class="settings-switch-input" type="checkbox" />
               <span>测试模式（Mock）</span>
             </label>
             <label class="settings-toggle llm-profile-modal__toggle-row">
-              <input v-model="draft.multimodal_enabled" type="checkbox" />
+              <input v-model="draft.multimodal_enabled" class="settings-switch-input" type="checkbox" />
               <span>多模态 / Vision</span>
             </label>
           </div>
@@ -502,8 +502,6 @@ watch(
   display: grid;
   place-items: center;
   padding: 24px;
-  background: var(--color-overlay);
-  backdrop-filter: blur(2px);
 }
 
 .llm-profile-modal {
@@ -511,10 +509,7 @@ watch(
   max-height: min(88vh, 720px);
   display: flex;
   flex-direction: column;
-  border-radius: 12px;
-  border: 1px solid var(--color-border-strong, var(--color-border));
-  background: var(--color-surface);
-  box-shadow: var(--shadow-lg, 0 16px 48px rgba(0, 0, 0, 0.28));
+  padding: 0;
   overflow: hidden;
 }
 
@@ -538,23 +533,6 @@ watch(
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-}
-
-.llm-profile-modal__close {
-  width: 32px;
-  height: 32px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 22px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.llm-profile-modal__close:hover {
-  background: rgba(148, 163, 184, 0.16);
-  color: var(--color-text);
 }
 
 .llm-profile-modal__body {
@@ -670,14 +648,8 @@ watch(
 
 .settings-field__hint {
   margin: 0;
-  font-size: 12px;
-  color: var(--color-text-subtle);
-  line-height: 1.4;
 }
 
-.settings-field__hint code {
-  font-size: 11px;
-}
 
 .llm-profile-modal__error {
   margin: 0;

@@ -1,5 +1,6 @@
 <script setup>
 import SettingsSaveBar from "./SettingsSaveBar.vue";
+import SettingsPageHeader from "./SettingsPageHeader.vue";
 
 defineProps({
   title: { type: String, required: true },
@@ -18,16 +19,11 @@ const emit = defineEmits(["save"]);
 
 <template>
   <section class="panel settings-embedded-panel setup-config-panel">
-    <header class="panel__header">
-      <div>
-        <div class="panel__title">{{ title }}</div>
-        <div v-if="subtitle || !configWritable" class="setup-config-panel__subtitle">
-          <template v-if="subtitle">{{ subtitle }}</template>
-          <template v-if="subtitle && !configWritable"> · </template>
-          <span v-if="!configWritable">只读</span>
-        </div>
-      </div>
-    </header>
+    <SettingsPageHeader
+      class="config-panel-shell__header"
+      :title="title"
+      :description="[subtitle, !configWritable ? '只读' : ''].filter(Boolean).join(' · ')"
+    />
 
     <div class="panel__body setup-config-panel__body">
       <div v-if="loading && !configPath" class="command-panel__loading">加载中…</div>

@@ -90,7 +90,8 @@ describe("SimplifiedAutoPanel", () => {
     const experience = wrapper.get(".simplified-auto-panel__experience");
     expect(experience.text()).toContain("第一条");
     expect(experience.classes()).toContain("simplified-auto-panel__experience");
-    expect(wrapper.find(".simplified-auto-panel__row").classes()).toContain("simplified-auto-panel__row");
+    expect(wrapper.findAll(".settings-row").length).toBeGreaterThan(0);
+    expect(wrapper.get(".simplified-auto-panel__experience").element.closest(".settings-row").classList.contains("settings-row--field")).toBe(true);
   });
 
   it("reads trigger recovery state and opens the Desktop triggers settings route", async () => {
@@ -117,7 +118,7 @@ describe("SimplifiedAutoPanel", () => {
     await flushPromises();
     await wrapper.get('[aria-label="职责"]').setValue("尚未保存的职责");
     api.getAutoSettings.mockResolvedValueOnce({ revision: 4, wake_interval_seconds: 1800, dreaming_available: true, dreaming_status: { state: "waiting" }, trigger_available: true, trigger_recovery: { recovery_required: true, pending_delivery_id: "delivery-2", revision: 8 }, needs_reconcile: false });
-    const triggerRow = wrapper.findAll(".simplified-auto-panel__row").find((row) => row.text().includes("自主运行状态"));
+    const triggerRow = wrapper.findAll(".settings-row").find((row) => row.text().includes("自主运行状态"));
     expect(triggerRow).toBeTruthy();
     await triggerRow.get('[aria-label="刷新状态"]').trigger("click");
     await flushPromises();
@@ -140,7 +141,7 @@ describe("SimplifiedAutoPanel", () => {
     expect(wrapper.findAll("button").some((button) => button.text() === "同步自主运行")).toBe(true);
 
     api.getAutoSettings.mockResolvedValueOnce({ revision: 4, wake_interval_seconds: 3600, dreaming_available: true, dreaming_status: { state: "waiting" }, trigger_available: true, trigger: null, needs_reconcile: true });
-    const triggerRow = wrapper.findAll(".simplified-auto-panel__row").find((row) => row.text().includes("自主运行状态"));
+    const triggerRow = wrapper.findAll(".settings-row").find((row) => row.text().includes("自主运行状态"));
     await triggerRow.find("button").trigger("click");
     await flushPromises();
     expect(wrapper.findAll("button").some((button) => button.text() === "同步自主运行")).toBe(true);
@@ -159,7 +160,7 @@ describe("SimplifiedAutoPanel", () => {
     await wrapper.get(".btn--primary").trigger("click");
     await flushPromises();
     api.getAutoSettings.mockResolvedValueOnce({ revision: 5, wake_interval_seconds: 0, dreaming_available: true, dreaming_status: { state: "waiting" }, trigger_available: true, trigger: { recovery_required: false, enabled: true, condition: { interval_seconds: 1800 } }, needs_reconcile: true });
-    const triggerRow = wrapper.findAll(".simplified-auto-panel__row").find((row) => row.text().includes("自主运行状态"));
+    const triggerRow = wrapper.findAll(".settings-row").find((row) => row.text().includes("自主运行状态"));
     await triggerRow.find("button").trigger("click");
     await flushPromises();
     expect(wrapper.findAll("button").some((button) => button.text() === "同步自主运行")).toBe(true);

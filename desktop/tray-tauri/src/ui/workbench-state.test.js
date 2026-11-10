@@ -108,6 +108,21 @@ test('waiting_user remains cancellable without switching the composer from send 
   assert.match(source, /:pending-kind="dockPendingKind"/)
 })
 
+test('sidebar actions live in keyboard-accessible context menus', () => {
+  const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
+  const styles = readFileSync(new URL('./desktop-ui.css', import.meta.url), 'utf8')
+  assert.match(source, /label: '新建智能体'/)
+  assert.match(source, /label: '自主智能体总览'/)
+  assert.match(source, /label: '打开工作组列表'/)
+  assert.match(source, /label: '打开对话'/)
+  assert.match(source, /label: '智能体设置'/)
+  assert.match(source, /aria-label="智能体，右键查看操作"/)
+  assert.match(source, /@keydown="onAgentEntryKeydown\(\$event, agent\)"/)
+  assert.doesNotMatch(source, /class="agent-row-action"/)
+  assert.doesNotMatch(source, /class="group-add"/)
+  assert.doesNotMatch(styles, /agent-row-action|group-add/)
+})
+
 test('Desktop menubar groups actions by user task and disables unavailable operations', () => {
   const menus = createDesktopMenuModel({ activeAgentId: 'agent-a', activeAgentName: 'autotest', activeTab: 'browser', online: true, generating: false, hasPendingApproval: true, nodeVersion: '0.11.0' })
   assert.deepEqual(desktopMenuNames, ['DAgents', '资源', '视图', '智能体', '帮助'])

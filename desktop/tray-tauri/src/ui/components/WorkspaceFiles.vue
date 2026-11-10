@@ -1525,16 +1525,16 @@ onUnmounted(() => {
 <template>
   <section class="workspace-files" :style="{ '--workspace-dock-bottom-space': `${workspaceDockScrollInset(dockCollapsed, dockOccupiedHeight)}px` }" aria-label="Agent 工作区文件">
     <header class="workspace-files__toolbar">
-      <button type="button" class="desktop-icon-button" :disabled="!currentPath || loading" title="上级目录" aria-label="上级目录" @click="goUp"><UiIcon name="arrow-up" :size="16" /></button>
-      <button type="button" class="desktop-icon-button workspace-files__list-toggle" :aria-expanded="!fileListCollapsed" :title="fileListCollapsed ? '显示文件列表' : '收起文件列表'" :aria-label="fileListCollapsed ? '显示文件列表' : '收起文件列表'" @click="fileListCollapsed = !fileListCollapsed"><UiIcon :name="fileListCollapsed ? 'panel-left-open' : 'panel-left-close'" :size="16" /></button>
+      <button type="button" class="desktop-icon-button desktop-icon-button--toolbar" :disabled="!currentPath || loading" title="上级目录" aria-label="上级目录" @click="goUp"><UiIcon name="arrow-up" :size="16" /></button>
+      <button type="button" class="desktop-icon-button desktop-icon-button--toolbar workspace-files__list-toggle" :aria-expanded="!fileListCollapsed" :title="fileListCollapsed ? '显示文件列表' : '收起文件列表'" :aria-label="fileListCollapsed ? '显示文件列表' : '收起文件列表'" @click="fileListCollapsed = !fileListCollapsed"><UiIcon :name="fileListCollapsed ? 'panel-left-open' : 'panel-left-close'" :size="16" /></button>
       <div class="workspace-files__breadcrumbs"><button type="button" @click="loadDirectory('')">工作区</button><template v-for="(part,index) in breadcrumbs" :key="index"><span>/</span><button type="button" @click="loadDirectory(breadcrumbs.slice(0,index+1).join('/'))">{{ part }}</button></template><span v-if="filename">/</span><b v-if="filename" :title="filename">{{ filename }}</b></div>
       <span v-if="previewKind === 'docx' && documentWarnings.length && !documentPreviewError" class="workspace-files__format-warning" tabindex="0" role="status" aria-label="Word 预览格式提示" :title="documentWarnings.join('\n')"><UiIcon name="alert" :size="15" /></span>
       <span v-if="noticeSummary" class="workspace-files__notice" tabindex="0" role="status" aria-live="polite" :aria-label="noticeSummary" aria-describedby="workspace-files-notice-detail"><UiIcon name="alert" :size="16" /><span class="workspace-files__sr-only">{{ noticeSummary }}</span><span id="workspace-files-notice-detail" class="workspace-files__notice-detail" role="tooltip"><span v-for="(detail,index) in noticeDetails" :key="index">{{ detail }}</span></span></span>
       <div class="workspace-files__toolbar-actions">
-        <button v-if="dockCollapsed" ref="dockRestoreButton" type="button" class="desktop-icon-button workspace-files__dock-toggle" :title="`${dockAgentName} · ${dockStatusLabel}；展开快速消息栏`" :aria-label="`${dockAgentName}：展开快速消息栏，当前${dockStatusLabel}`" @click="emit('expand-agent-dock')"><UiIcon name="message-square" :size="16" /><i :class="`is-${dockStatus}`" aria-hidden="true"></i></button>
+        <button v-if="dockCollapsed" ref="dockRestoreButton" type="button" class="desktop-icon-button desktop-icon-button--toolbar workspace-files__dock-toggle" :title="`${dockAgentName} · ${dockStatusLabel}；展开快速消息栏`" :aria-label="`${dockAgentName}：展开快速消息栏，当前${dockStatusLabel}`" @click="emit('expand-agent-dock')"><UiIcon name="message-square" :size="16" /><i :class="`is-${dockStatus}`" aria-hidden="true"></i></button>
         <button
           type="button"
-          class="desktop-icon-button"
+          class="desktop-icon-button desktop-icon-button--toolbar"
           :aria-label="props.attachmentLimitReached
             ? '无法引用：一条消息最多添加 8 个附件或注解'
             : selectedPath ? '引用文件到对话' : '请选择文件后引用到对话'"
@@ -1553,16 +1553,16 @@ onUnmounted(() => {
           <button type="button" :aria-pressed="previewMode === 'source'" :class="{ 'is-active': previewMode === 'source' }" @click="setPreviewMode('source')">{{ sourceModeLabel }}</button>
         </div>
         <details ref="toolbarMenu" class="workspace-files__actions-menu">
-        <summary class="desktop-icon-button" title="更多文件操作" aria-label="更多文件操作"><UiIcon name="more-horizontal" :size="16" /></summary>
-        <div class="workspace-files__actions-popover" aria-label="更多文件操作">
-          <button type="button" :disabled="loading || Boolean(activeWriteRequest)" @click="runToolbarAction(createFile)"><UiIcon name="file-plus" :size="15" /><span>新建文件</span></button>
-          <button type="button" :disabled="loading || Boolean(activeWriteRequest)" @click="runToolbarAction(onUpload)"><UiIcon name="upload" :size="15" /><span>导入本机文件</span></button>
-          <button type="button" :disabled="!selectedPath || resourceActionBusy" @click="runToolbarAction(saveSelectedAs)"><UiIcon name="arrow-down" :size="15" /><span>另存为</span></button>
-          <button type="button" :disabled="!selectedPath || resourceActionBusy" @click="runToolbarAction(revealSelectedFile)"><UiIcon name="file" :size="15" /><span>在文件管理器中定位</span></button>
+        <summary class="desktop-icon-button desktop-icon-button--toolbar" title="更多文件操作" aria-label="更多文件操作"><UiIcon name="more-horizontal" :size="16" /></summary>
+        <div class="workspace-files__actions-popover ui-popover" aria-label="更多文件操作">
+          <button type="button" class="btn btn--ghost btn--sm" :disabled="loading || Boolean(activeWriteRequest)" @click="runToolbarAction(createFile)"><UiIcon name="file-plus" :size="15" /><span>新建文件</span></button>
+          <button type="button" class="btn btn--ghost btn--sm" :disabled="loading || Boolean(activeWriteRequest)" @click="runToolbarAction(onUpload)"><UiIcon name="upload" :size="15" /><span>导入本机文件</span></button>
+          <button type="button" class="btn btn--ghost btn--sm" :disabled="!selectedPath || resourceActionBusy" @click="runToolbarAction(saveSelectedAs)"><UiIcon name="arrow-down" :size="15" /><span>另存为</span></button>
+          <button type="button" class="btn btn--ghost btn--sm" :disabled="!selectedPath || resourceActionBusy" @click="runToolbarAction(revealSelectedFile)"><UiIcon name="file" :size="15" /><span>在文件管理器中定位</span></button>
         </div>
       </details>
-      <button type="button" class="desktop-icon-button" title="刷新" aria-label="刷新" :disabled="loading" @click="refreshResources('manual')"><UiIcon name="refresh-cw" :size="16" /></button>
-      <button type="button" class="desktop-icon-button" :title="saving ? '正在保存' : draftConflict || externalUpdate ? '工作区已有更新，请选择覆盖保存或丢弃草稿' : fileMissing ? '文件已移除，无法保存' : '保存文件'" aria-label="保存文件" :disabled="!dirty || saving || Boolean(activeWriteRequest) || !canEditText || draftConflict || externalUpdate || fileMissing" @click="saveFile"><UiIcon name="save" :size="16" /></button>
+      <button type="button" class="desktop-icon-button desktop-icon-button--toolbar" title="刷新" aria-label="刷新" :disabled="loading" @click="refreshResources('manual')"><UiIcon name="refresh-cw" :size="16" /></button>
+      <button type="button" class="desktop-icon-button desktop-icon-button--toolbar" :title="saving ? '正在保存' : draftConflict || externalUpdate ? '工作区已有更新，请选择覆盖保存或丢弃草稿' : fileMissing ? '文件已移除，无法保存' : '保存文件'" aria-label="保存文件" :disabled="!dirty || saving || Boolean(activeWriteRequest) || !canEditText || draftConflict || externalUpdate || fileMissing" @click="saveFile"><UiIcon name="save" :size="16" /></button>
       </div>
     </header>
     <div class="workspace-files__body" :class="{ 'is-list-collapsed': fileListCollapsed }">
@@ -1573,31 +1573,31 @@ onUnmounted(() => {
         <div v-if="dirty" class="workspace-files__draft-bar" :class="{ 'is-conflict': draftConflict || externalUpdate || fileMissing }" role="status" aria-live="polite">
           <span>{{ draftStatusText }}</span>
           <div class="workspace-files__draft-actions">
-            <button v-if="canOverwriteDraft" type="button" :disabled="saving || loading" @click="saveFile({ overwrite: true })">覆盖保存</button>
+            <button v-if="canOverwriteDraft" type="button" class="btn btn--sm" :disabled="saving || loading" @click="saveFile({ overwrite: true })">覆盖保存</button>
           </div>
         </div>
         <div v-if="hasRetainedDraft" class="workspace-files__draft-bar is-conflict is-retained" role="status" aria-live="polite">
           <span>当前显示源文件的{{ chunkedText ? '只读分段预览' : '只读预览' }}；本地草稿已独立保留，可另存草稿或通过资源菜单明确丢弃。</span>
-          <div class="workspace-files__draft-actions"><button type="button" :disabled="resourceActionBusy" @click="saveRetainedDraftAs">另存本地草稿</button></div>
+          <div class="workspace-files__draft-actions"><button type="button" class="btn btn--sm" :disabled="resourceActionBusy" @click="saveRetainedDraftAs">另存本地草稿</button></div>
         </div>
         <div v-if="actionStatus" class="workspace-files__action-status" role="status" aria-live="polite">{{ actionStatus }}</div>
         <div v-if="actionError" class="workspace-files__action-status workspace-files__action-error" role="alert">{{ actionError }}</div>
         <div v-if="activeWriteRequest" class="workspace-files__action-status" role="status" aria-live="polite">
           {{ workspaceWriteProgressLabel(writeProgress?.phase, writeProgress?.bytes, writeProgress?.total) }}
-          <button type="button" @click="cancelActiveWorkspaceWrite">请求取消</button>
+          <button type="button" class="btn btn--ghost btn--sm" @click="cancelActiveWorkspaceWrite">请求取消</button>
         </div>
         <div ref="editorContentRef" class="workspace-files__editor-content" @wheel.capture="cancelPendingScrollRestore" @touchstart.capture="cancelPendingScrollRestore" @pointerdown.capture="cancelPendingScrollRestore" @keydown.capture="cancelPendingScrollRestore">
           <div v-if="loading" class="workspace-files__empty">正在读取工作区…</div>
-          <div v-else-if="error" class="workspace-files__empty workspace-files__preview-error"><span>{{ error }}</span><button v-if="chunkedText || canRetrySelectedText" type="button" @click="reloadSelectedFile">重新读取文件</button><button v-if="selectedPath" type="button" :disabled="resourceActionBusy" @click="saveSelectedAs">另存为原文件</button></div>
+          <div v-else-if="error" class="workspace-files__empty workspace-files__preview-error"><span>{{ error }}</span><button v-if="chunkedText || canRetrySelectedText" type="button" class="btn btn--sm" @click="reloadSelectedFile">重新读取文件</button><button v-if="selectedPath" type="button" class="btn btn--sm" :disabled="resourceActionBusy" @click="saveSelectedAs">另存为原文件</button></div>
           <template v-else-if="selectedPath">
-            <div v-if="documentPreviewError" class="workspace-files__empty workspace-files__preview-error"><span>{{ documentPreviewError }}</span><button type="button" :disabled="resourceActionBusy" @click="saveSelectedAs">另存为原文件</button></div>
+            <div v-if="documentPreviewError" class="workspace-files__empty workspace-files__preview-error"><span>{{ documentPreviewError }}</span><button type="button" class="btn btn--sm" :disabled="resourceActionBusy" @click="saveSelectedAs">另存为原文件</button></div>
             <div v-else-if="previewKind === 'image'" class="workspace-files__image-stage"><div class="workspace-files__image-target" @pointerdown="startImageSelection" @pointermove="moveImageSelection" @pointerup="stopImageSelection" @pointercancel="stopImageSelection"><img class="workspace-files__image" :src="previewUrl" :alt="filename" draggable="false"><div v-if="imageSelection" class="workspace-files__image-selection" :style="imageSelectionStyle()"></div></div></div>
             <PdfPreview v-else-if="previewKind === 'pdf'" :bytes="fileBytes || new Uint8Array()" :bottom-inset="workspaceDockScrollInset(dockCollapsed, dockOccupiedHeight)" @selection="capturePdfSelection" @reference-contextmenu="openReferenceMenu" />
             <iframe v-else-if="['html', 'docx'].includes(previewKind) && previewMode === 'preview'" ref="documentFrame" class="workspace-files__document-frame" :srcdoc="safeDocumentPreview" :title="`${filename} 文档预览`" sandbox="allow-same-origin" @load="onDocumentFrameLoad"></iframe>
             <div v-else-if="previewKind === 'svg' && previewMode === 'preview'" class="workspace-files__image-stage"><div class="workspace-files__image-target" @pointerdown="startImageSelection" @pointermove="moveImageSelection" @pointerup="stopImageSelection" @pointercancel="stopImageSelection"><img class="workspace-files__image" :src="svgPreviewUrl" :alt="filename" draggable="false"><div v-if="imageSelection" class="workspace-files__image-selection" :style="imageSelectionStyle()"></div></div></div>
             <section v-else-if="previewKind === 'xlsx'" class="workspace-files__sheet-preview" :aria-label="`${filename} Excel 预览`">
               <div v-if="workbookSheets.length" class="workspace-files__sheet-toolbar">
-                <div class="workspace-files__sheet-meta"><span class="workspace-files__sheet-name">工作表</span><select v-model="workbookSheetName" aria-label="选择工作表"><option v-for="sheet in workbookSheets" :key="sheet.name" :value="sheet.name">{{ sheet.name }}</option></select></div>
+                <div class="workspace-files__sheet-meta"><span class="workspace-files__sheet-name">工作表</span><select v-model="workbookSheetName" class="settings-field__input settings-field__input--compact" aria-label="选择工作表"><option v-for="sheet in workbookSheets" :key="sheet.name" :value="sheet.name">{{ sheet.name }}</option></select></div>
                 <span class="workspace-files__sheet-count">{{ workbookRowCount }} 行 <i>·</i> {{ workbookColumnCount }} 列<span v-if="workbookPreview?.truncated"> <i>·</i> 预览上限 {{ workspacePreviewLimits.rows }} × {{ workspacePreviewLimits.columns }}</span></span>
               </div>
               <div v-if="workbookPreview?.rows.length" class="workspace-files__sheet-scroll"><table><thead><tr><th class="workspace-files__sheet-corner" aria-label="行号和列号"></th><th v-for="index in workbookColumnCount" :key="index" scope="col">{{ xlsxColumnLabel(index) }}</th></tr></thead><tbody><tr v-for="(row,rowIndex) in workbookGrid" :key="rowIndex"><th class="workspace-files__row-index" scope="row">{{ rowIndex + 1 }}</th><template v-for="cell in row" :key="cell.address"><td v-if="!cell.covered" :rowspan="cell.rowspan" :colspan="cell.colspan" :class="{ 'is-selected': cell.selected }" :data-cell-address="cell.address" :title="`${cell.address}${cell.value ? ` · ${cell.value}` : ''}`" @pointerdown="startSpreadsheetSelection($event, cell)" @pointerenter="continueSpreadsheetSelection(cell)">{{ cell.value }}</td></template></tr></tbody></table></div>
@@ -1612,15 +1612,15 @@ onUnmounted(() => {
             <div v-else-if="chunkedText" class="workspace-files__chunked-text"><pre>{{ content }}</pre></div>
             <div v-else-if="previewKind === 'code' && previewMode === 'preview'" class="workspace-files__code-preview" @mouseup="captureCodeSelection"><pre><code class="hljs" v-html="highlightedContent"></code></pre></div>
             <textarea v-else-if="canEditText" ref="editorRef" v-model="content" spellcheck="false" :aria-label="`编辑 ${filename}`" @input="updateContent($event.target.value)" @select="captureTextSelection" />
-            <div v-else-if="unsupportedPreviewNotice" class="workspace-files__empty workspace-files__unsupported"><span>{{ unsupportedPreviewNotice }}</span><button type="button" :disabled="resourceActionBusy" @click="saveSelectedAs">另存为原文件</button></div>
-            <div v-else class="workspace-files__empty">无法读取此文件。<button type="button" :disabled="resourceActionBusy" @click="saveSelectedAs">另存为原文件</button></div>
+          <div v-else-if="unsupportedPreviewNotice" class="workspace-files__empty workspace-files__unsupported"><span>{{ unsupportedPreviewNotice }}</span><button type="button" class="btn btn--sm" :disabled="resourceActionBusy" @click="saveSelectedAs">另存为原文件</button></div>
+            <div v-else class="workspace-files__empty">无法读取此文件。<button type="button" class="btn btn--sm" :disabled="resourceActionBusy" @click="saveSelectedAs">另存为原文件</button></div>
           </template>
           <div v-else-if="!entries.length" class="workspace-files__empty workspace-files__empty-workspace">
             <div class="workspace-files__empty-group">
               <span>此目录为空，可新建文件或导入文件开始使用。</span>
               <div class="workspace-files__empty-actions">
-                <button type="button" title="新建文件" aria-label="新建文件" :disabled="loading || Boolean(activeWriteRequest)" @click="createFile"><UiIcon name="file-plus" :size="16" /><span>新建文件</span></button>
-                <button type="button" title="导入本机文件" aria-label="导入本机文件" :disabled="loading || Boolean(activeWriteRequest)" @click="onUpload()"><UiIcon name="upload" :size="16" /><span>导入文件</span></button>
+                <button type="button" class="btn" title="新建文件" aria-label="新建文件" :disabled="loading || Boolean(activeWriteRequest)" @click="createFile"><UiIcon name="file-plus" :size="16" /><span>新建文件</span></button>
+                <button type="button" class="btn" title="导入本机文件" aria-label="导入本机文件" :disabled="loading || Boolean(activeWriteRequest)" @click="onUpload()"><UiIcon name="upload" :size="16" /><span>导入文件</span></button>
               </div>
             </div>
           </div>
@@ -1628,7 +1628,7 @@ onUnmounted(() => {
         </div>
         <div v-if="chunkedText" class="workspace-files__chunk-toolbar" role="status">
           <span>{{ textChunkRange.end < textChunkRange.size ? '大文件部分内容' : '大文件已完整读取' }} · 已读取 {{ textChunkRange.end.toLocaleString() }} / {{ textChunkRange.size.toLocaleString() }} 字节 · 剩余 {{ Math.max(0, textChunkRange.size - textChunkRange.end).toLocaleString() }} 字节 · 只读</span>
-          <button v-if="hasNextTextChunk" type="button" :disabled="textChunkBusy" @click="loadNextTextChunk">{{ textChunkBusy ? '读取中…' : '读取下一段' }}</button>
+          <button v-if="hasNextTextChunk" type="button" class="btn btn--sm" :disabled="textChunkBusy" @click="loadNextTextChunk">{{ textChunkBusy ? '读取中…' : '读取下一段' }}</button>
           <span v-else>已到文件末尾</span>
         </div>
       </main>
@@ -1636,21 +1636,21 @@ onUnmounted(() => {
     <UiContextMenu v-model="entryMenu" :label="entryMenu?.entry?.name || currentPath || '工作区'" :width="260" @select="onEntryMenuSelect" />
     <UiContextMenu v-model="referenceMenu" :label="referenceMenu?.anchor?.label" :width="216" @select="onReferenceMenuSelect" />
     <Teleport to="body">
-      <section v-for="annotation in annotations" :key="annotation.id" class="workspace-files__annotation-popover" role="dialog" aria-label="资源注解" :style="annotationStyle(annotation)" @pointerdown.stop>
-        <header><div><strong>资源注解</strong><span :title="`${annotation.reference.path} · ${annotation.reference.anchor.label}`">{{ annotation.reference.name }} · {{ annotation.reference.anchor.label }}</span></div><button type="button" aria-label="取消注解" title="取消注解" @click="removeAnnotation(annotation.id, { notify: true })"><UiIcon name="close" :size="15" /></button></header>
-        <textarea :ref="element => setAnnotationInput(annotation.id, element)" :value="annotation.comment" maxlength="2000" rows="3" placeholder="写下希望模型关注的内容…" aria-label="注解内容" @input="updateAnnotation(annotation, $event)" @keydown.esc.stop.prevent="removeAnnotation(annotation.id, { notify: true })"></textarea>
+      <section v-for="annotation in annotations" :key="annotation.id" class="workspace-files__annotation-popover ui-popover" role="dialog" aria-label="资源注解" :style="annotationStyle(annotation)" @pointerdown.stop>
+        <header><div><strong>资源注解</strong><span :title="`${annotation.reference.path} · ${annotation.reference.anchor.label}`">{{ annotation.reference.name }} · {{ annotation.reference.anchor.label }}</span></div><button class="desktop-icon-button desktop-icon-button--toolbar" type="button" aria-label="取消注解" title="取消注解" @click="removeAnnotation(annotation.id, { notify: true })"><UiIcon name="close" :size="15" /></button></header>
+        <textarea class="settings-field__input" :ref="element => setAnnotationInput(annotation.id, element)" :value="annotation.comment" maxlength="2000" rows="3" placeholder="写下希望模型关注的内容…" aria-label="注解内容" @input="updateAnnotation(annotation, $event)" @keydown.esc.stop.prevent="removeAnnotation(annotation.id, { notify: true })"></textarea>
         <p>注解会随资源一起发送；关闭或切换页面会移除。</p>
       </section>
     </Teleport>
   </section>
   <Teleport to="body">
-    <div v-if="createNameDialogOpen" class="workspace-files__create-scrim" @click.self="cancelCreateFile">
-      <form class="workspace-files__create-dialog" role="dialog" aria-modal="true" aria-labelledby="workspace-create-file-title" @submit.prevent="submitCreateFile" @keydown.esc.stop.prevent="cancelCreateFile">
-        <header><div><h2 id="workspace-create-file-title">新建文件</h2><p>将在 {{ currentPath || '工作区根目录' }} 中创建一个空文件。</p></div><button type="button" aria-label="关闭" @click="cancelCreateFile"><UiIcon name="close" :size="16" /></button></header>
-        <label for="workspace-create-file-name">文件名</label>
-        <input id="workspace-create-file-name" ref="newFileNameInput" v-model="newFileName" type="text" maxlength="255" autocomplete="off" placeholder="例如：notes.md" :aria-invalid="Boolean(newFileNameError)" :aria-describedby="newFileNameError ? 'workspace-create-file-error' : undefined" @input="newFileNameError = ''">
+    <div v-if="createNameDialogOpen" class="ui-dialog-backdrop workspace-files__create-scrim" @click.self="cancelCreateFile">
+      <form class="workspace-files__create-dialog ui-dialog" role="dialog" aria-modal="true" aria-labelledby="workspace-create-file-title" @submit.prevent="submitCreateFile" @keydown.esc.stop.prevent="cancelCreateFile">
+        <header class="ui-dialog__header"><div><h2 id="workspace-create-file-title">新建文件</h2><p>将在 {{ currentPath || '工作区根目录' }} 中创建一个空文件。</p></div><button class="desktop-icon-button desktop-icon-button--toolbar" type="button" aria-label="关闭" @click="cancelCreateFile"><UiIcon name="close" :size="16" /></button></header>
+        <label class="settings-field__label" for="workspace-create-file-name">文件名</label>
+        <input id="workspace-create-file-name" ref="newFileNameInput" v-model="newFileName" class="settings-field__input" type="text" maxlength="255" autocomplete="off" placeholder="例如：notes.md" :aria-invalid="Boolean(newFileNameError)" :aria-describedby="newFileNameError ? 'workspace-create-file-error' : undefined" @input="newFileNameError = ''">
         <p v-if="newFileNameError" id="workspace-create-file-error" class="workspace-files__create-error" role="alert">{{ newFileNameError }}</p>
-        <footer><button type="button" :disabled="Boolean(activeWriteRequest)" @click="cancelCreateFile">取消</button><button type="submit" class="is-primary" :disabled="Boolean(activeWriteRequest)">创建</button></footer>
+        <footer class="ui-dialog__actions"><button type="button" class="btn btn--ghost" :disabled="Boolean(activeWriteRequest)" @click="cancelCreateFile">取消</button><button type="submit" class="btn btn--primary" :disabled="Boolean(activeWriteRequest)">创建</button></footer>
       </form>
     </div>
   </Teleport>
@@ -1664,19 +1664,18 @@ onUnmounted(() => {
 .workspace-files__image-selection{position:absolute;border:2px solid #536c76;background:#78909c38;pointer-events:none}
 .workspace-files__sheet-preview td{user-select:none;cursor:cell}
 .workspace-files__sheet-preview td.is-selected{background:#dfe8eb;box-shadow:inset 0 0 0 1px #788f98}
-.workspace-files__annotation-popover{position:fixed;z-index:1001;box-sizing:border-box;width:min(320px,calc(100vw - 16px));padding:10px;border:1px solid #d6dddf;border-radius:9px;background:#fff;color:#30383c;box-shadow:0 10px 30px #17212636}
+.workspace-files__annotation-popover{position:fixed;z-index:1001;box-sizing:border-box;width:min(320px,calc(100vw - 16px));padding:10px}
 .workspace-files__annotation-popover>header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .workspace-files__annotation-popover>header>div{display:grid;flex:1;min-width:0;gap:3px}
 .workspace-files__annotation-popover>header strong{font-size:12px;font-weight:600}
 .workspace-files__annotation-popover>header span{overflow:hidden;color:#667176;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
-.workspace-files__annotation-popover>header button{display:grid;flex:none;width:28px;height:28px;padding:0;place-items:center;border:0;border-radius:5px;background:transparent;color:#596368;cursor:pointer}
-.workspace-files__annotation-popover>header button:hover{background:#eceeef}
-.workspace-files__annotation-popover textarea{display:block;box-sizing:border-box;width:100%;min-height:72px;max-height:180px;padding:8px 9px;border:1px solid #d9e0e2;border-radius:6px;outline:0;background:#fff;color:#30383c;font-family:inherit;font-size:12px;line-height:1.5;resize:vertical}
-.workspace-files__annotation-popover textarea:focus{border-color:#89999f;box-shadow:0 0 0 2px #89999f22}
+
+.workspace-files__annotation-popover textarea{display:block;box-sizing:border-box;width:100%;min-height:88px;max-height:180px;padding:8px 9px;resize:vertical}
+
 .workspace-files__annotation-popover textarea::placeholder{color:#828c90}
 .workspace-files__annotation-popover p{margin:6px 1px 0;color:#727d81;font-size:10px;line-height:1.4}
-.workspace-files{display:flex;flex:1;min-width:0;min-height:0;box-sizing:border-box;flex-direction:column;background:#fff;color:#30383c}.workspace-files__toolbar{display:flex;align-items:center;gap:6px;min-height:42px;padding:0 12px;border-bottom:1px solid #e1e4e6}.workspace-files__toolbar button{display:grid;place-items:center;min-width:30px;height:30px;padding:0 7px;border:1px solid transparent;border-radius:5px;background:transparent;color:#4c5559;font-size:11px;cursor:pointer}.workspace-files__toolbar button:hover:not(:disabled){background:#eceeef}.workspace-files__toolbar button:disabled{opacity:.45}.workspace-files__breadcrumbs{display:flex;flex:1;align-items:center;gap:6px;min-width:0;overflow:hidden;color:#777f83;font-size:12px}.workspace-files__breadcrumbs button{overflow:hidden;max-width:160px;padding:3px 1px;border:0;background:transparent;color:#566065;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.workspace-files__breadcrumbs b{overflow:hidden;color:#30383c;text-overflow:ellipsis;white-space:nowrap}.workspace-files__body{display:flex;flex:1;min-height:0}.workspace-files__list{flex:0 0 245px;min-width:150px;overflow:auto;scroll-padding-bottom:var(--workspace-dock-bottom-space, 12px);padding:8px 8px var(--workspace-dock-bottom-space, 12px);border-right:1px solid #d4dce0;background:#fafbfc}.workspace-files__list button{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 8px;border:0;border-radius:5px;background:transparent;color:#4a5357;text-align:left;font-size:12px;cursor:pointer}.workspace-files__list button.selected,.workspace-files__list button:hover{background:#eceeef}.workspace-files__list button span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.workspace-files__list button .workspace-files__folder-icon{flex:none;width:16px;height:16px;background:#586166;mask-repeat:no-repeat;mask-position:center;mask-size:contain}.workspace-files__list button small{color:#777f83;font-size:10px}.workspace-files__editor{display:flex;background:#fff;flex:1;min-width:0;min-height:0;align-items:stretch;justify-content:stretch}.workspace-files__editor textarea{flex:1;min-width:0;min-height:0;scroll-padding-bottom:var(--workspace-dock-bottom-space, 12px);padding:16px 16px var(--workspace-dock-bottom-space, 12px);border:0;outline:0;background:#fff;color:#30383c;font:12px/1.6 Consolas,monospace;resize:none}.workspace-files__image{max-width:100%;max-height:100%;margin:auto;object-fit:contain}.workspace-files__empty{display:grid;flex:1;place-items:center;padding:24px;color:#777f83;font-size:12px;text-align:center}.workspace-files__hidden{display:none}.workspace-files__notice{position:relative;display:grid;flex:0 0 30px;place-items:center;width:30px;height:30px;border-radius:5px;color:#a53c38;cursor:help}.workspace-files__notice:hover,.workspace-files__notice:focus-visible{background:#fff1ef;outline:2px solid #b74a43;outline-offset:1px}.workspace-files__notice-detail{position:absolute;z-index:50;top:calc(100% + 5px);right:0;display:none;min-width:220px;max-width:min(420px,70vw);padding:9px 11px;border:1px solid #e2c7c8;border-radius:6px;background:#fff7f6;box-shadow:0 5px 16px #26374024;color:#7f302d;font-size:11px;line-height:1.45;white-space:normal}.workspace-files__notice-detail>span{display:block}.workspace-files__notice-detail>span+span{margin-top:5px}.workspace-files__notice:hover .workspace-files__notice-detail,.workspace-files__notice:focus .workspace-files__notice-detail{display:block}.workspace-files__sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-.workspace-files__toolbar-actions{position:relative;display:flex;flex:none;align-items:center;gap:4px;margin-left:auto}.workspace-files__actions-menu{position:relative;flex:none}.workspace-files__actions-menu>summary{display:grid;place-items:center;list-style:none;width:30px;height:30px;padding:0;border:1px solid transparent;border-radius:5px;color:#4c5559;cursor:pointer}.workspace-files__actions-menu>summary::-webkit-details-marker{display:none}.workspace-files__actions-menu>summary:hover,.workspace-files__actions-menu[open]>summary{background:#eceeef}.workspace-files__actions-popover{position:absolute;z-index:40;top:calc(100% + 5px);right:0;display:grid;min-width:190px;padding:4px;border:1px solid #d9e0e2;border-radius:7px;background:#fff;box-shadow:0 8px 24px #26374020}.workspace-files__actions-popover button{display:flex!important;align-items:center;justify-content:flex-start;gap:9px;width:100%;min-width:0!important;height:34px;padding:0 9px!important;border:0!important;border-radius:5px!important;background:transparent!important;color:#3d474b!important;text-align:left!important;font:inherit!important;cursor:pointer}.workspace-files__actions-popover button:hover:not(:disabled){background:#f0f2f2!important}.workspace-files__actions-popover button:disabled{color:#9aa3a6!important;cursor:default}.workspace-files__actions-popover button .ui-icon{flex:none}.workspace-files__dock-toggle{position:relative;color:#3f484c}.workspace-files__dock-toggle i{position:absolute;right:3px;top:3px;width:7px;height:7px;border:1px solid #fff;border-radius:50%;background:#7a8589}.workspace-files__dock-toggle i.is-pending{background:#c18526}.workspace-files__dock-toggle i.is-generating{background:#657780}.workspace-files__dock-toggle i.is-offline{background:#b7534c}.workspace-files__dock-toggle:focus-visible,.workspace-files__actions-menu>summary:focus-visible{outline:2px solid #65777f;outline-offset:1px}
+.workspace-files{display:flex;flex:1;min-width:0;min-height:0;box-sizing:border-box;flex-direction:column;background:#fff;color:#30383c}.workspace-files__toolbar{display:flex;align-items:center;gap:6px;min-height:42px;padding:0 12px;border-bottom:1px solid #e1e4e6}.workspace-files__breadcrumbs{display:flex;flex:1;align-items:center;gap:6px;min-width:0;overflow:hidden;color:#777f83;font-size:12px}.workspace-files__breadcrumbs button{overflow:hidden;max-width:160px;padding:3px 1px;border:0;background:transparent;color:#566065;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}.workspace-files__breadcrumbs b{overflow:hidden;color:#30383c;text-overflow:ellipsis;white-space:nowrap}.workspace-files__body{display:flex;flex:1;min-height:0}.workspace-files__list{flex:0 0 245px;min-width:150px;overflow:auto;scroll-padding-bottom:var(--workspace-dock-bottom-space, 12px);padding:8px 8px var(--workspace-dock-bottom-space, 12px);border-right:1px solid #d4dce0;background:#fafbfc}.workspace-files__list button{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 8px;border:0;border-radius:5px;background:transparent;color:#4a5357;text-align:left;font-size:12px;cursor:pointer}.workspace-files__list button.selected,.workspace-files__list button:hover{background:#eceeef}.workspace-files__list button span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.workspace-files__list button .workspace-files__folder-icon{flex:none;width:16px;height:16px;background:#586166;mask-repeat:no-repeat;mask-position:center;mask-size:contain}.workspace-files__list button small{color:#777f83;font-size:10px}.workspace-files__editor{display:flex;background:#fff;flex:1;min-width:0;min-height:0;align-items:stretch;justify-content:stretch}.workspace-files__editor textarea{flex:1;min-width:0;min-height:0;scroll-padding-bottom:var(--workspace-dock-bottom-space, 12px);padding:16px 16px var(--workspace-dock-bottom-space, 12px);border:0;outline:0;background:#fff;color:#30383c;font:12px/1.6 Consolas,monospace;resize:none}.workspace-files__image{max-width:100%;max-height:100%;margin:auto;object-fit:contain}.workspace-files__empty{display:grid;flex:1;place-items:center;padding:24px;color:#777f83;font-size:12px;text-align:center}.workspace-files__hidden{display:none}.workspace-files__notice{position:relative;display:grid;flex:0 0 30px;place-items:center;width:30px;height:30px;border-radius:5px;color:#a53c38;cursor:help}.workspace-files__notice:hover,.workspace-files__notice:focus-visible{background:#fff1ef;outline:2px solid #b74a43;outline-offset:1px}.workspace-files__notice-detail{position:absolute;z-index:50;top:calc(100% + 5px);right:0;display:none;min-width:220px;max-width:min(420px,70vw);padding:9px 11px;border:1px solid #e2c7c8;border-radius:6px;background:#fff7f6;box-shadow:0 5px 16px #26374024;color:#7f302d;font-size:11px;line-height:1.45;white-space:normal}.workspace-files__notice-detail>span{display:block}.workspace-files__notice-detail>span+span{margin-top:5px}.workspace-files__notice:hover .workspace-files__notice-detail,.workspace-files__notice:focus .workspace-files__notice-detail{display:block}.workspace-files__sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.workspace-files__toolbar-actions{position:relative;display:flex;flex:none;align-items:center;gap:4px;margin-left:auto}.workspace-files__actions-menu{position:relative;flex:none}.workspace-files__actions-menu>summary{display:grid;place-items:center;list-style:none;padding:0;cursor:pointer}.workspace-files__actions-menu>summary::-webkit-details-marker{display:none}.workspace-files__actions-menu>summary:hover,.workspace-files__actions-menu[open]>summary{background:var(--color-surface-hover)}.workspace-files__actions-popover{position:absolute;z-index:40;top:calc(100% + 5px);right:0;display:grid;min-width:190px;padding:4px}.workspace-files__actions-popover button{display:flex;justify-content:flex-start;width:100%;min-width:0;text-align:left}.workspace-files__actions-popover button .ui-icon{flex:none}.workspace-files__dock-toggle{position:relative;color:#3f484c}.workspace-files__dock-toggle i{position:absolute;right:3px;top:3px;width:7px;height:7px;border:1px solid #fff;border-radius:50%;background:#7a8589}.workspace-files__dock-toggle i.is-pending{background:#c18526}.workspace-files__dock-toggle i.is-generating{background:#657780}.workspace-files__dock-toggle i.is-offline{background:#b7534c}
 .workspace-files__preview-toggle{display:flex;flex:none;align-items:center;gap:2px;padding:2px;border:1px solid #dfe4e6;border-radius:7px;background:#f3f5f6}
 .workspace-files__preview-toggle button{display:flex!important;align-items:center;justify-content:center;min-width:54px!important;height:25px!important;padding:0 9px!important;border:0!important;border-radius:5px!important;background:transparent!important;color:#667277!important;font:inherit!important;font-size:11px!important;cursor:pointer}
 .workspace-files__preview-toggle button.is-active{background:#fff!important;color:#344249!important;box-shadow:0 1px 3px #23323a1c}
@@ -1722,8 +1721,8 @@ onUnmounted(() => {
 .workspace-files__sheet-toolbar { display:flex; flex:none; align-items:center; justify-content:space-between; gap:12px; min-height:44px; padding:0 14px; border-bottom:1px solid #e4e9eb; background:#fbfcfc; color:#748087; font-size:11px; }
 .workspace-files__sheet-meta { display:flex; align-items:center; gap:8px; min-width:0; }
 .workspace-files__sheet-name { color:#435158; font-size:12px; font-weight:600; }
-.workspace-files__sheet-toolbar select { max-width:min(260px,60%); min-width:100px; padding:5px 26px 5px 9px; border:1px solid #d9e0e2; border-radius:6px; outline:0; background:#fff; color:#30383c; font:inherit; }
-.workspace-files__sheet-toolbar select:focus-visible { border-color:#879aa3; box-shadow:0 0 0 2px #879aa31c; }
+.workspace-files__sheet-toolbar select { max-width:min(260px,60%); min-width:100px; }
+
 .workspace-files__sheet-count { flex:none; padding:5px 8px; border:1px solid #e6eaec; border-radius:6px; background:#fff; color:#68757b; font-variant-numeric:tabular-nums; }
 .workspace-files__sheet-count i { padding:0 2px; color:#a0aaae; font-style:normal; }
 .workspace-files__sheet-scroll { flex:1; min-height:0; overflow:auto; padding-bottom:var(--workspace-dock-bottom-space, 12px); scroll-padding-bottom:var(--workspace-dock-bottom-space, 12px); background:#fff; }
@@ -1738,45 +1737,35 @@ onUnmounted(() => {
 .workspace-files__format-warning { display:grid; flex:0 0 30px; width:30px; height:30px; place-items:center; border-radius:5px; color:#a77d32; cursor:help; }
 .workspace-files__format-warning:hover,.workspace-files__format-warning:focus-visible { background:#fff7e6; outline:2px solid #d5bf8c; outline-offset:1px; }
 .workspace-files__preview-error,.workspace-files__unsupported { align-content:center; gap:10px; }
-.workspace-files__preview-error button,.workspace-files__unsupported button,.workspace-files__empty button { padding:5px 10px; border:1px solid #d2dadd; border-radius:5px; background:#fff; color:#3e484c; cursor:pointer; }
+
 .workspace-files__editor { flex-direction:column; }
 .workspace-files__editor-content { display:flex; flex:1; min-width:0; min-height:0; align-items:stretch; justify-content:stretch; overflow:hidden; }
 .workspace-files__editor-content > * { min-width:0; }
 .workspace-files__draft-bar { display:flex; flex:none; align-items:center; justify-content:space-between; gap:12px; min-height:40px; padding:5px 12px; border-bottom:1px solid #e6e9ea; background:#f5f7f7; color:#586469; font-size:12px; }
 .workspace-files__draft-bar.is-conflict { border-bottom-color:#ead7bb; background:#fff9ef; color:#795a2b; }
 .workspace-files__draft-actions { display:flex; flex:none; align-items:center; gap:6px; }
-.workspace-files__draft-actions button { min-height:28px; padding:4px 9px; border:1px solid #d2dadd; border-radius:5px; background:#fff; color:#3e484c; font:inherit; cursor:pointer; }
-.workspace-files__draft-actions button:hover:not(:disabled) { background:#edf0f1; }
-.workspace-files__draft-actions button:disabled { opacity:.5; cursor:default; }
-.workspace-files__create-scrim { position:fixed; z-index:1000; inset:0; display:grid; place-items:center; padding:24px; background:#17212655; }
-.workspace-files__create-dialog { box-sizing:border-box; width:min(420px,100%); padding:20px; border:1px solid #d8dfe1; border-radius:10px; background:#fff; color:#30383c; box-shadow:0 18px 54px #18292d30; font:inherit; }
+
+.workspace-files__create-scrim { position:fixed; z-index:1000; inset:0; display:grid; place-items:center; padding:24px; }
+.workspace-files__create-dialog { box-sizing:border-box; width:min(420px,100%); }
 .workspace-files__create-dialog header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:20px; }
 .workspace-files__create-dialog h2 { margin:0; color:#30383c; font-size:17px; font-weight:600; }
 .workspace-files__create-dialog header p { margin:5px 0 0; color:#6b7579; font-size:12px; line-height:1.5; }
-.workspace-files__create-dialog header button { display:grid; flex:none; width:30px; height:30px; place-items:center; padding:0; border:0; border-radius:5px; background:transparent; color:#596469; cursor:pointer; }
-.workspace-files__create-dialog header button:hover { background:#eef0f1; }
-.workspace-files__create-dialog label { display:block; margin-bottom:6px; color:#475257; font-size:12px; font-weight:600; }
-.workspace-files__create-dialog input { box-sizing:border-box; width:100%; height:36px; padding:0 10px; border:1px solid #cbd3d6; border-radius:6px; outline:0; background:#fff; color:#30383c; font:inherit; font-size:13px; line-height:1.4; }
-.workspace-files__create-dialog input:focus-visible { border-color:#727e83; box-shadow:0 0 0 2px #707d831c; }
-.workspace-files__create-dialog footer { display:flex; justify-content:flex-end; gap:8px; margin-top:22px; }
-.workspace-files__create-dialog footer button { min-width:72px; height:32px; padding:0 12px; border:1px solid #cbd3d6; border-radius:6px; background:#fff; color:#3f494e; font:inherit; font-size:12px; cursor:pointer; }
-.workspace-files__create-dialog footer button:hover { background:#f1f3f4; }
-.workspace-files__create-dialog footer button.is-primary { border-color:#343c40; background:#343c40; color:#fff; }
-.workspace-files__create-dialog footer button.is-primary:hover { background:#242b2f; }
+
+.workspace-files__create-dialog label { display:block; margin-bottom:6px; }
+.workspace-files__create-dialog input { box-sizing:border-box; width:100%; max-width:none; }
+
+.workspace-files__create-dialog footer { margin-top:22px; }
+
 .workspace-files__create-error { margin:7px 0 0; color:#a13c37; font-size:12px; }
 .workspace-files__list button .workspace-files__folder-icon { background:#5b83a7; }
 .workspace-files__list button .workspace-files__file-icon { flex:none; color:#7c878c; }
 .workspace-files__body.is-list-collapsed .workspace-files__list { display:none; }
-.workspace-files__list-toggle:focus-visible { outline:2px solid #718a98; outline-offset:1px; }
 
 .workspace-files__sheet-scroll td { overflow-wrap:normal; word-break:normal; }
 .workspace-files__sheet-scroll td.is-numeric { text-align:right; font-variant-numeric:tabular-nums; }
 .workspace-files__empty-group { display:flex; max-width:100%; flex-direction:column; align-items:center; gap:14px; }
 .workspace-files__empty-actions { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; }
-.workspace-files__empty-actions button { display:inline-flex; align-items:center; gap:7px; min-height:34px; padding:0 11px; border:1px solid #d2dadd; border-radius:6px; background:#fff; color:#3e484c; font:inherit; cursor:pointer; }
-.workspace-files__empty-actions button:hover:not(:disabled) { background:#f1f4f5; }
-.workspace-files__empty-actions button:focus-visible { outline:2px solid #718a98; outline-offset:2px; }
-.workspace-files__empty-actions button:disabled { opacity:.5; cursor:default; }
+
 @media (max-width: 760px) {
   .workspace-files__draft-bar { align-items:flex-start; flex-direction:column; gap:7px; }
   .workspace-files__draft-actions { align-self:flex-end; }

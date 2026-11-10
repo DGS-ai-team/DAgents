@@ -38,12 +38,12 @@ onMounted(load);
   >
     <section class="settings-section">
       <h2 class="settings-section__title">访问地址</h2>
-      <p class="settings-section__desc">监听地址由启动配置决定，修改后需要重启本机服务。</p>
-      <div class="setup-config-panel__readonly-grid">
-        <div class="command-stat">
-          <span class="command-stat__label">监听</span>
-          <span class="command-stat__value">{{ form.node.listen_host || "—" }}:{{ form.node.listen_port || "—" }}</span>
-        </div>
+      <div class="settings-row">
+        <span class="settings-row__copy">
+          <span class="settings-row__title">监听地址</span>
+          <span class="settings-row__description">由启动配置决定，修改后需要重启本机服务。</span>
+        </span>
+        <code>{{ form.node.listen_host || "—" }}:{{ form.node.listen_port || "—" }}</code>
       </div>
     </section>
 

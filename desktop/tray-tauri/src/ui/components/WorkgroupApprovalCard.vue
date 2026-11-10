@@ -70,7 +70,7 @@ function approveLabel() {
       <div class="wg-task__approval-actions">
         <button
           type="button"
-          class="approval-action-btn approval-action-btn--reject"
+          class="btn btn--sm"
           :disabled="hitlBusy"
           @click.stop="resolve(approvalItem.callId, false)"
         >
@@ -78,7 +78,7 @@ function approveLabel() {
         </button>
         <button
           type="button"
-          class="approval-action-btn approval-action-btn--approve"
+          class="btn btn--primary btn--sm"
           :disabled="hitlBusy"
           @click.stop="resolve(approvalItem.callId, true)"
         >
@@ -91,7 +91,7 @@ function approveLabel() {
       <div class="wg-task__approval-actions">
         <button
           type="button"
-          class="approval-action-btn approval-action-btn--reject"
+          class="btn btn--sm"
           :disabled="hitlBusy"
           @click.stop="resolve('', false)"
         >
@@ -99,7 +99,7 @@ function approveLabel() {
         </button>
         <button
           type="button"
-          class="approval-action-btn approval-action-btn--approve"
+          class="btn btn--primary btn--sm"
           :disabled="hitlBusy"
           @click.stop="resolve('', true)"
         >

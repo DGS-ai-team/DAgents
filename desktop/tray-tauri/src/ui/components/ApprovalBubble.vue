@@ -159,12 +159,12 @@ function riskText(risk) {
 
     <footer class="approval-actions" :class="{ 'approval-actions--multi': multi }">
       <p v-if="multi" class="approval-actions__note">未选中的操作本次不执行</p>
-      <button type="button" class="approval-actions__reject" :disabled="busy" @click="rejectAll">
+      <button type="button" class="btn btn--sm approval-actions__reject" :disabled="busy" @click="rejectAll">
         {{ multi ? "拒绝本批" : "拒绝" }}
       </button>
       <button
         type="button"
-        class="approval-actions__approve"
+        class="btn btn--primary btn--sm approval-actions__approve"
         :disabled="busy || (multi && selectedCount === 0)"
         @click="approveSelected"
       >
@@ -203,10 +203,9 @@ function riskText(risk) {
 .approval-item__summary { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.88rem; }
 .approval-item__pending { flex: 0 0 auto; color: var(--color-text-muted); font-size: 0.76rem; }
 .approval-item__toggle { display: inline-flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 8px; padding: 6px 3px; border: 0; border-radius: 6px; color: inherit; background: transparent; text-align: left; cursor: pointer; }
-.approval-item__toggle:hover { background: var(--color-surface-muted); }
-.approval-item__toggle:focus-visible,
-.approval-item__raw summary:focus-visible,
-.approval-actions button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.approval-item__toggle:hover { background: var(--color-surface-hover); }
+.approval-item__toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.approval-item__raw summary:focus-visible { outline: 2px solid var(--focus-ring, var(--color-primary)); outline-offset: 2px; }
 .approval-item__checkbox { flex: 0 0 auto; width: 17px; height: 17px; margin: 0 3px 0 4px; accent-color: var(--color-primary); }
 .approval-risk { flex: 0 0 auto; padding: 2px 7px; border: 1px solid transparent; border-radius: 999px; font-size: 0.69rem; line-height: 1.3; }
 .approval-risk--inline { padding: 1px 6px; }
@@ -230,9 +229,6 @@ function riskText(risk) {
 .approval-actions { justify-content: flex-end; flex-wrap: wrap; padding: 10px 12px 12px; }
 .approval-actions--multi { border-top: 1px solid var(--color-border); }
 .approval-actions__note { flex: 1 1 100%; margin: 0; color: var(--text-muted, #6b7280); font-size: 0.76rem; }
-.approval-actions button { min-height: 34px; padding: 6px 12px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); color: var(--color-text); cursor: pointer; }
-.approval-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
-.approval-actions__approve { color: var(--color-primary-strong); background: var(--color-primary-soft); border-color: var(--color-primary); }
 @media (max-width: 520px) {
   .approval-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .approval-actions__note { grid-column: 1 / -1; }

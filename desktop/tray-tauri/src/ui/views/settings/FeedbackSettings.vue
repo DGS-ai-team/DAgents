@@ -189,8 +189,8 @@ onMounted(() => {
         <span class="feedback-draft" v-if="form.title || form.body">草稿自动保留</span>
       </div>
       <div class="feedback-form">
-        <label>
-          类型
+        <label class="settings-row settings-row--field">
+          <span class="settings-row__copy"><span class="settings-row__title">类型</span></span>
           <UiSelect
             v-model="form.type"
             :options="[
@@ -200,8 +200,14 @@ onMounted(() => {
             aria-label="类型"
           />
         </label>
-        <label>标题<input v-model="form.title" maxlength="160" placeholder="用一句话概括" @input="persistDraft" /></label>
-        <label class="feedback-form__wide">正文<textarea v-model="form.body" maxlength="10000" rows="7" placeholder="请描述发生了什么、期望结果是什么" @input="persistDraft" /></label>
+        <label class="settings-row settings-row--field">
+          <span class="settings-row__copy"><span class="settings-row__title">标题</span></span>
+          <input v-model="form.title" class="settings-field__input" maxlength="160" placeholder="用一句话概括" @input="persistDraft" />
+        </label>
+        <label class="settings-row settings-row--field feedback-form__wide">
+          <span class="settings-row__copy"><span class="settings-row__title">正文</span></span>
+          <textarea v-model="form.body" class="settings-field__input settings-field__input--multiline feedback-form__body-input" maxlength="10000" rows="7" placeholder="请描述发生了什么、期望结果是什么" @input="persistDraft" />
+        </label>
       </div>
       <div class="feedback-actions"><button class="btn btn--primary" type="button" :disabled="saving" @click="submit">{{ saving ? "保存中…" : "提交反馈" }}</button><button v-if="submissionConflict" class="btn btn--ghost" type="button" @click="startNewFeedback">新建一条反馈</button></div>
     </section>
@@ -270,10 +276,9 @@ onMounted(() => {
 .feedback-card h2 { margin: 0; font-size: 16px; }.feedback-card h3 { margin: 20px 0 8px; font-size: 15px; }.feedback-card p { color: var(--color-text-subtle); }
 .feedback-card__head p { margin: 6px 0 0; font-size: 13px; }.feedback-draft,.feedback-id { font-size: 12px; color: var(--color-text-subtle); }
 .feedback-form { display: flex; flex-direction: column; gap: 0; margin-top: 20px; }
-.feedback-form label { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(260px, 1.7fr); align-items: center; gap: 24px; padding: 14px 0; border-bottom: 1px solid var(--color-border); font-size: 13px; color: var(--color-text-subtle); }
-.feedback-form__wide { display: block !important; padding-top: 18px !important; }
-.feedback-form input,.feedback-form textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--color-border); border-radius: 6px; padding: 9px 10px; background: var(--color-surface-alt); color: var(--color-text); font: inherit; }.feedback-form textarea { resize: vertical; min-height: 180px; }
+.feedback-form .settings-field__input { width: 100%; max-width: none; box-sizing: border-box; }
+.feedback-form__body-input { min-height: 180px; }
 .feedback-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 16px; }.feedback-message { margin: 12px 0; font-size: 13px; }.feedback-message--error { color: var(--color-danger, #c53030); }.feedback-message--success { color: var(--color-success, #2f855a); }
 .feedback-list { margin-top: 16px; border-top: 1px solid var(--color-border); }.feedback-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 4px; border: 0; border-bottom: 1px solid var(--color-border); background: transparent; color: var(--color-text); text-align: left; cursor: pointer; }.feedback-row:hover,.feedback-row.is-selected { background: var(--color-surface-alt); }.feedback-row span:first-child { display: grid; gap: 5px; }.feedback-row small { color: var(--color-text-subtle); }.feedback-row__statuses { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }.feedback-row em { padding: 3px 7px; border-radius: 999px; background: var(--color-surface-alt); color: var(--color-text-subtle); font-size: 12px; font-style: normal; white-space: nowrap; }.feedback-empty { padding: 24px 0; color: var(--color-text-subtle); text-align: center; }.feedback-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: 14px; border-radius: 6px; background: var(--color-surface-alt); color: var(--color-text); font: inherit; line-height: 1.55; }.feedback-detail__meta { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; color: var(--color-text-subtle); font-size: 13px; }.feedback-reply { margin-top: 18px; padding: 14px; border-left: 3px solid var(--color-action, #4f46e5); background: var(--color-surface-alt); }.feedback-reply p { margin: 6px 0 0; white-space: pre-wrap; }
-@media (max-width: 640px) { .feedback-form label { grid-template-columns: 1fr; gap: 8px; }.feedback-form__wide { display: grid !important; }.feedback-row { align-items: flex-start; flex-direction: column; }.feedback-row__statuses { justify-content: flex-start; } }
+@media (max-width: 640px) { .feedback-row { align-items: flex-start; flex-direction: column; }.feedback-row__statuses { justify-content: flex-start; } }
 </style>

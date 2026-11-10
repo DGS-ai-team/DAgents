@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../../api/node.js";
 import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
+import SettingsSectionHeader from "../../components/SettingsSectionHeader.vue";
 import UiIcon from "../../components/UiIcon.vue";
 import { notifyConfigurationChanged } from "../../utils/configurationEvents.js";
 import { confirmDesktopAction } from "../../utils/desktopDialogs.js";
@@ -476,51 +477,46 @@ onMounted(() => {
       </div>
     </section>
 
-    <div v-if="showCredentialForm" class="linux-settings__modal-backdrop" @click.self="closeCredentialForm">
-      <section class="linux-settings__modal" role="dialog" aria-modal="true" aria-labelledby="credential-form-title">
+    <div v-if="showCredentialForm" class="ui-dialog-backdrop linux-settings__modal-backdrop" @click.self="closeCredentialForm">
+      <section class="ui-dialog linux-settings__modal" role="dialog" aria-modal="true" aria-labelledby="credential-form-title">
         <div class="linux-settings__modal-head">
           <div><h2 id="credential-form-title">新增凭据</h2><p>保存后会自动生成唯一凭据 ID。</p></div>
-          <button type="button" class="linux-settings__modal-close" aria-label="关闭凭据对话框" title="关闭" :disabled="saving" @click="closeCredentialForm"><UiIcon name="close" :size="16" /></button>
+          <button type="button" class="btn btn--ghost btn--sm desktop-icon-button" aria-label="关闭凭据对话框" title="关闭" :disabled="saving" @click="closeCredentialForm"><UiIcon name="close" :size="16" /></button>
         </div>
         <div class="linux-settings__editor">
-          <div class="linux-settings__field">
-            <label>显示名称 <span>可选</span></label>
-            <input v-model="credential.display_name" class="settings-field__input" placeholder="例如：生产环境登录凭据" />
-          </div>
-          <div class="linux-settings__field">
-            <label>认证方式 <span>必选</span></label>
+          <label class="settings-row settings-row--field">
+            <span class="settings-row__copy"><span class="settings-row__title">显示名称</span><span class="settings-row__description">可选</span></span>
+            <input v-model="credential.display_name" class="settings-field__input" aria-label="显示名称" placeholder="例如：生产环境登录凭据" />
+          </label>
+          <label class="settings-row settings-row--field">
+            <span class="settings-row__copy"><span class="settings-row__title">认证方式</span><span class="settings-row__description">必选</span><small class="settings-row__description">{{ credentialAuthDescription }}</small></span>
             <UiSelect
               v-model="credential.auth_type"
               :options="authTypeOptions"
               aria-label="认证方式"
               @change="onCredentialAuthTypeChange"
             />
-            <small>{{ credentialAuthDescription }}</small>
-          </div>
-          <div v-if="credential.auth_type === 'password' || credential.auth_type === 'private_key'" class="linux-settings__field">
-            <label>凭据来源 <span>必选</span></label>
+          </label>
+          <label v-if="credential.auth_type === 'password' || credential.auth_type === 'private_key'" class="settings-row settings-row--field">
+            <span class="settings-row__copy"><span class="settings-row__title">凭据来源</span><span class="settings-row__description">必选</span><small class="settings-row__description">直接输入的内容会加密保存到本机 Node 配置中，不需要重启 Node 或 shell。</small></span>
             <UiSelect
               v-model="credential.secret_mode"
               :options="secretModeOptions"
               aria-label="凭据来源"
               @change="onCredentialSecretModeChange"
             />
-            <small>直接输入的内容会加密保存到本机 Node 配置中，不需要重启 Node 或 shell。</small>
-          </div>
-          <div class="linux-settings__field linux-settings__field--wide">
+          </label>
+          <label class="settings-row settings-row--field">
             <template v-if="credential.secret_mode === 'direct'">
-              <label>{{ credential.auth_type === "private_key" ? "SSH 私钥" : "登录密码" }} <span>必选</span></label>
-              <textarea v-if="credential.auth_type === 'private_key'" v-model="credential.secret_value" rows="6" class="settings-field__input" placeholder="粘贴 SSH 私钥内容" />
-              <input v-else v-model="credential.secret_value" type="password" autocomplete="new-password" class="settings-field__input" placeholder="输入 SSH 登录密码" />
-              <small v-if="credential.auth_type === 'private_key'">请粘贴完整私钥内容（含 BEGIN/END 行）；内容会加密保存，不会通过凭据列表接口返回。</small>
-              <small v-else>密码会加密保存，不会通过凭据列表接口返回。</small>
+              <span class="settings-row__copy"><span class="settings-row__title">{{ credential.auth_type === "private_key" ? "SSH 私钥" : "登录密码" }}</span><span class="settings-row__description">必选</span><small v-if="credential.auth_type === 'private_key'" class="settings-row__description">请粘贴完整私钥内容（含 BEGIN/END 行）；内容会加密保存，不会通过凭据列表接口返回。</small><small v-else class="settings-row__description">密码会加密保存，不会通过凭据列表接口返回。</small></span>
+              <textarea v-if="credential.auth_type === 'private_key'" v-model="credential.secret_value" rows="6" class="settings-field__input settings-field__input--multiline" aria-label="SSH 私钥" placeholder="粘贴 SSH 私钥内容" />
+              <input v-else v-model="credential.secret_value" type="password" autocomplete="new-password" class="settings-field__input" aria-label="登录密码" placeholder="输入 SSH 登录密码" />
             </template>
             <template v-else>
-              <label>{{ credential.auth_type === "private_key" ? "保存完整私钥内容的环境变量" : "环境变量引用" }} <span>必选</span></label>
-              <input v-model="credential.secret_ref" class="settings-field__input" :placeholder="credential.auth_type === 'private_key' ? '例如：env:SSH_KEY' : '例如：env:SSH_PASSWORD'" />
-              <small>{{ credential.auth_type === "private_key" ? "变量值必须是完整私钥文本，不是文件路径。" : "这里只保存引用名称，Node 会在连接时从进程环境变量解析。" }} 修改环境变量后需重启 Node 才能读取新值。</small>
+              <span class="settings-row__copy"><span class="settings-row__title">{{ credential.auth_type === "private_key" ? "保存完整私钥内容的环境变量" : "环境变量引用" }}</span><span class="settings-row__description">必选</span><small class="settings-row__description">{{ credential.auth_type === "private_key" ? "变量值必须是完整私钥文本，不是文件路径。" : "这里只保存引用名称，Node 会在连接时从进程环境变量解析。" }} 修改环境变量后需重启 Node 才能读取新值。</small></span>
+              <input v-model="credential.secret_ref" class="settings-field__input" :aria-label="credential.auth_type === 'private_key' ? '完整私钥环境变量' : '环境变量引用'" :placeholder="credential.auth_type === 'private_key' ? '例如：env:SSH_KEY' : '例如：env:SSH_PASSWORD'" />
             </template>
-          </div>
+          </label>
         </div>
         <div class="linux-settings__modal-actions">
           <button type="button" class="btn btn--ghost btn--sm" :disabled="saving" @click="closeCredentialForm">取消</button>
@@ -529,35 +525,35 @@ onMounted(() => {
       </section>
     </div>
 
-    <div v-if="showChannelForm" class="linux-settings__modal-backdrop" @click.self="closeChannelForm">
-      <section class="linux-settings__modal linux-settings__modal--wide" role="dialog" aria-modal="true" aria-labelledby="channel-form-title">
+    <div v-if="showChannelForm" class="ui-dialog-backdrop linux-settings__modal-backdrop" @click.self="closeChannelForm">
+      <section class="ui-dialog linux-settings__modal linux-settings__modal--wide" role="dialog" aria-modal="true" aria-labelledby="channel-form-title">
         <div class="linux-settings__modal-head">
           <div><h2 id="channel-form-title">{{ editingChannelId ? "编辑 SSH 通道" : "新增 SSH 通道" }}</h2><p>{{ editingChannelId ? `正在修改通道 ${editingChannelId}` : "通道 ID由系统自动生成，一个通道代表一台远程主机。" }}</p></div>
-          <button type="button" class="linux-settings__modal-close" aria-label="关闭 SSH 通道对话框" title="关闭" :disabled="saving" @click="closeChannelForm"><UiIcon name="close" :size="16" /></button>
+          <button type="button" class="btn btn--ghost btn--sm desktop-icon-button" aria-label="关闭 SSH 通道对话框" title="关闭" :disabled="saving" @click="closeChannelForm"><UiIcon name="close" :size="16" /></button>
         </div>
         <div class="linux-settings__channel-editor">
           <div class="linux-settings__group">
-            <div class="linux-settings__group-head"><strong>连接目标</strong><span>远程主机信息</span></div>
-            <div class="linux-settings__grid linux-settings__grid--target">
-              <div class="linux-settings__field linux-settings__field--wide"><label>显示名称 <span>可选</span></label><input v-model="channel.display_name" class="settings-field__input" placeholder="例如：生产服务器" /></div>
-              <div class="linux-settings__field linux-settings__field--wide"><label>主机或 IP <span>必选</span></label><input v-model="channel.host" class="settings-field__input" placeholder="例如：10.0.0.21" /></div>
-              <div class="linux-settings__field"><label>SSH 端口 <span>必选</span></label><input v-model.number="channel.port" type="number" class="settings-field__input" placeholder="22" /></div>
-              <div class="linux-settings__field"><label>Linux 用户名 <span>必选</span></label><input v-model="channel.username" class="settings-field__input" placeholder="例如：deploy" /></div>
+            <SettingsSectionHeader :level="3" title="连接目标" description="指定 SSH 连接使用的主机、端口和用户。" />
+            <div>
+              <div class="settings-row settings-row--field"><span class="settings-row__copy"><span class="settings-row__title">显示名称</span><span class="settings-row__description">可选</span></span><input v-model="channel.display_name" class="settings-field__input" aria-label="显示名称" placeholder="例如：生产服务器" /></div>
+              <div class="settings-row settings-row--field"><span class="settings-row__copy"><span class="settings-row__title">主机或 IP</span><span class="settings-row__description">必选</span></span><input v-model="channel.host" class="settings-field__input" aria-label="主机或 IP" placeholder="例如：10.0.0.21" /></div>
+              <div class="settings-row settings-row--field"><span class="settings-row__copy"><span class="settings-row__title">SSH 端口</span><span class="settings-row__description">必选</span></span><input v-model.number="channel.port" type="number" class="settings-field__input" aria-label="SSH 端口" placeholder="22" /></div>
+              <div class="settings-row settings-row--field"><span class="settings-row__copy"><span class="settings-row__title">Linux 用户名</span><span class="settings-row__description">必选</span></span><input v-model="channel.username" class="settings-field__input" aria-label="Linux 用户名" placeholder="例如：deploy" /></div>
             </div>
           </div>
           <div class="linux-settings__group">
-            <div class="linux-settings__group-head"><strong>登录凭据</strong><span>选择已保存的认证方式</span></div>
-            <div class="linux-settings__grid">
-              <div class="linux-settings__field">
-                <label>登录凭据 <span>必选</span></label>
+            <SettingsSectionHeader :level="3" title="登录凭据" description="选择已保存的凭据和主机验证策略。" />
+            <div>
+              <div class="settings-row settings-row--field">
+                <span class="settings-row__copy"><span class="settings-row__title">登录凭据</span><span class="settings-row__description">必选</span></span>
                 <UiSelect
                   v-model="channel.credential_id"
                   :options="savedCredentialOptions"
                   aria-label="登录凭据"
                 />
               </div>
-              <div class="linux-settings__field">
-                <label>主机密钥策略 <span>必选</span></label>
+              <div class="settings-row settings-row--field">
+                <span class="settings-row__copy"><span class="settings-row__title">主机密钥策略</span><span class="settings-row__description">必选</span></span>
                 <UiSelect
                   v-model="channel.host_key_policy"
                   :options="hostKeyPolicyOptions"
@@ -565,20 +561,18 @@ onMounted(() => {
                   @change="onHostKeyPolicyChange"
                 />
               </div>
-              <div class="linux-settings__field linux-settings__field--wide">
-                <label>{{ channel.host_key_policy === "pinned" ? "SHA256 主机指纹" : "known_hosts 文件路径" }} <span>{{ channel.host_key_policy === "pinned" ? "必选" : "可选" }}</span></label>
-                <input v-model="channel.host_key_ref" class="settings-field__input" :placeholder="channel.host_key_policy === 'pinned' ? '例如：SHA256:xxxxxxxx' : '留空使用 Node 当前用户的 ~/.ssh/known_hosts'" />
-                <small v-if="channel.host_key_policy === 'pinned'">首次测试发现未知主机时，可在诊断结果中核对指纹后直接保存。</small>
-                <small v-else>Node 会在本机读取该文件；留空时使用当前运行 Node 的系统用户的 SSH known_hosts。</small>
+          <div class="settings-row settings-row--field">
+                <span class="settings-row__copy"><span class="settings-row__title">{{ channel.host_key_policy === "pinned" ? "SHA256 主机指纹" : "known_hosts 文件路径" }}</span><span class="settings-row__description">{{ channel.host_key_policy === "pinned" ? "必选" : "可选" }}</span><small v-if="channel.host_key_policy === 'pinned'" class="settings-row__description">首次测试发现未知主机时，可在诊断结果中核对指纹后直接保存。</small><small v-else class="settings-row__description">Node 会在本机读取该文件；留空时使用当前运行 Node 的系统用户的 SSH known_hosts。</small></span>
+                <input v-model="channel.host_key_ref" class="settings-field__input" :aria-label="channel.host_key_policy === 'pinned' ? 'SHA256 主机指纹' : 'known_hosts 文件路径'" :placeholder="channel.host_key_policy === 'pinned' ? '例如：SHA256:xxxxxxxx' : '留空使用 Node 当前用户的 ~/.ssh/known_hosts'" />
               </div>
             </div>
           </div>
           <div class="linux-settings__group">
-            <div class="linux-settings__group-head"><strong>会话默认值</strong><span>可按需调整</span></div>
-            <div class="linux-settings__grid">
-              <div class="linux-settings__field"><label>默认远程目录 <span>可选</span></label><input v-model="channel.default_cwd" class="settings-field__input" placeholder="例如：/opt/app" /></div>
-              <div class="linux-settings__field"><label>远程 Shell <span>可选</span></label><input v-model="channel.remote_shell" class="settings-field__input" placeholder="bash" /></div>
-              <div class="linux-settings__field"><label>最大并发会话 <span>必选</span></label><input v-model.number="channel.max_sessions" type="number" min="1" max="64" class="settings-field__input" placeholder="4" /><small>同一 Linux 通道允许同时打开的持久终端数量；智能体绑定时还可以设置更小的上限。</small></div>
+            <SettingsSectionHeader :level="3" title="远程环境" description="设置连接后的默认工作目录、Shell 与会话上限。" />
+            <div>
+              <div class="settings-row settings-row--field"><span class="settings-row__copy"><span class="settings-row__title">默认远程目录</span><span class="settings-row__description">可选</span></span><input v-model="channel.default_cwd" class="settings-field__input" aria-label="默认远程目录" placeholder="例如：/opt/app" /></div>
+              <div class="settings-row settings-row--field"><span class="settings-row__copy"><span class="settings-row__title">远程 Shell</span><span class="settings-row__description">可选</span></span><input v-model="channel.remote_shell" class="settings-field__input" aria-label="远程 Shell" placeholder="bash" /></div>
+              <div class="settings-row settings-row--field"><span class="settings-row__copy"><span class="settings-row__title">最大并发会话</span><span class="settings-row__description">必选；同一 Linux 通道允许同时打开的持久终端数量，智能体绑定时还可以设置更小的上限。</span></span><input v-model.number="channel.max_sessions" type="number" min="1" max="64" class="settings-field__input" aria-label="最大并发会话" placeholder="4" /></div>
             </div>
           </div>
         </div>
@@ -605,13 +599,9 @@ onMounted(() => {
 .linux-settings__summary-card--hint strong { font-size:18px; }
 .linux-settings__count,.linux-settings__step-badge { flex:0 0 auto; padding:4px 9px; border-radius:999px; color:var(--color-text-muted); background:var(--color-surface-muted, #f3f6f8); font-size:12px; }
 .linux-settings__step-badge { color:var(--color-primary, #1575c5); background:color-mix(in srgb, var(--color-primary, #1575c5) 10%, transparent); }
-.linux-settings__editor,.linux-settings__channel-editor { display:grid; gap:16px; margin-top:18px; }
-.linux-settings__editor { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.linux-settings__editor,.linux-settings__channel-editor { display:flex; flex-direction:column; gap:16px; margin-top:18px; }
 .linux-settings__channel-editor { gap:12px; }
-.linux-settings__group { padding:16px; border:1px solid var(--color-border); border-radius:12px; background:var(--color-surface-muted, #fbfcfd); }
-.linux-settings__group-head { display:flex; align-items:baseline; gap:9px; margin-bottom:13px; }
-.linux-settings__group-head strong { font-size:14px; }
-.linux-settings__group-head span { color:var(--color-text-muted); font-size:12px; }
+.linux-settings__group { min-width:0; }
 .linux-settings__diagnostics { margin:12px 0 16px; padding:12px 14px; border:1px solid var(--color-border); border-radius:12px; background:var(--color-surface-muted, #fbfcfd); }
 .linux-settings__diagnostics-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:13px; }
 .linux-settings__diagnostics-code { color:var(--color-danger, #b42318); font-family:var(--font-mono, monospace); font-size:11px; }
@@ -624,15 +614,7 @@ onMounted(() => {
 .linux-settings__stage-name { color:var(--color-text); font-weight:600; }
 .linux-settings__stage-message { min-width:0; overflow:hidden; color:var(--color-text-muted); text-overflow:ellipsis; white-space:nowrap; }
 .linux-settings__stage-duration { color:var(--color-text-muted); font-variant-numeric:tabular-nums; }
-.linux-settings__grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
-.linux-settings__grid--target { grid-template-columns:repeat(2,minmax(0,1fr)); }
-.linux-settings__field { min-width:0; display:flex; flex-direction:column; gap:6px; }
-.linux-settings__field--wide { grid-column:1 / -1; }
-.linux-settings__field label { display:flex; align-items:center; gap:6px; color:var(--color-text); font-size:12px; font-weight:600; }
-.linux-settings__field label span { color:var(--color-text-muted); font-size:11px; font-weight:400; }
-.linux-settings__field small { color:var(--color-text-muted); font-size:11px; line-height:1.5; }
-.linux-settings__field .settings-field__input { width:100%; box-sizing:border-box; }
-.linux-settings__form-actions { display:flex; justify-content:flex-end; gap:8px; grid-column:1 / -1; padding-top:2px; }
+.linux-settings__form-actions { display:flex; justify-content:flex-end; gap:8px; padding-top:2px; }
 .linux-settings__agent-note { display:flex; flex-direction:column; gap:4px; padding:11px 13px; border:1px solid color-mix(in srgb, var(--color-primary, #1575c5) 24%, var(--color-border)); border-radius:9px; background:color-mix(in srgb, var(--color-primary, #1575c5) 7%, transparent); color:var(--color-text-muted); font-size:12px; line-height:1.5; }
 .linux-settings__agent-note strong { color:var(--color-text); }
 .linux-settings__list { display:grid; gap:8px; margin-top:16px; }
@@ -645,16 +627,13 @@ onMounted(() => {
 .linux-settings__muted { color:var(--color-text-muted); }
 .linux-settings__error { color:var(--color-danger); }
 .linux-settings__ok { color:var(--color-success,#3d9a5f); }
-.linux-settings__modal-backdrop { position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; padding:24px; overflow:auto; background:rgba(15,23,42,.36); }
-.linux-settings__modal { width:min(560px,100%); max-height:calc(100vh - 48px); overflow:auto; padding:22px; border:1px solid var(--color-border); border-radius:14px; background:var(--color-surface,#fff); box-shadow:0 20px 60px rgba(15,23,42,.2); }
+.linux-settings__modal-backdrop { position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center; padding:24px; overflow:auto; }
+.linux-settings__modal { width:min(560px,100%); max-height:calc(100vh - 48px); overflow:auto; }
 .linux-settings__modal--wide { width:min(820px,100%); }
 .linux-settings__modal-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
 .linux-settings__modal-head h2 { margin:0; color:var(--color-text); font-size:18px; }
 .linux-settings__modal-head p { margin:6px 0 0; color:var(--color-text-muted); font-size:12px; line-height:1.5; }
-.linux-settings__modal-close { width:28px; height:28px; padding:0; border:0; border-radius:7px; color:var(--color-text-muted); background:transparent; font-size:24px; line-height:1; cursor:pointer; }
-.linux-settings__modal-close:hover { color:var(--color-text); background:var(--color-surface-muted,#f3f6f8); }
 .linux-settings__modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:20px; padding-top:16px; border-top:1px solid var(--color-border); }
-@media(max-width:900px) { .linux-settings__grid--target { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media(max-width:720px) { .linux-settings__row { align-items:stretch; flex-direction:column; } .linux-settings__summary,.linux-settings__editor,.linux-settings__grid,.linux-settings__grid--target { grid-template-columns:1fr; } .linux-settings__actions { justify-content:flex-start; } .linux-settings__form-actions { justify-content:flex-start; } .linux-settings__modal-backdrop { align-items:flex-start; padding:12px; } .linux-settings__modal { padding:16px; max-height:calc(100vh - 24px); } }
+@media(max-width:720px) { .linux-settings__row { align-items:stretch; flex-direction:column; } .linux-settings__summary { grid-template-columns:1fr; } .linux-settings__actions { justify-content:flex-start; } .linux-settings__form-actions { justify-content:flex-start; } .linux-settings__modal-backdrop { align-items:flex-start; padding:12px; } .linux-settings__modal { padding:16px; max-height:calc(100vh - 24px); } }
 @media(max-width:640px) { .linux-settings__stage { grid-template-columns:18px 96px minmax(0, 1fr); } .linux-settings__stage-duration { display:none; } }
 </style>

@@ -302,12 +302,12 @@ function handleRequestedProfile() {
         连接到管理平台后可注册本机服务，并参与工作组协作。
       </p>
       <div class="setup-manage-stack">
-        <label class="settings-toggle">
+        <label class="settings-row settings-toggle">
           <input v-model="form.manage.enabled" type="checkbox" />
-          <span>启用连接</span>
+          <span class="settings-row__copy"><span class="settings-row__title">启用连接</span></span>
         </label>
-        <label class="settings-field settings-field--stack">
-          <span class="settings-field__label">服务地址</span>
+        <label class="settings-row settings-row--field">
+          <span class="settings-row__copy"><span class="settings-row__title">服务地址</span></span>
           <input
             v-model="form.manage.url"
             class="settings-field__input"
@@ -318,8 +318,8 @@ function handleRequestedProfile() {
             autocomplete="off"
           />
         </label>
-        <label class="settings-field settings-field--stack">
-          <span class="settings-field__label">管理平台连接密钥</span>
+        <label class="settings-row settings-row--field">
+          <span class="settings-row__copy"><span class="settings-row__title">管理平台连接密钥</span><span class="settings-row__description">{{ form.manage.has_node_token ? "已配置凭据；替换时输入新值。" : "尚未配置凭据。" }}</span></span>
           <input
             v-model="form.manage.node_token"
             class="settings-field__input"
@@ -327,21 +327,18 @@ function handleRequestedProfile() {
             autocomplete="new-password"
             placeholder="留空保持当前凭据"
           />
-          <small class="settings-field__hint">
-            {{ form.manage.has_node_token ? "已配置凭据；替换时输入新值。" : "尚未配置凭据。" }}
-          </small>
         </label>
-        <label v-if="form.manage.has_node_token" class="settings-toggle">
+        <label v-if="form.manage.has_node_token" class="settings-row settings-toggle">
           <input v-model="form.manage.clear_node_token" type="checkbox" />
-          <span>清除已保存的管理平台连接密钥</span>
+          <span class="settings-row__copy"><span class="settings-row__title">清除已保存的管理平台连接密钥</span><span class="settings-row__description">保存时删除当前已保存的密钥。</span></span>
         </label>
-        <label class="settings-toggle" :class="{ 'settings-toggle--disabled': manageFieldsDisabled }">
+        <label class="settings-row settings-toggle" :class="{ 'settings-toggle--disabled': manageFieldsDisabled }">
           <input
             v-model="form.manage.workgroup_enabled"
             type="checkbox"
             :disabled="manageFieldsDisabled"
           />
-          <span>启用工作组通道</span>
+          <span class="settings-row__copy"><span class="settings-row__title">启用工作组通道</span><span class="settings-row__description">允许此本机服务加入和使用工作组。</span></span>
         </label>
       </div>
     </section>

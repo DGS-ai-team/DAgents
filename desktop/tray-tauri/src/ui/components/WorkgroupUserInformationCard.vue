@@ -96,6 +96,7 @@ function submitOnEnter(event) {
     <div class="wg-member-question__answer">
       <input
         v-model="draft"
+        class="settings-field__input wg-member-question__answer-input"
         type="text"
         aria-label="成员问题回答"
         :placeholder="info.placeholder || (info.options?.length ? '也可以输入自定义回答…' : '输入回答…')"
@@ -103,7 +104,7 @@ function submitOnEnter(event) {
         @input="validationMessage = ''"
         @keydown.enter="submitOnEnter"
       />
-      <button type="button" :disabled="busy" @click="submit">
+      <button type="button" class="btn btn--primary btn--sm" :disabled="busy" @click="submit">
         {{ busy ? "提交中…" : "提交回答" }}
       </button>
     </div>
@@ -179,32 +180,10 @@ function submitOnEnter(event) {
   gap: 7px;
   margin-top: 9px;
 }
-.wg-member-question__answer input {
+.wg-member-question__answer-input {
   min-width: 0;
   flex: 1 1 auto;
-  height: 32px;
-  padding: 0 9px;
-  border: 1px solid var(--color-border, #d1d5db);
-  border-radius: 7px;
-  background: var(--color-surface, #fff);
-  color: var(--color-text, #111827);
-  font: inherit;
-  font-size: 12.5px;
 }
-.wg-member-question__answer button {
-  flex: 0 0 auto;
-  height: 32px;
-  padding: 0 11px;
-  border: 0;
-  border-radius: 7px;
-  background: var(--color-primary, #0078d4);
-  color: #fff;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.wg-member-question__answer button:disabled,
 .wg-member-question__option:disabled {
   cursor: default;
   opacity: 0.58;

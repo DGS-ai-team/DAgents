@@ -61,7 +61,6 @@ import folderOpenIcon from '@shared-icons/desktop/folder-open.svg?url'
 import sendIcon from '@shared-icons/desktop/send.svg?url'
 import stopIcon from '@shared-icons/dagents/stop.svg?url'
 import brandIconUrl from '@dagents-brand/brand-icon.png?url'
-import './desktop-ui.css'
 
 const maskStyle = (icon) => ({
   maskImage: `url("${icon}")`,
@@ -1190,13 +1189,21 @@ function runEntryContextMenuItem(item) {
 function openAgentContextMenu(event, agent, anchor = event?.currentTarget) {
   const id = String(agent?.agent_id || '').trim()
   if (!id) return
+  const focusAnchor = anchor instanceof HTMLElement && !anchor.matches('button, a, input, select, textarea, [tabindex]:not([tabindex="-1"])')
+    ? anchor.querySelector('.agent-item') || anchor
+    : anchor
   const kind = agent.agent_type === 'auto' ? '自主智能体' : '智能体'
   const isWorking = agent.state === 'working' || (activeId.value === id && turnInProgress.value)
   const disabledReason = !status.value.online ? '请先连接本地服务' : status.value.setup_required ? '请先完成本地服务初始化' : deletingAgentId.value ? '正在删除智能体' : isWorking ? '智能体工作中，暂不能删除' : ''
   void openEntryContextMenu(event, {
     title: agent.display_name || id,
-    anchor,
-    items: [{ label: `删除${kind}`, icon: 'trash', danger: true, disabled: Boolean(disabledReason), title: disabledReason || undefined, run: () => deleteAgentById(id) }],
+    anchor: focusAnchor,
+    items: [
+      { label: '打开对话', icon: 'message-square', run: () => selectAgent(id, { openChat: true }) },
+      { label: '智能体设置', icon: 'settings', run: () => openAgentSettings(id) },
+      { separator: true },
+      { label: `删除${kind}`, icon: 'trash', danger: true, disabled: Boolean(disabledReason), title: disabledReason || undefined, run: () => deleteAgentById(id) },
+    ],
   })
 }
 function onAgentEntryKeydown(event, agent) {
@@ -1216,8 +1223,25 @@ function openSidebarWorkgroupContextMenu(event, group, anchor = event?.currentTa
   void openEntryContextMenu(event, {
     title: group.display_name || id,
     anchor,
-    items: [{ label: '从本地服务移除工作组', icon: 'trash', danger: true, disabled: Boolean(disabledReason), title: disabledReason || undefined, run: () => removeSidebarWorkgroup(group) }],
+    items: [
+      { label: '打开工作组', icon: 'workgroup', run: () => openWorkgroup(id) },
+      { separator: true },
+      { label: '从本地服务移除工作组', icon: 'trash', danger: true, disabled: Boolean(disabledReason), title: disabledReason || undefined, run: () => removeSidebarWorkgroup(group) },
+    ],
   })
+}
+function openSidebarGroupContextMenu(event, groupName, anchor = event?.currentTarget) {
+  const items = groupName === 'agents'
+    ? [{ label: '新建智能体', icon: 'plus', run: () => { showAgentCreate.value = true } }]
+    : groupName === 'auto'
+      ? [{ label: '自主智能体总览', icon: 'auto', run: showAutoOverview }]
+      : [{ label: '打开工作组列表', icon: 'workgroup', run: showWorkgroups }]
+  void openEntryContextMenu(event, { title: groupName === 'agents' ? '智能体' : groupName === 'auto' ? '自主智能体' : '工作组', anchor, items })
+}
+function onSidebarGroupKeydown(event, groupName) {
+  if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+  event.preventDefault()
+  openSidebarGroupContextMenu(event, groupName)
 }
 function onWorkgroupEntryKeydown(event, group) {
   if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
@@ -2081,31 +2105,29 @@ onUnmounted(() => {
     <aside class="rail" :class="{ collapsed: sidebarCollapsed }">
       <div class="sidebar-scroll">
         <section class="side-section">
-          <button v-if="sidebarCollapsed" class="collapsed-group" :class="{ selected: !isWorkgroupView && Boolean(activeId) && activeAgent?.agent_type !== 'auto' }" aria-label="智能体" title="智能体" :aria-expanded="collapsedGroup === 'agents'" @click="collapsedGroup = collapsedGroup === 'agents' ? '' : 'agents'"><span class="group-icon" :style="maskStyle(navAgentsIcon)"></span></button>
+          <button v-if="sidebarCollapsed" class="collapsed-group" :class="{ selected: !isWorkgroupView && Boolean(activeId) && activeAgent?.agent_type !== 'auto' }" aria-label="智能体" title="智能体" :aria-expanded="collapsedGroup === 'agents'" @click="collapsedGroup = collapsedGroup === 'agents' ? '' : 'agents'" @contextmenu="openSidebarGroupContextMenu($event, 'agents')" @keydown="onSidebarGroupKeydown($event, 'agents')"><span class="group-icon" :style="maskStyle(navAgentsIcon)"></span></button>
           <template v-else>
-            <div class="group-title"><span class="group-icon" :style="maskStyle(navAgentsIcon)"></span><span>智能体</span><button class="group-add" aria-label="新建智能体" title="新建智能体" @click="showAgentCreate = true">+</button></div>
-            <div v-for="agent in normalAgents" :key="agent.agent_id" class="agent-row">
-              <button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @contextmenu="openAgentContextMenu($event, agent)" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button>
-              <button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button>
+            <div class="group-title" tabindex="0" aria-label="智能体，右键查看操作" title="右键查看操作" @contextmenu="openSidebarGroupContextMenu($event, 'agents')" @keydown="onSidebarGroupKeydown($event, 'agents')"><span class="group-icon" :style="maskStyle(navAgentsIcon)"></span><span>智能体</span></div>
+            <div v-for="agent in normalAgents" :key="agent.agent_id" class="agent-row" @contextmenu="openAgentContextMenu($event, agent)">
+              <button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button>
             </div>
           </template>
-          <div v-if="sidebarCollapsed && collapsedGroup === 'agents'" class="sidebar-popover"><div class="sidebar-popover-heading"><b>智能体</b><button class="group-add" type="button" aria-label="新建智能体" title="新建智能体" @click="showAgentCreate = true">+</button></div><div v-for="agent in normalAgents" :key="agent.agent_id" class="agent-row"><button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @contextmenu="openAgentContextMenu($event, agent)" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button><button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button></div></div>
+          <div v-if="sidebarCollapsed && collapsedGroup === 'agents'" class="sidebar-popover"><div class="sidebar-popover-heading" tabindex="0" aria-label="智能体，右键查看操作" title="右键查看操作" @contextmenu="openSidebarGroupContextMenu($event, 'agents')" @keydown="onSidebarGroupKeydown($event, 'agents')"><b>智能体</b></div><div v-for="agent in normalAgents" :key="agent.agent_id" class="agent-row" @contextmenu="openAgentContextMenu($event, agent)"><button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button></div></div>
         </section>
         <section class="side-section">
-          <button v-if="sidebarCollapsed && showWorkgroupSidebar" class="collapsed-group" :class="{ selected: activeTab === 'workgroups' }" aria-label="工作组" title="工作组" :aria-expanded="collapsedGroup === 'workgroups'" @click="collapsedGroup = collapsedGroup === 'workgroups' ? '' : 'workgroups'"><span class="group-icon" :style="maskStyle(navWorkgroupsIcon)"></span></button>
-          <template v-if="!sidebarCollapsed && showWorkgroupSidebar"><button class="group-title group-title-button" :class="{ selected: isWorkgroupView }" :aria-current="isWorkgroupView ? 'page' : undefined" @click="showWorkgroups"><span class="group-icon" :style="maskStyle(navWorkgroupsIcon)"></span><span>工作组</span></button><button v-for="group in workgroupList" :key="group.workgroup_id" class="agent-item" :class="{ selected: activeTab === 'workgroups' && selectedWorkgroupId === group.workgroup_id }" :title="group.display_name || group.workgroup_id" @click="openWorkgroup(group.workgroup_id)" @contextmenu="openSidebarWorkgroupContextMenu($event, group)" @keydown="onWorkgroupEntryKeydown($event, group)"><span class="agent-label">{{ group.display_name || group.workgroup_id }}</span></button></template>
-          <div v-if="sidebarCollapsed && showWorkgroupSidebar && collapsedGroup === 'workgroups'" class="sidebar-popover"><button class="sidebar-popover-title" type="button" @click="showWorkgroups">工作组</button><button v-for="group in workgroupList" :key="group.workgroup_id" :class="{ selected: activeTab === 'workgroups' && selectedWorkgroupId === group.workgroup_id }" @click="openWorkgroup(group.workgroup_id)" @contextmenu="openSidebarWorkgroupContextMenu($event, group)" @keydown="onWorkgroupEntryKeydown($event, group)"><span class="agent-label">{{ group.display_name || group.workgroup_id }}</span></button></div>
+          <button v-if="sidebarCollapsed && showWorkgroupSidebar" class="collapsed-group" :class="{ selected: activeTab === 'workgroups' }" aria-label="工作组" title="工作组" :aria-expanded="collapsedGroup === 'workgroups'" @click="collapsedGroup = collapsedGroup === 'workgroups' ? '' : 'workgroups'" @contextmenu="openSidebarGroupContextMenu($event, 'workgroups')" @keydown="onSidebarGroupKeydown($event, 'workgroups')"><span class="group-icon" :style="maskStyle(navWorkgroupsIcon)"></span></button>
+          <template v-if="!sidebarCollapsed && showWorkgroupSidebar"><button class="group-title group-title-button" :class="{ selected: isWorkgroupView }" :aria-current="isWorkgroupView ? 'page' : undefined" @click="showWorkgroups" @contextmenu="openSidebarGroupContextMenu($event, 'workgroups')" @keydown="onSidebarGroupKeydown($event, 'workgroups')"><span class="group-icon" :style="maskStyle(navWorkgroupsIcon)"></span><span>工作组</span></button><button v-for="group in workgroupList" :key="group.workgroup_id" class="agent-item" :class="{ selected: activeTab === 'workgroups' && selectedWorkgroupId === group.workgroup_id }" :title="group.display_name || group.workgroup_id" @click="openWorkgroup(group.workgroup_id)" @contextmenu="openSidebarWorkgroupContextMenu($event, group)" @keydown="onWorkgroupEntryKeydown($event, group)"><span class="agent-label">{{ group.display_name || group.workgroup_id }}</span></button></template>
+          <div v-if="sidebarCollapsed && showWorkgroupSidebar && collapsedGroup === 'workgroups'" class="sidebar-popover"><button class="sidebar-popover-title" type="button" @click="showWorkgroups" @contextmenu="openSidebarGroupContextMenu($event, 'workgroups')" @keydown="onSidebarGroupKeydown($event, 'workgroups')">工作组</button><button v-for="group in workgroupList" :key="group.workgroup_id" :class="{ selected: activeTab === 'workgroups' && selectedWorkgroupId === group.workgroup_id }" @click="openWorkgroup(group.workgroup_id)" @contextmenu="openSidebarWorkgroupContextMenu($event, group)" @keydown="onWorkgroupEntryKeydown($event, group)"><span class="agent-label">{{ group.display_name || group.workgroup_id }}</span></button></div>
         </section>
         <section class="side-section">
-          <button v-if="sidebarCollapsed" class="collapsed-group" :class="{ selected: !isWorkgroupView && Boolean(activeId) && activeAgent?.agent_type === 'auto' }" aria-label="自主智能体" title="自主智能体" :aria-expanded="collapsedGroup === 'auto'" @click="collapsedGroup = collapsedGroup === 'auto' ? '' : 'auto'"><span class="group-icon" :style="maskStyle(navAutoIcon)"></span></button>
+          <button v-if="sidebarCollapsed" class="collapsed-group" :class="{ selected: !isWorkgroupView && Boolean(activeId) && activeAgent?.agent_type === 'auto' }" aria-label="自主智能体" title="自主智能体" :aria-expanded="collapsedGroup === 'auto'" @click="collapsedGroup = collapsedGroup === 'auto' ? '' : 'auto'" @contextmenu="openSidebarGroupContextMenu($event, 'auto')" @keydown="onSidebarGroupKeydown($event, 'auto')"><span class="group-icon" :style="maskStyle(navAutoIcon)"></span></button>
           <template v-else>
-            <div class="group-title"><span class="group-icon" :style="maskStyle(navAutoIcon)"></span><span>自主智能体</span></div>
-            <div v-for="agent in autoAgents" :key="agent.agent_id" class="agent-row">
-              <button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @contextmenu="openAgentContextMenu($event, agent)" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button>
-              <button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button>
+            <div class="group-title" tabindex="0" aria-label="自主智能体，右键查看操作" title="右键查看操作" @contextmenu="openSidebarGroupContextMenu($event, 'auto')" @keydown="onSidebarGroupKeydown($event, 'auto')"><span class="group-icon" :style="maskStyle(navAutoIcon)"></span><span>自主智能体</span></div>
+            <div v-for="agent in autoAgents" :key="agent.agent_id" class="agent-row" @contextmenu="openAgentContextMenu($event, agent)">
+              <button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button>
             </div>
           </template>
-          <div v-if="sidebarCollapsed && collapsedGroup === 'auto'" class="sidebar-popover"><b>自主智能体</b><div v-for="agent in autoAgents" :key="agent.agent_id" class="agent-row"><button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @contextmenu="openAgentContextMenu($event, agent)" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button><button class="agent-row-action" type="button" :aria-label="`${agent.display_name || agent.agent_id} 设置`" title="智能体设置" @click="openAgentSettings(agent.agent_id)"><UiIcon name="settings" :size="15" /></button></div></div>
+          <div v-if="sidebarCollapsed && collapsedGroup === 'auto'" class="sidebar-popover"><b tabindex="0" aria-label="自主智能体，右键查看操作" title="右键查看操作" @contextmenu="openSidebarGroupContextMenu($event, 'auto')" @keydown="onSidebarGroupKeydown($event, 'auto')">自主智能体</b><div v-for="agent in autoAgents" :key="agent.agent_id" class="agent-row" @contextmenu="openAgentContextMenu($event, agent)"><button class="agent-item" :class="{ selected: !isWorkgroupView && activeId === agent.agent_id }" :aria-current="!isWorkgroupView && activeId === agent.agent_id ? 'page' : undefined" :title="agent.display_name || agent.agent_id" @click="selectAgent(agent.agent_id, { openChat: true })" @keydown="onAgentEntryKeydown($event, agent)"><span class="agent-label">{{ agent.display_name || agent.agent_id }}</span><span v-if="agent.has_pending_hitl" class="pending-dot"></span></button></div></div>
         </section>
       </div>
       <div class="node-indicator" :class="status.online ? 'online' : 'offline'" :title="`本地服务 · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}`" :aria-label="`本地服务 · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}`"><span>{{ `本地服务 · ${status.online ? '在线' : '离线'}${status.version ? ' · v' + status.version : ''}` }}</span><i></i></div>
