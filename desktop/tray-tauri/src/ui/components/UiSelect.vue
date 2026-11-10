@@ -10,6 +10,7 @@ const props = defineProps({
   searchable: { type: Boolean, default: false },
   searchPlaceholder: { type: String, default: "搜索选项" },
   ariaLabel: { type: String, default: "" },
+  ariaInvalid: { type: Boolean, default: false },
   /** Keep popovers inside modal focus traps. Positioning still uses the viewport. */
   contained: { type: Boolean, default: false },
   /** settings = 设置/首配输入框外观；compact = 稍紧凑 */
@@ -255,6 +256,7 @@ onBeforeUnmount(() => {
       :disabled="disabled"
       :aria-expanded="open"
       :aria-label="ariaLabel || undefined"
+      :aria-invalid="ariaInvalid ? 'true' : undefined"
       :aria-controls="open ? listId : undefined"
       aria-haspopup="listbox"
       @click="toggleMenu"
@@ -329,149 +331,5 @@ onBeforeUnmount(() => {
 
 .ui-select--settings {
   max-width: 520px;
-}
-
-.ui-select--compact .ui-select__trigger {
-  min-height: 34px;
-  padding: 7px 10px;
-}
-
-.ui-select__trigger {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
-  min-height: 38px;
-  padding: 8px 12px;
-  border-radius: var(--radius-md, 8px);
-  border: 1px solid var(--color-border);
-  background: var(--color-input, var(--color-surface));
-  color: var(--color-text);
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
-}
-
-.ui-select--open .ui-select__trigger,
-.ui-select__trigger:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--color-primary-strong, var(--color-primary)) 40%, var(--color-border));
-}
-
-.ui-select__trigger:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-primary-strong, var(--color-primary)) 45%, transparent);
-  outline-offset: 1px;
-}
-
-.ui-select__trigger:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.ui-select__value {
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ui-select__value--placeholder {
-  color: var(--color-text-subtle);
-}
-
-.ui-select__chevron {
-  flex: 0 0 auto;
-  color: var(--color-text-muted);
-  opacity: 0.85;
-  transition: transform 0.15s ease;
-}
-
-.ui-select--open .ui-select__chevron {
-  transform: rotate(180deg);
-}
-</style>
-
-<!-- menu teleported: unscoped twin via global class names on teleported node -->
-<style>
-.ui-select__menu {
-  /* Contained menus must be out of flow before measuring the trigger. */
-  position: fixed;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 6px;
-  overflow: hidden;
-  border-radius: 12px;
-  border: 1px solid var(--color-border-strong, var(--color-border));
-  background: var(--color-surface);
-  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0, 0, 0, 0.12));
-  color: var(--color-text);
-}
-
-.ui-select__list { min-height: 0; overflow: auto; }
-.ui-select__search { display: flex; flex: none; align-items: center; gap: 8px; padding: 5px 7px 9px; margin-bottom: 4px; border-bottom: 1px solid var(--color-border); color: var(--color-text-muted); }
-.ui-select__search input { width: 100%; min-width: 0; padding: 3px 0; border: 0; outline: 0; background: transparent; color: var(--color-text); font: inherit; font-size: 13px; box-shadow: none; }
-.ui-select__search input::placeholder { color: var(--color-text-subtle); }
-.ui-select__search:focus-within { box-shadow: 0 1px 0 var(--color-text-muted); }
-.ui-select__option-copy { display: grid; min-width: 0; gap: 3px; }
-.ui-select__option-description { overflow: hidden; color: var(--color-text-muted); font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
-
-.ui-select__empty {
-  margin: 0;
-  padding: 12px 10px;
-  font-size: 13px;
-  color: var(--color-text-subtle);
-  text-align: center;
-}
-
-.ui-select__option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
-  padding: 9px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.ui-select__option:hover:not(:disabled),
-.ui-select__option:focus-visible,
-.ui-select__option--focused {
-  background: var(--color-surface-hover, color-mix(in srgb, var(--color-text) 6%, transparent));
-  outline: none;
-}
-
-.ui-select__option--active {
-  background: color-mix(in srgb, var(--color-primary-strong, var(--color-primary)) 10%, transparent);
-  color: var(--color-text);
-}
-
-.ui-select__option:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.ui-select__option-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ui-select__option-check {
-  flex: 0 0 auto;
-  font-size: 12px;
-  color: var(--color-primary-strong, var(--color-primary));
 }
 </style>

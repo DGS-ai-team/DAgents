@@ -50,12 +50,12 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
     <div v-if="loading" role="status">加载中…</div>
     <template v-else>
       <fieldset class="simplified-auto-panel__fields" :disabled="saving">
-      <div class="simplified-auto-panel__row"><div><strong>职责</strong><small>定义这个 Auto Agent 的长期工作责任</small></div><textarea v-model="draft.responsibility" rows="2" aria-label="职责" /></div>
-      <div class="simplified-auto-panel__row">
-        <div>
-          <strong>自主运行频率</strong>
-          <small>设置 Auto Agent 自动工作的间隔</small>
-        </div>
+      <label class="settings-row settings-row--field">
+        <span class="settings-row__copy"><span class="settings-row__title">职责</span><span class="settings-row__description">定义这个 Auto Agent 的长期工作责任</span></span>
+        <textarea v-model="draft.responsibility" class="settings-field__input settings-field__input--multiline" rows="2" aria-label="职责" />
+      </label>
+      <div class="settings-row settings-row--field">
+        <span class="settings-row__copy"><span class="settings-row__title">自主运行频率</span><span class="settings-row__description">设置 Auto Agent 自动工作的间隔</span></span>
         <div class="simplified-auto-panel__control">
           <UiSelect
             v-model="wakeValue"
@@ -66,6 +66,7 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
           <input
             v-if="customWake"
             v-model.number="draft.wake_interval_seconds"
+            class="settings-field__input"
             type="number"
             min="1"
             aria-label="自定义间隔秒数"
@@ -73,16 +74,13 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
           <span v-if="customWake" class="simplified-auto-panel__unit">秒</span>
         </div>
       </div>
-      <div class="simplified-auto-panel__row"><div><strong>每日经验整理</strong><small>定时整理近期经验，帮助保持长期工作脉络</small></div><div class="simplified-auto-panel__control"><input v-model="draft.dreaming_enabled" class="settings-switch-input" type="checkbox" aria-label="启用每日经验整理" :disabled="dreamingLoading || !!dreamingError || !dreamingStatus" /></div></div>
+      <label class="settings-row"><span class="settings-row__copy"><span class="settings-row__title">每日经验整理</span><span class="settings-row__description">定时整理近期经验，帮助保持长期工作脉络</span></span><input v-model="draft.dreaming_enabled" class="settings-switch-input" type="checkbox" aria-label="启用每日经验整理" :disabled="dreamingLoading || !!dreamingError || !dreamingStatus" /></label>
       <div
         v-if="triggerRecovery || triggerError || needsReconcile"
-        class="simplified-auto-panel__row"
+        class="settings-row"
         role="status"
       >
-        <div>
-          <strong>自主运行状态</strong>
-          <small>{{ triggerError || (triggerRecovery ? "上次投递需要核对" : (needsReconcile ? "自主运行配置尚未同步" : "")) }}</small>
-        </div>
+        <span class="settings-row__copy"><span class="settings-row__title">自主运行状态</span><span class="settings-row__description">{{ triggerError || (triggerRecovery ? "上次投递需要核对" : (needsReconcile ? "自主运行配置尚未同步" : "")) }}</span></span>
         <div class="simplified-auto-panel__control">
           <button
             v-if="triggerRecovery"
@@ -106,14 +104,10 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
           </button>
         </div>
       </div>
-      <div v-if="draft.dreaming_enabled" class="simplified-auto-panel__row"><div><strong>整理时间</strong></div><input v-model="draft.dreaming_time" type="time" aria-label="经验整理时间" :disabled="dreamingLoading || !!dreamingError || !dreamingStatus" /></div>
-      <div v-if="draft.dreaming_enabled" class="simplified-auto-panel__row"><div><strong>时区</strong></div><input v-model="draft.timezone" aria-label="时区" :disabled="dreamingLoading || !!dreamingError || !dreamingStatus" /></div>
-      <div class="simplified-auto-panel__row">
-        <div>
-          <strong>每日经验整理状态</strong>
-          <small v-if="dreamingError">{{ dreamingError }}</small>
-          <small v-else>每日经验整理运行情况</small>
-        </div>
+      <label v-if="draft.dreaming_enabled" class="settings-row settings-row--field"><span class="settings-row__copy"><span class="settings-row__title">整理时间</span></span><input v-model="draft.dreaming_time" class="settings-field__input" type="time" aria-label="经验整理时间" :disabled="dreamingLoading || !!dreamingError || !dreamingStatus" /></label>
+      <label v-if="draft.dreaming_enabled" class="settings-row settings-row--field"><span class="settings-row__copy"><span class="settings-row__title">时区</span></span><input v-model="draft.timezone" class="settings-field__input" aria-label="时区" :disabled="dreamingLoading || !!dreamingError || !dreamingStatus" /></label>
+      <div class="settings-row">
+        <span class="settings-row__copy"><span class="settings-row__title">每日经验整理状态</span><span class="settings-row__description">{{ dreamingError || "每日经验整理运行情况" }}</span></span>
         <div class="simplified-auto-panel__control">
           <span>{{ dreamingLoading ? "读取中…" : (!draft.dreaming_enabled ? "已关闭" : dreamingStateLabel(dreamingStatus?.state)) }}</span>
           <button
@@ -128,8 +122,8 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
           </button>
         </div>
       </div>
-      <div v-if="draft.dreaming_enabled && dreamingStatus" class="simplified-auto-panel__row"><div><strong>执行时间</strong></div><span>下次 {{ formatDreamingDate(dreamingStatus.next_at) }} · 上次成功 {{ formatDreamingDate(dreamingStatus.last_success) }}<template v-if="dreamingStatus.last_error"> · {{ dreamingStatus.last_error }}</template></span></div>
-      <div class="simplified-auto-panel__row"><div><strong>经验摘要</strong><small>每日经验整理成功后更新</small></div><p class="simplified-auto-panel__experience">{{ experienceError || config.experience?.content || "暂无经验摘要" }}<span v-if="!experienceError && config.experience?.updated_at"> · {{ new Date(config.experience.updated_at).toLocaleString() }}</span></p></div>
+      <div v-if="draft.dreaming_enabled && dreamingStatus" class="settings-row"><span class="settings-row__copy"><span class="settings-row__title">执行时间</span></span><span>下次 {{ formatDreamingDate(dreamingStatus.next_at) }} · 上次成功 {{ formatDreamingDate(dreamingStatus.last_success) }}<template v-if="dreamingStatus.last_error"> · {{ dreamingStatus.last_error }}</template></span></div>
+      <div class="settings-row settings-row--field"><span class="settings-row__copy"><span class="settings-row__title">经验摘要</span><span class="settings-row__description">每日经验整理成功后更新</span></span><p class="simplified-auto-panel__experience">{{ experienceError || config.experience?.content || "暂无经验摘要" }}<span v-if="!experienceError && config.experience?.updated_at"> · {{ new Date(config.experience.updated_at).toLocaleString() }}</span></p></div>
       </fieldset>
       <SettingsSaveBar :status="dirty ? (needsReconcile ? '有未保存的更改 · 自主运行配置已保存、尚未同步' : '有未保存的更改') : (notice || '当前智能体设置。')" :error="error" :saving="saving" :disabled="!loaded || !dirty" @save="save">
         <button v-if="needsReconcile" type="button" class="btn btn--ghost btn--sm" :disabled="saving" @click="reconcile">同步自主运行</button>
@@ -148,55 +142,6 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
   margin: 0;
   padding: 0;
   border: 0;
-}
-
-.simplified-auto-panel__row {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr);
-  gap: 24px;
-  align-items: center;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.simplified-auto-panel__row > div:first-child {
-  display: grid;
-  gap: 3px;
-}
-
-.simplified-auto-panel small {
-  color: var(--color-text-subtle);
-  font: 400 11px/1.45 var(--desktop-font-ui);
-}
-
-.simplified-auto-panel__row strong {
-  color: var(--color-text-muted);
-  font: 500 12.5px/1.4 var(--desktop-font-ui);
-}
-
-.simplified-auto-panel textarea,
-.simplified-auto-panel input:not([type="checkbox"]) {
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 7px 10px;
-  background: var(--color-surface);
-  color: var(--color-text);
-  font: 400 13px/1.4 var(--desktop-font-ui);
-}
-
-.simplified-auto-panel textarea {
-  min-height: 54px;
-  resize: vertical;
-}
-
-.simplified-auto-panel input[type="checkbox"]:not(.settings-switch-input) {
-  width: 17px;
-  height: 17px;
-  margin: 0;
-  accent-color: var(--color-accent);
 }
 
 .simplified-auto-panel__control {
@@ -220,7 +165,7 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
 .simplified-auto-panel__unit {
   flex: 0 0 auto;
   color: var(--color-text-subtle);
-  font: 400 11px/1.4 var(--desktop-font-ui);
+  font: 400 11px/1.4 var(--font-ui);
 }
 
 .simplified-auto-panel__experience {
@@ -232,20 +177,9 @@ onMounted(load); onUnmounted(() => { disposed = true; epoch += 1; saveEpoch += 1
   border-radius: 8px;
   background: var(--color-surface-alt);
   color: var(--color-text-subtle);
-  font: 400 12px/1.5 var(--desktop-font-ui);
+  font: 400 12px/1.5 var(--font-ui);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 640px) {
-  .simplified-auto-panel__row {
-    grid-template-columns: 1fr;
-    gap: 8px;
-    align-items: start;
-  }
-
-  .simplified-auto-panel__control {
-    justify-content: flex-start;
-  }
-}
 </style>

@@ -124,19 +124,3 @@ onBeforeUnmount(() => {
     </div>
   </Teleport>
 </template>
-
-<style>
-.ui-context-menu{position:fixed;z-index:3000;box-sizing:border-box;display:flex;flex-direction:column;max-width:calc(100vw - 16px);padding:4px;overflow-x:hidden;overflow-y:auto;border:1px solid var(--desktop-menu-border, #d7dfe2);border-radius:8px;background:var(--desktop-menu-surface, #fff);box-shadow:var(--desktop-menu-shadow, 0 8px 24px #17212630);color:var(--desktop-menu-text, #3d474b);font-family:var(--font-ui, sans-serif)}
-.ui-context-menu__context{display:grid;gap:3px;min-width:0;padding:6px 8px 7px;border-bottom:1px solid var(--desktop-menu-border, #e4e8ea)}
-.ui-context-menu__context strong,.ui-context-menu__context span{overflow:hidden;text-overflow:ellipsis}
-.ui-context-menu__context strong{color:var(--desktop-menu-muted, #59656a);font-size:11px;font-weight:600;white-space:nowrap}
-.ui-context-menu__context span{display:-webkit-box;max-height:34px;color:var(--desktop-menu-muted, #778186);font-size:10px;line-height:1.4;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:2}
-.ui-context-menu button{display:flex;position:relative;align-items:center;gap:8px;width:100%;min-height:32px;margin-top:2px;padding:4px 8px;border:0;border-radius:5px;background:transparent;color:var(--desktop-menu-text, #3d474b);font:inherit;font-size:12px;line-height:18px;text-align:left;cursor:default}
-.ui-context-menu button:hover:not(:disabled),.ui-context-menu button:focus-visible{outline:0;background:var(--desktop-menu-hover, #eef1f2)}
-.ui-context-menu button.is-danger{color:var(--desktop-menu-danger, #a23c3c)}
-.ui-context-menu button:disabled{color:var(--desktop-menu-muted, #929b9f);cursor:not-allowed}
-.ui-context-menu__icon{display:flex;flex:none;align-items:center;justify-content:center;width:16px;height:16px}
-.ui-context-menu__label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ui-context-menu__summary{margin-left:auto;color:var(--desktop-menu-muted, #8091a3);font-size:10px}
-.ui-context-menu__separator{height:1px;margin:4px 5px;background:var(--desktop-menu-border, #e4e8ea)}
-</style>

@@ -2,6 +2,7 @@
 import { onMounted } from "vue";
 import ConfigPanelShell from "./ConfigPanelShell.vue";
 import UiIcon from "./UiIcon.vue";
+import SettingsDisclosure from "./SettingsDisclosure.vue";
 import { useSetupConfig } from "../composables/useSetupConfig.js";
 
 const { loading, saving, error, statusMessage, dirty, configPath, configWritable, form, load, save } =
@@ -52,13 +53,11 @@ onMounted(load);
   >
     <section class="settings-section">
       <h2 class="settings-section__title">命令输出长度</h2>
-      <p class="settings-section__desc">过长输出会清洗并截断，避免占满上下文。</p>
-      <label class="settings-toggle">
-        <input v-model="form.tools.bash_compress_enabled" type="checkbox" />
-        <span>限制过长输出</span>
+      <label class="settings-row">
+        <span class="settings-row__copy"><span class="settings-row__title">限制过长输出</span><span class="settings-row__description">清洗并截断超过上限的命令输出。</span></span>
+        <input v-model="form.tools.bash_compress_enabled" class="settings-switch-input" type="checkbox" aria-label="限制过长输出" />
       </label>
-      <details class="security-config__advanced">
-        <summary>高级：调整输出上限</summary>
+      <SettingsDisclosure class="security-config__advanced" title="输出上限">
         <div class="setup-config-panel__field-grid">
           <label class="settings-field">
             <span class="settings-field__label">标准输出最大字符</span>
@@ -72,27 +71,25 @@ onMounted(load);
         <button class="btn btn--ghost btn--sm desktop-icon-button" type="button" title="恢复默认上限" aria-label="恢复默认上限" @click="restoreBashCompressDefaults">
           <UiIcon name="refresh-cw" :size="15" />
         </button>
-      </details>
+      </SettingsDisclosure>
     </section>
 
     <section class="settings-section">
       <h2 class="settings-section__title">重复操作提醒</h2>
-      <p class="settings-section__desc">短时间内重复相同工具调用时提示确认。</p>
-      <label class="settings-toggle">
-        <input v-model="form.hooks.duplicate_tool_call_enabled" type="checkbox" />
-        <span>启用重复调用检测</span>
+      <label class="settings-row">
+        <span class="settings-row__copy"><span class="settings-row__title">重复调用检测</span><span class="settings-row__description">短时间内重复相同工具调用时提示确认。</span></span>
+        <input v-model="form.hooks.duplicate_tool_call_enabled" class="settings-switch-input" type="checkbox" aria-label="重复调用检测" />
       </label>
-      <details class="security-config__advanced">
-        <summary>高级：调整检测窗口</summary>
+      <SettingsDisclosure class="security-config__advanced" title="检测窗口">
         <label class="settings-field">
           <span class="settings-field__label">检测窗口（秒）</span>
           <input v-model.number="form.hooks.duplicate_tool_call_window_seconds" class="settings-field__input" type="number" min="1" />
         </label>
-      </details>
+      </SettingsDisclosure>
     </section>
 
-    <details class="settings-section security-config__advanced">
-      <summary class="settings-section__title">高级编码设置</summary>
+    <section class="settings-section security-config__advanced">
+      <SettingsDisclosure title="编码设置">
       <p class="settings-section__desc">命令输出与文件读写的默认字节编码；通常保持 UTF-8。</p>
       <div class="setup-config-panel__field-grid">
         <label class="settings-field">
@@ -104,7 +101,8 @@ onMounted(load);
           <input v-model="form.tools.file_encoding" class="settings-field__input" type="text" placeholder="utf-8" autocomplete="off" />
         </label>
       </div>
-    </details>
+      </SettingsDisclosure>
+    </section>
   </ConfigPanelShell>
 </template>
 
@@ -112,14 +110,5 @@ onMounted(load);
 .security-config__advanced {
   margin-top: 12px;
 }
-
-.security-config__advanced > summary {
-  cursor: pointer;
-  color: var(--color-text-muted);
-  font-size: 13px;
-}
-
-.security-config__advanced .setup-config-panel__field-grid {
-  margin-top: 12px;
-}
+.security-config__advanced .setup-config-panel__field-grid { margin-top: 12px; }
 </style>

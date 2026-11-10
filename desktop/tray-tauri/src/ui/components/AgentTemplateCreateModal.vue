@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, ref, watch } from "vue";
+import { nextTick, reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
 import AgentSettingsForm from "./AgentSettingsForm.vue";
 import UiIcon from "./UiIcon.vue";
@@ -15,6 +15,9 @@ const saving = ref(false);
 const error = ref("");
 const showAdvanced = ref(false);
 const llmProfiles = ref([]);
+const dialogRoot = ref(null);
+const templateNameInput = ref(null);
+let openerElement = null;
 const meta = reactive({
   displayName: "",
   description: "",
@@ -93,21 +96,63 @@ function onBackdropClick(event) {
   if (event.target === event.currentTarget && !saving.value) emit("close");
 }
 
+function focusableElements() {
+  return [...(dialogRoot.value?.querySelectorAll(
+    'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+  ) || [])].filter((element) => !element.closest("[inert], [aria-hidden='true']"));
+}
+
+function onDialogKeydown(event) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!saving.value) emit("close");
+    return;
+  }
+  if (event.key !== "Tab") return;
+
+  const focusables = focusableElements();
+  if (!focusables.length) {
+    event.preventDefault();
+    dialogRoot.value?.focus();
+    return;
+  }
+  const first = focusables[0];
+  const last = focusables.at(-1);
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRoot.value)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 watch(
   () => props.open,
-  (visible) => {
+  async (visible, wasVisible) => {
     if (visible) {
+      openerElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       resetForm();
       void loadProfiles();
+      await nextTick();
+      if (props.open) templateNameInput.value?.focus();
+      return;
+    }
+    if (wasVisible) {
+      await nextTick();
+      if (openerElement?.isConnected) openerElement.focus();
+      openerElement = null;
     }
   },
+  { immediate: true },
 );
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="agent-create-overlay" @click="onBackdropClick">
-      <section class="agent-create-modal" role="dialog" aria-modal="true" aria-labelledby="agent-template-create-title">
+    <div v-if="open" class="ui-dialog-backdrop agent-create-overlay" @click="onBackdropClick">
+      <section ref="dialogRoot" class="ui-dialog agent-create-modal" role="dialog" aria-modal="true" aria-labelledby="agent-template-create-title" tabindex="-1" @keydown="onDialogKeydown">
         <header class="agent-create-modal__header">
           <div>
             <h2 id="agent-template-create-title" class="agent-create-modal__title">新建智能体模板</h2>
@@ -115,28 +160,28 @@ watch(
               保存为可复用蓝图，创建智能体时可一键预填
             </p>
           </div>
-          <button type="button" class="agent-create-modal__close" aria-label="关闭" :disabled="saving" @click="emit('close')">
+          <button type="button" class="btn btn--ghost btn--sm desktop-icon-button" aria-label="关闭" :disabled="saving" @click="emit('close')">
             <UiIcon name="close" :size="16" />
           </button>
         </header>
 
         <div class="agent-create-modal__body">
           <section class="agent-template-meta">
-            <label class="agent-template-meta__field agent-template-meta__field--wide">
-              <span>显示名称</span>
+            <label class="settings-field agent-template-meta__field agent-template-meta__field--wide">
+                <span class="settings-field__label">模板名称</span>
               <input
+                ref="templateNameInput"
                 v-model="meta.displayName"
                 type="text"
-                class="agent-template-meta__input"
+                class="settings-field__input"
                 placeholder="例如：代码助手模板"
-                autofocus
               />
             </label>
-            <label class="agent-template-meta__field agent-template-meta__field--wide">
-              <span>描述</span>
+            <label class="settings-field agent-template-meta__field agent-template-meta__field--wide">
+              <span class="settings-field__label">描述</span>
               <textarea
                 v-model="meta.description"
-                class="agent-template-meta__input agent-template-meta__input--area"
+                class="settings-field__input settings-field__input--multiline"
                 rows="2"
                 placeholder="可选，说明这个模板适合做什么"
               />
@@ -179,8 +224,6 @@ watch(
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(2px);
 }
 
 .agent-create-modal {
@@ -188,10 +231,7 @@ watch(
   max-height: min(88vh, 900px);
   display: flex;
   flex-direction: column;
-  border-radius: 12px;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-lg);
+  padding: 0;
   overflow: hidden;
 }
 
@@ -224,23 +264,6 @@ watch(
   color: var(--color-text-subtle);
 }
 
-.agent-create-modal__close {
-  width: 32px;
-  height: 32px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 22px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.agent-create-modal__close:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text);
-}
-
 .agent-create-modal__body {
   flex: 1 1 auto;
   min-height: 0;
@@ -261,27 +284,10 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 12px;
-  color: var(--color-text-muted);
 }
 
 .agent-template-meta__field--wide {
   grid-column: 1 / -1;
-}
-
-.agent-template-meta__input {
-  width: 100%;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-muted);
-  color: var(--color-text);
-  font-size: 13px;
-}
-
-.agent-template-meta__input--area {
-  resize: vertical;
-  min-height: 56px;
 }
 
 .agent-template-meta__hint {

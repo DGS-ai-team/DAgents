@@ -2,6 +2,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SecurityConfigPanel from "./SecurityConfigPanel.vue";
+import SettingsDisclosure from "./SettingsDisclosure.vue";
 import * as api from "../api/node.js";
 
 vi.mock("../api/node.js", () => ({ getSetupConfig: vi.fn(), patchSetupConfig: vi.fn() }));
@@ -32,14 +33,14 @@ describe("SecurityConfigPanel advanced controls", () => {
     const wrapper = mount(SecurityConfigPanel);
     await flushPromises();
 
-    const advanced = wrapper.findAll("details");
+    const advanced = wrapper.findAllComponents(SettingsDisclosure);
     expect(advanced).toHaveLength(3);
-    expect(advanced.every((item) => !item.element.open)).toBe(true);
-    expect(wrapper.findAll('.settings-toggle input[type="checkbox"]')).toHaveLength(2);
+    expect(advanced.every((item) => item.get('[role="button"]').attributes("aria-expanded") === "false")).toBe(true);
+    expect(wrapper.findAll('.settings-row > input[type="checkbox"]')).toHaveLength(2);
 
-    await advanced[0].get("summary").trigger("click");
-    await advanced[1].get("summary").trigger("click");
-    await advanced[2].get("summary").trigger("click");
+    await advanced[0].get('[role="button"]').trigger("click");
+    await advanced[1].get('[role="button"]').trigger("click");
+    await advanced[2].get('[role="button"]').trigger("click");
     const outputLimit = wrapper.get('input[type="number"][min="1"]');
     await outputLimit.setValue("24000");
     await wrapper.get(".setup-config-panel__actions button").trigger("click");

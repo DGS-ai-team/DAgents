@@ -1,0 +1,604 @@
+/* Shared control primitives. Layout belongs to the consuming page/component. */
+
+/* Buttons */
+.btn {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--control-height);
+  padding: 6px 14px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--control-radius);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-size-secondary);
+  line-height: 18px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease,
+    color 120ms ease, box-shadow 120ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--color-surface-hover);
+}
+
+.btn:active:not(:disabled) {
+  background: var(--color-surface-muted);
+}
+
+.btn:focus-visible,
+.desktop-icon-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  border-color: var(--action-primary);
+  background: var(--action-primary);
+  color: #fff;
+  box-shadow: none;
+}
+
+.btn--primary:hover:not(:disabled) {
+  border-color: var(--color-primary-strong);
+  background: var(--color-primary-strong);
+  color: #fff;
+}
+
+.btn--danger {
+  border-color: var(--action-danger);
+  background: var(--action-danger);
+  color: var(--color-text-invert);
+}
+
+.btn--danger:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+.btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  color: var(--text-primary);
+}
+
+.btn--sm {
+  min-height: var(--control-height-compact);
+  padding: 4px 10px;
+  font-size: var(--font-size-caption);
+  line-height: 18px;
+}
+
+.desktop-icon-button {
+  box-sizing: border-box;
+  display: inline-grid;
+  width: var(--control-height-emphasis);
+  height: var(--control-height-emphasis);
+  min-height: var(--control-height-emphasis);
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  line-height: 0;
+  text-align: center;
+}
+
+.desktop-icon-button:not(.btn) {
+  border: 1px solid transparent;
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease,
+    color 120ms ease;
+}
+
+.desktop-icon-button:not(.btn):hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  color: var(--text-primary);
+}
+
+.desktop-icon-button--toolbar {
+  width: var(--control-height-compact);
+  height: var(--control-height-compact);
+  min-height: var(--control-height-compact);
+}
+
+/* Form rows and controls */
+.settings-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.settings-field__label,
+.settings-row__title {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-field__label--error {
+  color: var(--status-error);
+}
+
+.settings-field__input {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 520px;
+  min-height: var(--control-height-emphasis);
+  padding: 8px 10px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--control-radius);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.settings-field__input--multiline {
+  min-height: 4.5em;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+textarea.settings-field__input { line-height: 1.5; }
+
+.settings-field__input:focus-visible {
+  border-color: var(--color-primary-strong);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.settings-field__input:disabled {
+  border-color: var(--border-subtle);
+  background: var(--color-surface-muted);
+  color: var(--text-tertiary);
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.settings-field__input[aria-invalid="true"] {
+  border-color: var(--status-error);
+}
+
+.settings-field__hint {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-caption);
+  line-height: 1.4;
+}
+
+.settings-field__error {
+  display: block;
+  margin-top: 3px;
+  color: var(--status-error);
+  font-size: var(--font-size-caption);
+  line-height: 1.4;
+}
+
+select.settings-field__input {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none'%3E%3Cpath d='M4.5 6.5 8 10l3.5-3.5' stroke='%236b7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 14px;
+}
+
+:root:not([data-theme="light"]) select.settings-field__input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none'%3E%3Cpath d='M4.5 6.5 8 10l3.5-3.5' stroke='%239ca3af' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* Switches are explicit; multi-select checkboxes keep their native shape. */
+.settings-switch-input,
+.settings-toggle input[type="checkbox"]:not(.form-checkbox) {
+  box-sizing: border-box;
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 22px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.settings-switch-input::after,
+.settings-toggle input[type="checkbox"]:not(.form-checkbox)::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 20%);
+  transition: transform 160ms ease, background-color 160ms ease;
+}
+
+.settings-switch-input:checked,
+.settings-toggle input[type="checkbox"]:not(.form-checkbox):checked {
+  border-color: var(--action-primary);
+  background: var(--action-primary);
+}
+
+.settings-switch-input:checked::after,
+.settings-toggle input[type="checkbox"]:not(.form-checkbox):checked::after {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+.settings-switch-input:hover:not(:disabled),
+.settings-toggle input[type="checkbox"]:not(.form-checkbox):hover:not(:disabled) {
+  border-color: var(--color-primary-strong);
+}
+
+.settings-switch-input:focus-visible,
+.settings-toggle input[type="checkbox"]:not(.form-checkbox):focus-visible,
+.form-checkbox:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.settings-switch-input:disabled,
+.settings-toggle input[type="checkbox"]:not(.form-checkbox):disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.form-checkbox,
+.settings-toggle input[type="checkbox"].form-checkbox {
+  box-sizing: border-box;
+  appearance: auto;
+  -webkit-appearance: checkbox;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--action-primary);
+  cursor: pointer;
+}
+
+.settings-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--action-primary);
+}
+
+/* Labels remain layout wrappers; settings rows may override display/grid. */
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.settings-toggle--disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.settings-toggle__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.badge--beta {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-strong);
+  vertical-align: middle;
+}
+
+/* Dialog and popover surfaces */
+.ui-dialog,
+.dialog,
+.panel-overlay__card {
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-dialog);
+}
+
+.ui-dialog,
+.dialog {
+  border: 1px solid var(--border-default);
+  background: var(--surface-dialog);
+  color: var(--text-primary);
+}
+
+.ui-dialog {
+  min-width: min(360px, calc(100vw - 32px));
+  padding: var(--space-5);
+}
+
+.ui-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.ui-dialog__body {
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.ui-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.ui-popover {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--surface-popover);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-popover);
+}
+
+.dialog-scrim,
+.panel-overlay,
+.ui-dialog-backdrop {
+  background: var(--surface-overlay);
+}
+
+/* Select trigger and its teleported listbox use the shared control tokens. */
+.ui-select__trigger {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--control-height-emphasis);
+  padding: 8px 12px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--control-radius);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms ease, box-shadow 150ms ease,
+    background-color 150ms ease;
+}
+
+.ui-select--compact .ui-select__trigger {
+  min-height: var(--control-height);
+  padding-block: 5px;
+  padding-inline: 10px;
+}
+
+.ui-select--open .ui-select__trigger,
+.ui-select__trigger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-primary-strong) 40%, var(--border-control));
+}
+
+.ui-select__trigger:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ui-select__trigger[aria-invalid="true"] {
+  border-color: var(--status-error);
+}
+
+.ui-select__trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ui-select__value {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-select__value--placeholder { color: var(--text-tertiary); }
+.ui-select__chevron { flex: 0 0 auto; color: var(--text-secondary); opacity: 0.85; transition: transform 150ms ease; }
+.ui-select--open .ui-select__chevron { transform: rotate(180deg); }
+
+.ui-select__menu {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  background: var(--surface-popover);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+}
+
+.ui-select__list { min-height: 0; overflow: auto; }
+.ui-select__search { display: flex; flex: none; align-items: center; gap: 8px; padding: 5px 7px 9px; margin-bottom: 4px; border-bottom: 1px solid var(--border-default); color: var(--text-secondary); }
+.ui-select__search input { width: 100%; min-width: 0; padding: 3px 0; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: inherit; font-size: 13px; box-shadow: none; }
+.ui-select__search input::placeholder { color: var(--text-tertiary); }
+.ui-select__search:focus-within { box-shadow: 0 1px 0 var(--text-secondary); }
+.ui-select__option-copy { display: grid; min-width: 0; gap: 3px; }
+.ui-select__option-description { overflow: hidden; color: var(--text-secondary); font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+
+.ui-select__empty {
+  margin: 0;
+  padding: 12px 10px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.ui-select__option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ui-select__option:hover:not(:disabled),
+.ui-select__option:focus-visible,
+.ui-select__option--focused {
+  outline: 0;
+  background: var(--color-surface-hover);
+}
+
+.ui-select__option--active {
+  background: color-mix(in srgb, var(--color-primary-strong) 10%, transparent);
+  color: var(--text-primary);
+}
+
+.ui-select__option:disabled { opacity: 0.45; cursor: not-allowed; }
+.ui-select__option-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-select__option-check { flex: 0 0 auto; color: var(--color-primary-strong); font-size: 12px; }
+
+/* Context menus use the same popover and neutral hover surface. */
+.ui-context-menu {
+  position: fixed;
+  z-index: 3000;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-width: calc(100vw - 16px);
+  padding: 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-popover);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+}
+
+.ui-context-menu__context { display: grid; gap: 3px; min-width: 0; padding: 6px 8px 7px; border-bottom: 1px solid var(--border-subtle); }
+.ui-context-menu__context strong,
+.ui-context-menu__context span { overflow: hidden; text-overflow: ellipsis; }
+.ui-context-menu__context strong { color: var(--text-secondary); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.ui-context-menu__context span { display: -webkit-box; max-height: 34px; color: var(--text-tertiary); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.ui-context-menu button { position: relative; display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--control-height); margin-top: 2px; padding: 4px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-primary); font: inherit; font-size: 12px; line-height: 18px; text-align: left; cursor: default; }
+.ui-context-menu button:hover:not(:disabled),
+.ui-context-menu button:focus-visible { outline: 0; background: var(--color-surface-hover); }
+.ui-context-menu button.is-danger { color: var(--action-danger); }
+.ui-context-menu button:disabled { color: var(--text-tertiary); cursor: not-allowed; }
+.ui-context-menu__icon { display: flex; flex: none; align-items: center; justify-content: center; width: 16px; height: 16px; }
+.ui-context-menu__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-context-menu__summary { margin-left: auto; color: var(--text-tertiary); font-size: 10px; }
+.ui-context-menu__separator { height: 1px; margin: 4px 5px; background: var(--border-subtle); }
+
+/* Legacy about/confirm dialog surface; new dialogs may use the ui-dialog API. */
+.dialog {
+  position: relative;
+  width: min(420px, calc(100vw - 32px));
+  padding: 22px;
+}
+
+.dialog h2 { margin: 0 0 15px; font-size: 17px; }
+.dialog p { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+
+.dialog-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  line-height: 0;
+  cursor: pointer;
+}
+
+.dialog-close:hover { background: var(--color-surface-hover); color: var(--text-primary); }
+.dialog-close:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.desktop-shell button:has(> .ui-icon:only-child),
+.desktop-shell button:has(> .icon-mask:only-child),
+.desktop-shell button:has(> .window-control-icon:only-child) {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  line-height: 0;
+  text-align: center;
+}
+
+.desktop-icon-button:not(.btn):disabled {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.desktop-shell button:has(> .ui-icon:only-child) > .ui-icon,
+.desktop-shell button:has(> .icon-mask:only-child) > .icon-mask,
+.desktop-shell button:has(> .window-control-icon:only-child) > .window-control-icon {
+  align-self: center;
+  justify-self: center;
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .settings-switch-input,
+  .settings-toggle input[type="checkbox"],
+  .ui-select__trigger,
+  .ui-select__chevron { transition-duration: 1ms; }
+}

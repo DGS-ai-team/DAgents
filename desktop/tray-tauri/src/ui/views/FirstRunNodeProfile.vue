@@ -639,27 +639,6 @@ async function submit() {
   min-width: 108px;
 }
 
-.first-run__footer :deep(.btn--primary) {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: #ffffff;
-}
-
-.first-run__footer :deep(.btn--primary:hover:not(:disabled)) {
-  background: var(--color-primary-strong);
-  border-color: var(--color-primary-strong);
-  color: #ffffff;
-}
-
-.first-run__footer :deep(.btn--ghost) {
-  color: var(--color-text-muted);
-}
-
-.first-run__footer :deep(.btn--ghost:hover:not(:disabled)) {
-  color: var(--color-text);
-  background: var(--color-surface-hover);
-}
-
 .first-run__progress-wrap {
   display: flex;
   flex-direction: column;
@@ -713,7 +692,6 @@ async function submit() {
 
 .first-run__body :deep(.settings-field__input) {
   max-width: none;
-  background-color: var(--color-input);
 }
 
 .first-run__body :deep(.ui-select) {

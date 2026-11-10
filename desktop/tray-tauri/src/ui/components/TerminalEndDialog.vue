@@ -24,7 +24,7 @@ function onKeydown(event) {
     <section ref="root" class="dialog terminal-end-dialog" role="alertdialog" aria-modal="true" aria-labelledby="terminal-end-title" tabindex="-1" @keydown="onKeydown">
       <h2 id="terminal-end-title">结束终端？</h2>
       <p>结束「{{ terminalName }}」会销毁 Node 上的终端会话并中断其中运行的命令。当前 Agent 或模型也可能正在使用它。</p>
-      <div class="dialog-actions"><button @click="emit('cancel')">取消</button><button class="danger" @click="emit('confirm')">结束终端</button></div>
+      <div class="dialog-actions"><button class="btn btn--ghost btn--sm" type="button" @click="emit('cancel')">取消</button><button class="btn btn--danger btn--sm" type="button" @click="emit('confirm')">结束终端</button></div>
     </section>
   </div>
 </template>
