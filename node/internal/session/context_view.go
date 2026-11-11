@@ -156,7 +156,7 @@ func cloneContextMessages(messages []llm.Message) []llm.Message {
 				clone.ContentParts[partIndex].ImageURL = &imageCopy
 			}
 		}
-		clone.FileReferences = append([]llm.FileReference(nil), message.FileReferences...)
+		clone.FileReferences = llm.CloneFileReferences(message.FileReferences)
 		clone.ToolCalls = append([]llm.ToolCall(nil), message.ToolCalls...)
 		if message.Source != nil {
 			source := *message.Source

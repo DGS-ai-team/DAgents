@@ -1,7 +1,3 @@
-@import "./tokens.css";
-@import "./layout.css";
-
-
 /* ---------- panel ---------- */
 
 .panel {
@@ -38,19 +34,6 @@
   color: var(--color-text);
 }
 
-/* Config shells that act as the page header use the same scale as other settings pages. */
-.settings-page.settings-embedded > .setup-config-panel > .panel__header .panel__title {
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-.settings-page.settings-embedded > .setup-config-panel > .panel__header .setup-config-panel__subtitle {
-  margin-top: 3px;
-  font-size: 13px;
-  line-height: 1.4;
-}
-
 .panel__subtitle {
   font-size: 12px;
   color: var(--color-text-subtle);
@@ -62,244 +45,7 @@
   min-height: 0;
 }
 
-/* ---------- buttons ---------- */
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: var(--control-height);
-  padding: 6px 14px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  color: var(--color-text);
-  cursor: pointer;
-  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease,
-    box-shadow 0.12s ease;
-}
-
-.btn:hover:not(:disabled) {
-  border-color: var(--color-border-strong);
-  background: var(--color-surface-hover);
-}
-
-.btn:active:not(:disabled) {
-  background: var(--color-surface-muted);
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn--primary {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: #ffffff;
-  box-shadow: none;
-}
-
-.btn--primary:hover:not(:disabled) {
-  background: var(--color-primary-strong);
-  border-color: var(--color-primary-strong);
-  color: #ffffff;
-}
-
-.btn--danger {
-  background: var(--color-danger);
-  border-color: var(--color-danger);
-  color: var(--color-text-invert);
-}
-
-.btn--danger:hover:not(:disabled) {
-  filter: brightness(0.95);
-}
-
-.btn--ghost {
-  background: transparent;
-  border-color: transparent;
-  color: var(--color-text-muted);
-}
-
-.btn--ghost:hover:not(:disabled) {
-  background: var(--color-surface-hover);
-  color: var(--color-text);
-}
-
-.btn--sm {
-  min-height: 28px;
-  padding: 4px 10px;
-  font-size: 12px;
-}
-
-.btn.desktop-icon-button {
-  width: 36px;
-  height: 36px;
-  min-height: 36px;
-  padding: 0;
-  flex: 0 0 auto;
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 7px;
-  border-radius: 4px;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-}
-
-.badge--beta {
-  background: var(--color-primary-soft);
-  color: var(--color-primary-strong);
-  vertical-align: middle;
-}
-
-.settings-toggle__label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.settings-section__title .badge {
-  margin-left: 8px;
-  vertical-align: middle;
-}
-
-/* ---------- approval tool bubble (inline in chat stream) ---------- */
-
-.approval-bubble {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-sm);
-}
-
-.approval-bubble--needs-action {
-  border-left: 3px solid var(--color-warning, #d97706);
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--color-warning, #d97706) 12%, var(--color-surface)),
-    var(--color-surface) 48px
-  );
-}
-
-.approval-bubble--needs-action.approval-bubble--risk-high {
-  border-left-color: #dc2626;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, #dc2626 12%, var(--color-surface)),
-    var(--color-surface) 48px
-  );
-}
-
-.approval-bubble--needs-action.approval-bubble--risk-medium {
-  border-left-color: #d97706;
-}
-
-.approval-bubble .tool-exec-bubble__source {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-
-.approval-bubble__title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.approval-bubble__name {
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--color-text);
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.approval-bubble__intro {
-  margin: 0;
-  font-size: 12.5px;
-  color: var(--color-text-muted);
-  line-height: 1.55;
-}
-
-.approval-bubble__bulk-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 10px;
-  border: 1px dashed var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-muted);
-}
-
-.approval-bubble__bulk-actions--footer {
-  margin-top: 4px;
-  border-top: 1px dashed var(--color-border);
-  border-left: 0;
-  border-right: 0;
-  border-bottom: 0;
-  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-  background: var(--color-surface-muted);
-}
-
-.approval-bubble__bulk-text {
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
-.approval-tool-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.approval-tool-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 4px 0;
-}
-
-.approval-tool-item + .approval-tool-item {
-  border-top: 1px solid var(--color-border);
-  margin-top: 8px;
-  padding-top: 10px;
-}
-
-.approval-tool-item__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.approval-tool-item__inline-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.approval-bubble__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding-top: 4px;
-  border-top: 1px dashed var(--color-border);
-}
+/* Shared control primitives are defined in styles/controls.css. */
 
 /* ---------- main chat ---------- */
 
@@ -400,6 +146,30 @@
   font-size: 13px;
   line-height: 1.5;
 }
+
+.chat__turn-error > p { margin: 0; }
+.chat__turn-error-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 7px;
+}
+.chat__turn-error-model { min-width: 0; color: var(--color-text-muted); font-size: 11px; overflow-wrap: anywhere; }
+.chat__turn-error-actions { display: flex; flex: 0 0 auto; gap: 4px; }
+.chat__turn-error-action {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.chat__turn-error-action:hover { background: var(--color-surface-muted); color: var(--color-text); }
+.chat__turn-error-action:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
 :root[data-theme="light"] .chat__stream {
   background: transparent;
@@ -722,11 +492,14 @@
   padding-bottom: 18px;
 }
 
-.settings-section + .settings-section,
-.settings-embedded .settings-section + .settings-section {
-  margin-top: 4px;
+.settings-section + .settings-section {
+  margin-top: 8px;
   padding-top: 18px;
   border-top: 1px solid var(--border-subtle);
+}
+
+.settings-embedded .settings-section + .settings-section {
+  margin-top: 4px;
 }
 
 .settings-layout__main .settings-field__input {
@@ -739,25 +512,6 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-}
-
-.settings-embedded-panel .setup-config-panel__field-grid .settings-field {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr);
-  align-items: center;
-  gap: 24px;
-  margin: 0;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.settings-embedded-panel .setup-config-panel__field-grid .settings-field:last-child {
-  border-bottom: 0;
-}
-
-.settings-embedded-panel .setup-config-panel__field-grid .settings-field__input {
-  justify-self: stretch;
-  max-width: 100%;
 }
 
 /* Standalone switches and fields use the same setting-row treatment as grid
@@ -777,32 +531,83 @@
   grid-row: 1;
 }
 
+/* Shared settings row. Legacy field wrappers and semantic rows use this one
+   layout declaration while templates migrate to `.settings-row`. */
+.settings-embedded-panel .setup-config-panel__field-grid .settings-field,
 .settings-embedded-panel .settings-field--stack,
-.settings-embedded-panel .settings-section > .settings-field {
+.settings-embedded-panel .settings-section > .settings-field,
+.settings-row,
+.settings-field.settings-row,
+.settings-toggle.settings-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
   align-items: center;
   gap: 24px;
+  min-width: 0;
   margin: 0;
   padding: 14px 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.settings-embedded-panel .settings-field--stack .settings-field__input,
-.settings-embedded-panel .settings-section > .settings-field .settings-field__input {
+.settings-embedded-panel .setup-config-panel__field-grid .settings-field:last-child,
+.settings-embedded-panel .settings-field--stack:last-child,
+.settings-embedded-panel .settings-section > .settings-field:last-child,
+.settings-row:last-child,
+.settings-field.settings-row:last-child,
+.settings-toggle.settings-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-row__copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.settings-row__description {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-row--field .settings-field__input {
+  justify-self: stretch;
+  width: 100%;
   max-width: 100%;
 }
 
-@media (max-width: 640px) {
-  .settings-embedded-panel .setup-config-panel__field-grid .settings-field {
+.settings-row > .ui-select,
+.settings-row > .settings-row__control > .ui-select {
+  width: 100%;
+  max-width: none;
+}
+
+.settings-row > .settings-row__control {
+  min-width: 0;
+  width: 100%;
+}
+
+.settings-row > .settings-switch-input {
+  justify-self: end;
+}
+
+@media (max-width: 900px) {
+  .settings-embedded-panel .setup-config-panel__field-grid .settings-field,
+  .settings-embedded-panel .settings-field--stack,
+  .settings-embedded-panel .settings-section > .settings-field,
+  .settings-row.settings-row--field,
+  .settings-field.settings-row--field,
+  .settings-toggle.settings-row--field {
     grid-template-columns: 1fr;
     gap: 8px;
   }
 
-  .settings-embedded-panel .settings-field--stack,
-  .settings-embedded-panel .settings-section > .settings-field {
-    grid-template-columns: 1fr;
-    gap: 8px;
+  .settings-row:not(.settings-row--field),
+  .settings-field.settings-row:not(.settings-row--field),
+  .settings-toggle.settings-row:not(.settings-row--field) {
+    grid-template-columns: 1fr auto;
+    gap: 12px;
   }
 }
 
@@ -860,6 +665,11 @@
   font-weight: 600;
 }
 
+.settings-section__title .badge {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
 .settings-section__desc {
   margin: 0 0 12px;
   font-size: var(--font-size-secondary);
@@ -869,129 +679,6 @@
 
 .settings-section__head + .settings-section__desc {
   margin-top: 0;
-}
-
-.settings-toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13.5px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.settings-toggle--disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.settings-toggle input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--color-primary);
-}
-
-/* Configuration booleans use a compact switch so every settings surface has
-   the same affordance. Selection lists keep their native checkbox semantics. */
-.settings-toggle input[type="checkbox"],
-.settings-switch-input {
-  appearance: none;
-  -webkit-appearance: none;
-  position: relative;
-  display: inline-block;
-  flex: 0 0 auto;
-  width: 38px;
-  height: 22px;
-  margin: 0;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 999px;
-  background: var(--color-surface-muted);
-  cursor: pointer;
-  transition: background-color 0.16s ease, border-color 0.16s ease,
-    box-shadow 0.16s ease;
-}
-
-.settings-toggle input[type="checkbox"]::after,
-.settings-switch-input::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--color-text-subtle);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 20%);
-  transition: transform 0.16s ease, background-color 0.16s ease;
-}
-
-.settings-toggle input[type="checkbox"]:checked,
-.settings-switch-input:checked {
-  border-color: var(--color-primary);
-  background: var(--color-primary);
-}
-
-.settings-toggle input[type="checkbox"]:checked::after,
-.settings-switch-input:checked::after {
-  transform: translateX(16px);
-  background: #fff;
-}
-
-.settings-toggle input[type="checkbox"]:hover:not(:disabled),
-.settings-switch-input:hover:not(:disabled) {
-  border-color: var(--color-primary-strong);
-}
-
-.settings-toggle input[type="checkbox"]:focus-visible,
-.settings-switch-input:focus-visible {
-  outline: 2px solid var(--color-primary-soft);
-  outline-offset: 2px;
-}
-
-.settings-toggle input[type="checkbox"]:disabled,
-.settings-switch-input:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.settings-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.settings-field__label {
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--color-text-muted);
-}
-
-.settings-field__input {
-  width: 100%;
-  max-width: 520px;
-  padding: 8px 10px;
-  font-size: 13px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface);
-  color: inherit;
-}
-
-select.settings-field__input {
-  appearance: none;
-  -webkit-appearance: none;
-  box-sizing: border-box;
-  min-height: 38px;
-  padding: 8px 36px 8px 12px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none'%3E%3Cpath d='M4.5 6.5 8 10l3.5-3.5' stroke='%236b7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 14px;
-}
-
-:root[data-theme="dark"] select.settings-field__input {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none'%3E%3Cpath d='M4.5 6.5 8 10l3.5-3.5' stroke='%239ca3af' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .setup-config-panel .panel__header {
@@ -1056,19 +743,6 @@ select.settings-field__input {
 
 .setup-config-panel__status {
   color: var(--color-primary-strong);
-}
-
-.setup-config-panel__toggles {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.setup-config-panel__toggles--row {
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 16px 24px;
-  margin-top: 12px;
 }
 
 .setup-config-panel__field-grid,
@@ -1211,12 +885,6 @@ select.settings-field__input {
   }
 }
 
-.btn--compact {
-  padding: 4px 8px;
-  font-size: 12px;
-  min-height: 28px;
-}
-
 .settings-section--llm {
   padding-bottom: 24px;
   margin-bottom: 8px;
@@ -1243,10 +911,6 @@ select.settings-field__input {
   max-width: none;
 }
 
-.settings-section + .settings-section {
-  margin-top: 8px;
-}
-
 .settings-section--standalone {
   margin-top: 16px;
   padding: 16px 0 8px;
@@ -1261,14 +925,6 @@ select.settings-field__input {
 
 .settings-section--debug .settings-section__desc {
   margin-bottom: 12px;
-}
-
-.settings-field__hint {
-  display: block;
-  margin-top: 3px;
-  color: var(--text-tertiary);
-  font-size: 12px;
-  line-height: 1.4;
 }
 
 .context-settings__details {
@@ -3304,47 +2960,6 @@ select.settings-field__input {
   cursor: default;
 }
 
-.approval-action-btn {
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  color: var(--color-text);
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 500;
-  padding: 5px 10px;
-  cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
-}
-
-.approval-action-btn--approve {
-  border-color: #86efac;
-  background: #f0fdf4;
-  color: #166534;
-}
-
-.approval-action-btn--reject {
-  border-color: #fca5a5;
-  background: #fef2f2;
-  color: #991b1b;
-}
-
-.approval-action-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.approval-action-btn--approve:hover:not(:disabled) {
-  border-color: var(--color-success);
-  color: var(--color-success);
-  background: var(--color-success-soft);
-}
-
-.approval-action-btn--reject:hover:not(:disabled) {
-  border-color: var(--color-danger);
-  color: var(--color-danger);
-  background: var(--color-danger-soft);
-}
-
 /* ---------- composer toolbar ---------- */
 
 .composer-toolbar {
@@ -3407,7 +3022,17 @@ select.settings-field__input {
 }
 
 .composer-toolbar__trigger-label {
+  display: block;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.composer-toolbar__trigger-label > span {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3470,12 +3095,22 @@ select.settings-field__input {
   color: var(--color-primary-strong);
 }
 
-.composer-toolbar__option-label {
+.composer-toolbar__option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.composer-toolbar__option-model,
+.composer-toolbar__option-profile {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.composer-toolbar__option-model { font-weight: 500; }
+.composer-toolbar__option-profile { color: var(--color-text-subtle); font-size: 10px; font-weight: 400; }
 
 .composer-toolbar__option-check {
   flex: 0 0 auto;

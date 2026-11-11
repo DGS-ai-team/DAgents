@@ -111,9 +111,7 @@ type Orchestrator struct {
 	contextInjectionBuilder ContextInjectionBuilder
 	lifecycleMetadata       func(sessionID string) map[string]any
 	lifecycleCommand        LifecycleCommandSink
-	toolBudgetCheck         func(sessionID string) (bool, string)
-	toolRetryCheck          func(sessionID string) (bool, string)
-	modelRetryCheck         func(sessionID string) (bool, string)
+	toolBudgetCheck         func(sessionID, toolCallID string) (bool, string)
 	executionFence          ExecutionFence
 	toolExecutionStatus     ToolExecutionStatusReader
 
@@ -395,7 +393,7 @@ func (o *Orchestrator) SetLifecycleCommandSink(fn LifecycleCommandSink) {
 // SetToolBudgetCheck attaches the runtime-owned preflight for a ToolBatch.
 // The callback runs after ToolCall facts are recorded but before any tool side
 // effect starts, preserving the durable proposed-before-executed invariant.
-func (o *Orchestrator) SetToolBudgetCheck(fn func(sessionID string) (bool, string)) {
+func (o *Orchestrator) SetToolBudgetCheck(fn func(sessionID, toolCallID string) (bool, string)) {
 	if o == nil {
 		return
 	}
@@ -413,25 +411,6 @@ func (o *Orchestrator) SetToolRetryLimit(limit int) {
 		limit = 0
 	}
 	o.toolRetryLimit = limit
-}
-
-// SetToolRetryCheck attaches the runtime-owned lifecycle budget preflight for
-// a retry edge. It is separate from the initial tool-call check because a
-// retry consumes a different budget dimension.
-func (o *Orchestrator) SetToolRetryCheck(fn func(sessionID string) (bool, string)) {
-	if o == nil {
-		return
-	}
-	o.toolRetryCheck = fn
-}
-
-// SetModelRetryCheck applies Turn-level token/time/cost limits before another
-// provider attempt is opened inside the current Step.
-func (o *Orchestrator) SetModelRetryCheck(fn func(sessionID string) (bool, string)) {
-	if o == nil {
-		return
-	}
-	o.modelRetryCheck = fn
 }
 
 func (o *Orchestrator) emitLifecycleCommand(ctx context.Context, sessionID string, command TurnCommand) error {
@@ -482,6 +461,15 @@ func (o *Orchestrator) RunHumanMessageTurn(
 	o.resetAgentPrompt(sessionID)
 	if userMsg.Role == "" {
 		userMsg.Role = "user"
+	}
+	if userMsg.Role == "user" {
+		if execution, ok := ExecutionContextFromContext(ctx); ok && strings.TrimSpace(execution.TurnID) != "" {
+			provenance := llm.EffectiveMessageProvenance(userMsg)
+			if provenance.Producer == "human" {
+				provenance.Reference = execution.TurnID
+				userMsg.Provenance = &provenance
+			}
+		}
 	}
 	o.clearModelContextSnapshot(sessionID)
 	o.handbookMu.Lock()
@@ -698,8 +686,13 @@ func (o *Orchestrator) CancelPendingToolCalls(
 		msg = ToolUserInterruptedMessage
 	}
 	if meta == nil {
-		meta = map[string]any{"interrupted_by_turn_cancel": true}
+		meta = map[string]any{}
 	}
+	// The cancellation reason may be localized text and therefore cannot be
+	// safely classified from the tool result body. Preserve the authoritative
+	// lifecycle outcome explicitly for both SSE and durable history.
+	meta["async_status"] = string(tools.ResultStatusCancelled)
+	meta["interrupted_by_turn_cancel"] = true
 	o.insertMissingToolResponsesAfterAssistant(
 		sessionID,
 		history,
@@ -922,6 +915,8 @@ func (o *Orchestrator) runOneStep(
 	result, err := o.runModelRequest(ctx, sessionID, systemPrompt, llmMessages, toolDefs, requestDigest, stepIndex)
 	if err != nil {
 		if errors.Is(err, ErrBudgetExhausted) {
+			execution, _ := ExecutionContextFromContext(ctx)
+			o.RecordTurnFailureContext(sessionID, history, execution.TurnID)
 			finishReason = "budget_exhausted"
 			streamErr = err
 			o.publishTurnFinished(sessionID, finishReason)
@@ -946,6 +941,8 @@ func (o *Orchestrator) runOneStep(
 			o.appendHistory(sessionID, history, partial)
 		}
 		if !errors.Is(err, context.Canceled) {
+			execution, _ := ExecutionContextFromContext(ctx)
+			o.RecordTurnFailureContext(sessionID, history, execution.TurnID)
 			o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
 				Type:      CommandModelRequestFailed,
 				At:        time.Now().UTC(),

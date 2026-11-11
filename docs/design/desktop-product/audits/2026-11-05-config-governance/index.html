@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Node 配置治理 · 第一轮验收记录</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f5f7f9;
+      --surface: #fff;
+      --soft: #f8fafb;
+      --text: #24313d;
+      --muted: #667684;
+      --border: #dbe2e8;
+      --accent: #557f91;
+      --pending: #705c28;
+      --pending-bg: #f7f2e7;
+      font: 14px/1.65 "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background: var(--page);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh; }
+    aside { position: sticky; top: 0; align-self: start; height: 100vh; padding: 24px 16px; border-right: 1px solid var(--border); background: #f8fafb; }
+    .brand { margin: 0 0 5px; font-size: 15px; font-weight: 650; }
+    .meta { margin: 0 0 20px; color: var(--muted); font-size: 12px; }
+    nav a { display: block; margin: 2px 0; padding: 7px 9px; border-radius: 7px; color: var(--muted); text-decoration: none; }
+    nav a:hover, nav a:focus-visible { background: #eaf1f4; color: var(--text); outline: none; }
+    main { width: min(1080px, 100%); margin: 0 auto; padding: 36px clamp(20px, 4vw, 56px) 64px; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-size: 12px; font-weight: 650; }
+    h1 { margin: 0; font-size: clamp(26px, 3vw, 34px); line-height: 1.2; }
+    h2 { margin: 0 0 10px; font-size: 20px; }
+    h3 { margin: 0; font-size: 15px; }
+    .lead { max-width: 800px; margin: 14px 0 22px; color: var(--muted); font-size: 15px; }
+    section { margin-top: 28px; scroll-margin-top: 20px; }
+    .card { margin: 10px 0; padding: 16px 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+    .card p { margin: 7px 0; }
+    .state { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; background: var(--pending-bg); color: var(--pending); font-size: 11px; font-weight: 650; }
+    .muted { color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; background: var(--surface); }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { background: var(--soft); color: var(--muted); font-size: 12px; font-weight: 650; }
+    tr:last-child td { border-bottom: 0; }
+    code { overflow-wrap: anywhere; font-family: Consolas, "Cascadia Code", monospace; font-size: 12px; }
+    .evidence { min-height: 68px; padding: 12px; border: 1px dashed #b9c5cc; border-radius: 8px; background: var(--soft); color: var(--muted); }
+    footer { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+    @media (max-width: 760px) {
+      .layout { display: block; }
+      aside { position: static; height: auto; padding: 14px 18px; border-right: 0; border-bottom: 1px solid var(--border); }
+      nav { display: flex; flex-wrap: wrap; }
+      main { padding-top: 24px; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <p class="brand">Node 配置治理</p>
+      <p class="meta">第一轮 · 初版 2026-11-05 · 更新 2026-11-06</p>
+      <nav aria-label="报告目录">
+        <a href="#scope">范围与状态</a>
+        <a href="#coverage">总计划覆盖</a>
+        <a href="#checklist">实施清单</a>
+        <a href="#acceptance">验收记录</a>
+        <a href="#evidence">证据附件</a>
+      </nav>
+    </aside>
+    <main>
+      <header>
+        <p class="eyebrow">配置治理 · 第一轮实施与验收</p>
+        <h1>设置数据只由所属页面写回</h1>
+        <p class="lead">隔离 Node 设置 API 端到端验收已完成，含环境覆盖写入拒绝与原子性复验。BBDDA422原生截图58–60已补：启动/重启说明及raw-history持久化值已观察；截图60曾见Security恢复默认图标空白；最终候选1F76B550的截图61确认refresh-cw图标清晰、UIA名称/说明正确。1F76B550 build、2/2组件测试与lint通过。</p>
+      </header>
+
+      <section id="scope">
+        <h2>范围与状态</h2>
+        <div class="card">
+          <p><strong>本轮边界：</strong>Node 设置 API 与持久化、Capabilities/Security/Setup 表单、Manage grace 注入和对应说明文档。</p>
+          <p><strong>状态：</strong>隔离 Node 的 GET/PATCH/持久化检查与本轮必需原生视觉核对已完成。环境覆盖下的写入拒绝与原子性已修复并复验。</p>
+          <p class="muted">不包含凭据迁移，不增加三个隐藏能力总闸，不更改 memory 自动提取默认。原生页面为只读核对；设置保存、环境覆盖和持久化行为由隔离 API 与组件测试记录。</p>
+        </div>
+      </section>
+
+      <section id="coverage">
+        <h2>与第一轮总验收的覆盖关系</h2>
+        <div class="card">
+          <p>配置治理是第一轮改造中的独立验收包，验证面板写入边界、Node 有效设置、持久化与重启提示。它不替代真实 LLM 工作流的审批、取消、文件引用和交付验收，也不把那些运行时体验证据计作配置页通过。</p>
+          <p><a href="../2026-11-05-real-llm-workflow/index.html">真实 LLM 工作流审查</a> 记录了模型切换入口及工作流中的其他体验发现；其中截图和 API 时序不覆盖本页列出的设置保存与环境覆盖场景。</p>
+          <p><code>2026-11-05-round-one-validation</code> 目录保存 BBDDA422的设置截图58–60和最终候选1F76B550的截图61；本页引用的PATCH/GET与持久化摘要来自独立隔离Node。原生截图只读观察，不代表执行设置保存或环境变量切换。</p>
+        </div>
+      </section>
+
+      <section id="checklist">
+        <h2>实施清单</h2>
+        <table>
+          <thead><tr><th>项目</th><th>实现目标</th><th>当前记录</th></tr></thead>
+          <tbody>
+            <tr><td>Capabilities PATCH</td><td>只提交页面拥有字段；skills、triggers、child-agents 总闸保持原值。</td><td>隔离 API 验收通过：总闸预置为 false 后，仅 PATCH skills 上限仍保留 false；截图59只读观察到raw-history当前持久化值；未测试环境来源分支，也没有点击保存。</td></tr>
+            <tr><td>Raw history</td><td>API 提供有效值和控制来源；环境覆盖时只读展示，API 拒绝显式写入。</td><td>通过：env=true/false/无效值下显式字段均返回 400，混合 PATCH 整体不保存；无效 env 仍按默认有效值 true 报来源 environment。截图59只读显示当前已保存值启用，未切换环境变量或原生验证 environment 只读分支。</td></tr>
+            <tr><td>Bash 输出上限</td><td>正整数校验；显式恢复默认；遗漏字段保留原值。</td><td>隔离 API 验收通过：0 返回 400 且值不变，遗漏字段保留，显式 reset 恢复 12000/16000；截图60记录两个限额和恢复默认按钮，但历史图标空白由最终候选截图61确认修复；未点击恢复、改值或保存。1F76B550 build、2/2组件测试与lint通过。</td></tr>
+            <tr><td>Manage payload</td><td>只写当前表单字段，隐藏部署字段不随其他设置回传。</td><td>隔离 API 验收通过：仅更新 team 后，注册间隔、TTL 和 token 已配置状态保留；原生保存后快照未验证；API验收已证明隐藏字段保持。</td></tr>
+            <tr><td>重启提示</td><td>根据有效配置差异和热应用结果返回 <code>restart_required</code>。</td><td>无操作 PATCH 返回 false，NodeID 变化返回 true 且重启后持久；profile multimodal 修改由 profile fingerprint 在下一次请求时应用，因此 <code>restart_required=false</code>；raw-history 比较有效值，环境覆盖下的显式 PATCH 在落盘前拒绝。截图58原生可见启动配置与需重启说明。</td></tr>
+            <tr><td>默认值与 Manage grace</td><td>Hook 工具名单共用默认；offline grace 从 Manage 设置单点注入。</td><td>已实现并由相关代码/API测试覆盖；未另行采集目标环境运行日志。</td></tr>
+            <tr><td>配置说明</td><td>说明 bootstrap YAML、Node 数据库和遗留 <code>api_key_env</code> 的边界。</td><td>文档已修订并列入本轮配置治理范围。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="acceptance">
+        <h2>验收记录</h2>
+        <div class="card">
+          <h3>隔离设置 API 验收</h3>
+          <p>在独立目录、端口 <code>127.0.0.1:18801</code> 上运行临时 Node，LLM profile 为 Mock；没有调用模型服务。功能总闸稀疏 PATCH、工具上限 0 拒绝/省略保留/reset、Manage 隐藏字段保留、无操作重启判定、NodeID 重启持久化均通过。profile multimodal PATCH 的 <code>restart_required=false</code> 表示无需重启 Node：新值会由 profile fingerprint 在下一次模型请求时应用；它不表示当前正在进行的请求即时切换。</p>
+          <p>raw-history 在 env=true/false 时，GET 返回环境生效值和 <code>environment</code> 来源；invalid env 文本也保持 environment 来源并按默认有效值 true 处理。三种情况下显式 PATCH 均返回 <code>400 setting_controlled_by_environment</code>，即使请求同时带其他字段，整包也不保存。</p>
+          <p>移除 env 并重启后，拒绝的 PATCH 不改变已保存值；settings 来源下普通修改仍生效。重启判定现在比较有效 raw-history 值，因此环境覆盖期间不会因隐藏保存值差异误报。</p>
+          <h3>原生验收记录</h3>
+          <p>BBDDA422截图58–60显示启动/重启说明、raw-history持久化开启和Security输出限额；59不是environment来源，因此不代表环境只读分支的原生观察。截图60的空白图标由最终1F76B550截图61验证修复，refresh-cw和UIA名称/说明正常。环境覆盖写入拒绝、0/小数校验、恢复默认数据行为、隐藏字段保存保持和NodeID restart_required由隔离API/组件测试证明；本轮原生截图未执行保存或更改。</p>
+          <p>Agent 与 Auto 行式/关闭状态已由总报告41–43原生截图观察；截图58显示通用设置启动/重启说明，59显示Capabilities中的raw-history持久化开启状态，61显示Security恢复图标与UIA标签/说明正常。当前原生配置截图未点击保存，也未改变环境变量。</p>
+          <p><span class="state">必要原生核对完成</span> Screenshot 58–60为BBDDA422（Desktop PID45588、Node PID43344）；Screenshot 61为最终1F76B550（Desktop PID34012、Node PID43344），确认恢复图标与UIA名称/说明正确。只读观察，未重置/修改/保存。API/组件行为证据与原生视觉证据分别记录。</p>
+        </div>
+      </section>
+
+      <section id="evidence">
+        <h2>证据附件</h2>
+        <div class="evidence">本段列出的 <code>.runtime-test-*</code> 文件均为被 Git 忽略的本地 QA 证据，不随 PR 提交，也不会在 PR 页面中打开；本页的结果摘要和原生截图才是随 PR 可审阅的记录。隔离 Node 的脱敏摘要：<code>.runtime-test-config-governance/api-evidence-safe.json</code>、<code>raw-history-final-env-true-safe.json</code>、<code>raw-history-final-env-false-safe.json</code>、<code>raw-history-final-env-invalid-safe.json</code>、<code>raw-history-final-unset-after-true-safe.json</code>、<code>raw-history-final-unset-after-false-safe.json</code>。日志与摘要不包含真实凭据。对应原生截图58–61见总验收目录；61为最终1F76B550验证图标修复的证据。BBDDA422定向Dock测试日志：<code>.runtime-test-real-ux/final-dock-tests-2026-11-06.log</code>（1个文件、9项通过；不是全量前端测试）。</div>
+      </section>
+
+      <footer>Node 配置治理 · 隔离 API 验收已记录 · 必要设置页截图已记录；环境覆盖UI分支及原生保存点击未测试，API/组件行为证据单独标明。</footer>
+    </main>
+  </div>
+</body>
+</html>

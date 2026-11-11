@@ -125,16 +125,16 @@ onUnmounted(() => { disposed = true; epoch++; clearTimer(); document.removeEvent
   <main class="browser-viewer" aria-label="浏览器" :aria-busy="navigating">
     <header class="browser-viewer__toolbar">
       <div class="browser-viewer__navigation">
-        <button type="button" title="后退" aria-label="后退" :disabled="controlsDisabled || !data?.can_go_back" @click="control('back')"><UiIcon name="arrow-left" :size="16" /></button>
-        <button type="button" title="前进" aria-label="前进" :disabled="controlsDisabled || !data?.can_go_forward" @click="control('forward')"><UiIcon name="arrow-left" class="browser-viewer__forward" :size="16" /></button>
-        <button type="button" title="刷新网页" aria-label="刷新网页" :disabled="controlsDisabled || !hasPage" @click="control('reload')"><UiIcon name="refresh-cw" :size="16" /></button>
+        <button type="button" class="desktop-icon-button desktop-icon-button--toolbar" title="后退" aria-label="后退" :disabled="controlsDisabled || !data?.can_go_back" @click="control('back')"><UiIcon name="arrow-left" :size="16" /></button>
+        <button type="button" class="desktop-icon-button desktop-icon-button--toolbar" title="前进" aria-label="前进" :disabled="controlsDisabled || !data?.can_go_forward" @click="control('forward')"><UiIcon name="arrow-left" class="browser-viewer__forward" :size="16" /></button>
+        <button type="button" class="desktop-icon-button desktop-icon-button--toolbar" title="刷新网页" aria-label="刷新网页" :disabled="controlsDisabled || !hasPage" @click="control('reload')"><UiIcon name="refresh-cw" :size="16" /></button>
       </div>
       <form class="browser-viewer__address" @submit.prevent="control('navigate')">
         <UiIcon name="globe" :size="15" />
-        <input ref="addressInput" v-model="address" aria-label="网址" placeholder="输入网址，按 Enter 打开" autocomplete="off" spellcheck="false" :disabled="controlsDisabled" @input="addressDirty = true" @keydown.esc.stop="restoreAddress">
-        <button type="submit" title="打开网页" aria-label="打开网页" :disabled="controlsDisabled || !address.trim()"><UiIcon name="arrow-left" class="browser-viewer__forward" :size="15" /></button>
+        <input ref="addressInput" v-model="address" class="settings-field__input browser-viewer__address-input" aria-label="网址" placeholder="输入网址，按 Enter 打开" autocomplete="off" spellcheck="false" :disabled="controlsDisabled" @input="addressDirty = true" @keydown.esc.stop="restoreAddress">
+        <button type="submit" class="desktop-icon-button desktop-icon-button--toolbar" title="打开网页" aria-label="打开网页" :disabled="controlsDisabled || !address.trim()"><UiIcon name="arrow-left" class="browser-viewer__forward" :size="15" /></button>
       </form>
-      <button type="button" title="新建页面" aria-label="新建页面" :disabled="controlsDisabled" @click="control('new')"><UiIcon name="plus" :size="17" /></button>
+      <button type="button" class="desktop-icon-button desktop-icon-button--toolbar" title="新建页面" aria-label="新建页面" :disabled="controlsDisabled" @click="control('new')"><UiIcon name="plus" :size="17" /></button>
     </header>
     <nav v-if="pages.length" class="browser-viewer__tabs" aria-label="已打开页面">
       <div v-for="page in pages" :key="page.page_id" class="browser-viewer__tab" :class="{ selected: page.page_id === selectedPageId }">
@@ -142,7 +142,7 @@ onUnmounted(() => { disposed = true; epoch++; clearTimer(); document.removeEvent
         <button v-if="page.page_id === selectedPageId" type="button" title="关闭页面" aria-label="关闭页面" :disabled="navigating" @click="control('close')"><UiIcon name="close" :size="12" /></button>
       </div>
     </nav>
-    <p v-if="actionError || error" class="browser-viewer__notice browser-viewer__notice--error" role="alert">{{ actionError || error }} <button v-if="error" type="button" @click="refreshResources">重试</button></p>
+    <p v-if="actionError || error" class="browser-viewer__notice browser-viewer__notice--error" role="alert">{{ actionError || error }} <button v-if="error" type="button" class="btn btn--ghost btn--sm" @click="refreshResources">重试</button></p>
     <p v-else-if="busyNotice" class="browser-viewer__notice" role="status">智能体正在浏览，页面稍后会自动更新。</p>
     <p v-if="navigating" class="browser-viewer__progress" role="status">正在处理…</p>
     <section v-if="hasPage && data?.image_base64" class="browser-viewer__canvas">
@@ -151,24 +151,22 @@ onUnmounted(() => { disposed = true; epoch++; clearTimer(); document.removeEvent
     </section>
     <section v-else class="browser-viewer__empty" :role="configurationNotice || loading ? 'status' : undefined">
       <div class="browser-viewer__empty-icon"><UiIcon name="browser" :size="28" /></div>
-      <template v-if="configurationNotice"><h1>启用浏览器，开始浏览</h1><p>在能力设置中启用浏览器后，就可以在这里打开网页。</p><button type="button" aria-label="前往浏览器能力设置" @click="emit('open-connection-settings')">打开设置</button></template>
+      <template v-if="configurationNotice"><h1>启用浏览器，开始浏览</h1><p>在“共享服务”设置中启用浏览器后，就可以在这里打开网页。</p><button type="button" class="btn btn--primary" aria-label="前往共享服务设置" @click="emit('open-connection-settings')">打开设置</button></template>
       <template v-else-if="loading && !initialized"><h1>正在连接浏览器…</h1></template>
-      <template v-else><h1>打开一个网页</h1><p>在上方输入网址，或让智能体为你浏览。</p><small>你打开的页面会与当前智能体共享。</small><button type="button" :disabled="controlsDisabled" @click="addressInput?.focus()">输入网址</button></template>
+      <template v-else><h1>打开一个网页</h1><p>在上方输入网址，或让智能体为你浏览。</p><small>你打开的页面会与当前智能体共享。</small><button type="button" class="btn" :disabled="controlsDisabled" @click="addressInput?.focus()">输入网址</button></template>
     </section>
   </main>
 </template>
 
 <style scoped>
 .browser-viewer{height:100%;min-height:0;min-width:0;width:100%;flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--surface-app,#fff);color:var(--text-primary,#263740)}
-.browser-viewer button{display:inline-flex;align-items:center;justify-content:center;flex:none;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer;font:inherit}
-.browser-viewer button:hover:not(:disabled){background:var(--color-surface-hover,#eef1f3)}.browser-viewer button:disabled{opacity:.35;cursor:default}.browser-viewer button:focus-visible{outline:2px solid #8295a2;outline-offset:2px}
 .browser-viewer__toolbar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border-subtle,#e5e9ec);background:var(--color-bg-soft,#f7f8fa)}
-.browser-viewer__toolbar button{width:30px;height:30px}.browser-viewer__navigation{display:flex;gap:2px}.browser-viewer__forward{transform:rotate(180deg)}
-.browser-viewer__address{display:flex;align-items:center;gap:8px;flex:1;min-width:0;height:34px;border:1px solid var(--border-subtle,#e0e5e8);border-radius:8px;background:var(--surface-app,#fff);padding:0 4px 0 10px;color:var(--text-secondary,#6d7b86)}
-.browser-viewer__address:focus-within{border-color:#a8b5bf;box-shadow:0 0 0 2px #7c8c9b12}.browser-viewer__address input{min-width:0;flex:1;width:100%;border:0;outline:none;background:transparent;color:var(--text-primary,#263740);font:inherit;font-size:12px}.browser-viewer__address input::placeholder{color:var(--text-secondary,#85919b)}
-.browser-viewer__tabs{display:flex;gap:3px;flex:none;overflow-x:auto;padding:5px 14px;border-bottom:1px solid var(--border-subtle,#e5e9ec)}.browser-viewer__tab{display:flex;align-items:center;min-width:0;max-width:220px;flex-shrink:0;border-radius:6px;color:var(--text-secondary,#6d7b86)}.browser-viewer__tab.selected{background:var(--color-surface-hover,#eef1f3);color:var(--text-primary,#263740)}.browser-viewer__tab>button:first-child{min-width:0;padding:7px 9px;gap:6px;font-size:12px}.browser-viewer__tab span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.browser-viewer__tab>button+button{width:24px;height:24px;margin-right:3px}
-.browser-viewer__notice{display:flex;align-items:center;gap:8px;margin:0;padding:8px 18px;background:var(--color-bg-soft,#f7f8fa);color:var(--text-secondary,#6d7b86);font-size:12px}.browser-viewer__notice--error{color:#a14343}.browser-viewer__notice button{text-decoration:underline;padding:2px 5px}.browser-viewer__progress{margin:0;padding:6px 18px;font-size:11px;color:var(--text-secondary,#6d7b86)}
+.browser-viewer__navigation{display:flex;gap:2px}.browser-viewer__forward{transform:rotate(180deg)}
+.browser-viewer__address{display:flex;align-items:center;gap:8px;flex:1;min-width:0;height:36px;border:1px solid var(--border-control);border-radius:var(--control-radius);background:var(--surface-control);padding:0 4px 0 10px;color:var(--text-secondary)}
+.browser-viewer__address:focus-within{border-color:var(--border-strong,#a8b5bf);box-shadow:0 0 0 2px var(--focus-ring,#7c8c9b12)}.browser-viewer__address .browser-viewer__address-input{max-width:none;min-width:0;flex:1;width:100%;min-height:0;padding:0;border:0;outline:none;background:transparent;box-shadow:none;font-size:12px}.browser-viewer__address-input::placeholder{color:var(--text-secondary,#85919b)}
+.browser-viewer__tabs{display:flex;gap:3px;flex:none;overflow-x:auto;padding:5px 14px;border-bottom:1px solid var(--border-subtle,#e5e9ec)}.browser-viewer__tab{display:flex;align-items:center;min-width:0;max-width:220px;flex-shrink:0;border-radius:6px;color:var(--text-secondary,#6d7b86)}.browser-viewer__tab.selected{background:var(--color-surface-hover,#eef1f3);color:var(--text-primary,#263740)}.browser-viewer__tab button{display:inline-flex;align-items:center;justify-content:center;flex:none;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;cursor:pointer}.browser-viewer__tab button:hover:not(:disabled){background:var(--color-surface-hover)}.browser-viewer__tab button:focus-visible{outline:2px solid var(--focus-ring);outline-offset:1px}.browser-viewer__tab>button:first-child{min-width:0;padding:7px 9px;gap:6px;font-size:12px}.browser-viewer__tab span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.browser-viewer__tab>button+button{width:24px;height:24px;margin-right:3px}
+.browser-viewer__notice{display:flex;align-items:center;gap:8px;margin:0;padding:8px 18px;background:var(--color-bg-soft,#f7f8fa);color:var(--text-secondary,#6d7b86);font-size:12px}.browser-viewer__notice--error{color:#a14343}.browser-viewer__progress{margin:0;padding:6px 18px;font-size:11px;color:var(--text-secondary,#6d7b86)}
 .browser-viewer__canvas{min-height:0;flex:1;overflow:auto;display:flex;flex-direction:column;align-items:center;padding:12px 16px 76px;background:var(--color-bg-soft,#f7f8fa)}.browser-viewer__canvas img{display:block;width:100%;height:auto;flex-shrink:0;object-fit:contain;background:#fff;border:1px solid var(--border-subtle,#e5e9ec);border-radius:3px}.browser-viewer__canvas p{align-self:flex-start;margin:0 0 8px;font-size:11px;color:var(--text-secondary,#7e8a94);text-align:center}
-.browser-viewer__empty{flex:1;min-height:180px;overflow:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px 20px 90px;color:var(--text-secondary,#7e8a94)}.browser-viewer__empty-icon{display:grid;place-items:center;width:56px;height:56px;margin-bottom:16px;border-radius:15px;background:var(--color-bg-soft,#f3f5f7);color:#8798a5}.browser-viewer__empty h1{margin:0;font-size:18px;font-weight:600;color:var(--text-primary,#344651)}.browser-viewer__empty p{margin:10px 0 5px;font-size:13px}.browser-viewer__empty small{font-size:12px}.browser-viewer__empty>button{margin-top:20px;gap:8px;padding:8px 13px;background:var(--color-bg-soft,#f3f5f7);font-size:12px;color:var(--text-primary,#344651)}
-@media(max-width:640px){.browser-viewer__toolbar{gap:4px;padding:8px}.browser-viewer__navigation{gap:0}.browser-viewer__toolbar button{width:27px}.browser-viewer__canvas{padding:8px 8px 76px}}
+.browser-viewer__empty{flex:1;min-height:180px;overflow:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px 20px 90px;color:var(--text-secondary,#7e8a94)}.browser-viewer__empty-icon{display:grid;place-items:center;width:56px;height:56px;margin-bottom:16px;border-radius:15px;background:var(--color-bg-soft,#f3f5f7);color:#8798a5}.browser-viewer__empty h1{margin:0;font-size:18px;font-weight:600;color:var(--text-primary,#344651)}.browser-viewer__empty p{margin:10px 0 5px;font-size:13px}.browser-viewer__empty small{font-size:12px}.browser-viewer__empty>.btn{margin-top:20px}
+@media(max-width:640px){.browser-viewer__toolbar{gap:4px;padding:8px}.browser-viewer__navigation{gap:0}.browser-viewer__canvas{padding:8px 8px 76px}}
 </style>

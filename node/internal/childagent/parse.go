@@ -30,16 +30,6 @@ func parseCreateInput(argsJSON string, cfg Config) (CreateInput, error) {
 	if ttl > cfg.MaxTTLSeconds {
 		ttl = cfg.MaxTTLSeconds
 	}
-	maxTurns := cfg.DefaultMaxTurns
-	if v, ok := raw["max_turns"].(float64); ok && int(v) > 0 {
-		maxTurns = int(v)
-	}
-	if maxTurns < 1 {
-		maxTurns = 1
-	}
-	if maxTurns > cfg.MaxMaxTurns {
-		maxTurns = cfg.MaxMaxTurns
-	}
 	allowed := parseStringSlice(raw["allowed_tools"])
 	skillNames := parseStringSlice(raw["skill_names"])
 	return CreateInput{
@@ -48,7 +38,6 @@ func parseCreateInput(argsJSON string, cfg Config) (CreateInput, error) {
 		AllowedTools: allowed,
 		SkillNames:   skillNames,
 		TTLSeconds:   ttl,
-		MaxTurns:     maxTurns,
 	}, nil
 }
 

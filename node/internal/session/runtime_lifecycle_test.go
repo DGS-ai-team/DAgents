@@ -37,6 +37,46 @@ func newLifecycleTestRuntime() *runtime {
 	}
 }
 
+func TestRuntimeLifecycleProjectsUserRejectedApprovalAsDenied(t *testing.T) {
+	r := newLifecycleTestRuntime()
+	if err := r.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	state := r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
+		Type: turn.CommandAssistantReceived, SessionID: r.session.ID, TurnID: state.TurnID,
+		StepID: state.StepID, Generation: state.Generation, HasTools: true, At: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	calls := []llm.ToolCall{
+		{ID: "sample-1", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"sample-one.txt"}`}},
+		{ID: "sample-2", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"sample-two.txt"}`}},
+		{ID: "sample-3", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"sample-three.txt"}`}},
+	}
+	history := []llm.Message{{Role: "assistant", ToolCalls: calls}}
+	history = append(history,
+		llm.ToolResultMessage(calls[0].ID, calls[0].Function.Name, "rejected: user_rejected"),
+		llm.ToolResultMessage(calls[1].ID, calls[1].Function.Name, "sample two contents"),
+		llm.ToolResultMessage(calls[2].ID, calls[2].Function.Name, "rejected: user_rejected"),
+	)
+	if err := r.lifecycleRecordModelToolFacts(history, 0, calls); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct {
+		id     string
+		status turn.ToolExecutionStatus
+	}{
+		{id: "sample-1", status: turn.ToolExecutionStatusDenied},
+		{id: "sample-2", status: turn.ToolExecutionStatusSucceeded},
+		{id: "sample-3", status: turn.ToolExecutionStatusDenied},
+	} {
+		if got, ok := r.turnCoordinator.ToolExecutionStatusForCall(want.id); !ok || got != want.status {
+			t.Errorf("execution %q status=%s/%v, want %s", want.id, got, ok, want.status)
+		}
+	}
+}
+
 func TestRuntimePersistReportsStoreErrors(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "sessions.db"))
@@ -562,7 +602,7 @@ func TestRuntimeLifecycleStopsContinuationAtStepBudget(t *testing.T) {
 	r.publisher = hub
 	r.orch = orch
 	r.store = db
-	r.turnBudget = turn.TurnBudget{MaxSteps: 1}
+	r.turnBudget = turn.TurnBudget{MaxToolCalls: 1}
 	orch.SetLifecycleMetadataProvider(func(sessionID string) map[string]any {
 		if sessionID != r.session.ID {
 			return nil
@@ -575,16 +615,25 @@ func TestRuntimeLifecycleStopsContinuationAtStepBudget(t *testing.T) {
 	if err := r.lifecycleBeginHumanTurn(); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.lifecycleAfterModelStep(turn.StepOutcome{}, []llm.Message{
-		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "call-budget"}}},
+	calls := []llm.ToolCall{{ID: "call-budget", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"budget.txt"}`}}}
+	state := r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{Type: turn.CommandAssistantReceived, SessionID: r.session.ID, TurnID: state.TurnID, StepID: state.StepID, Generation: state.Generation, HasTools: true, At: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	history := []llm.Message{
+		{Role: "assistant", ToolCalls: calls},
 		{Role: "tool", ToolCallID: "call-budget", Content: "ok"},
-	}, 0); err != nil {
+	}
+	if err := r.lifecycleRecordModelToolFacts(history, 0, calls); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.lifecycleAfterModelStep(turn.StepOutcome{}, history, 0); err != nil {
 		t.Fatal(err)
 	}
 	if started, err := r.lifecycleBeginContinuationStep(turn.TurnSourceHuman); err != nil {
 		t.Fatal(err)
 	} else if started {
-		t.Fatal("continuation should be rejected after MaxSteps")
+		t.Fatal("continuation should be rejected after MaxToolCalls")
 	}
 	snapshot := r.turnCoordinator.Snapshot()
 	if snapshot.TurnStatus != turn.TurnStatusBudgetExhausted || snapshot.TurnEndReason == "" {
@@ -615,7 +664,7 @@ func TestRuntimeLifecycleStopsContinuationAtStepBudget(t *testing.T) {
 	if finishCount != 1 || terminalStateCount != 1 || terminalIndex < 0 || finishIndex <= terminalIndex {
 		t.Fatalf("budget terminal events must publish once, state before finish: %+v", received)
 	}
-	if finished.Data["finish_reason"] != "budget_exhausted" || finished.Data["budget_reason"] != "max_steps" || finished.Data["turn_complete"] != true {
+	if finished.Data["finish_reason"] != "budget_exhausted" || finished.Data["budget_reason"] != "max_tool_calls" || finished.Data["turn_complete"] != true {
 		t.Fatalf("budget terminal SSE = %+v", finished)
 	}
 	if finished.Data["turn_id"] != terminalState.Data["turn_id"] || fmt.Sprint(finished.Data["turn_generation"]) != fmt.Sprint(terminalState.Data["generation"]) || terminalState.Data["turn_status"] != string(turn.TurnStatusBudgetExhausted) {
@@ -642,18 +691,31 @@ func countTerminalEvents(events []stream.Event) int {
 
 func TestRuntimeLifecycleUsesReservedFinalSummaryStep(t *testing.T) {
 	r := newLifecycleTestRuntime()
-	r.turnBudget = turn.TurnBudget{MaxSteps: 1, ReserveFinalSummary: true}
-	r.lifecycleBeginHumanTurn()
-	r.lifecycleAfterModelStep(turn.StepOutcome{}, []llm.Message{
-		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "call-summary"}}},
+	r.turnBudget = turn.TurnBudget{MaxToolCalls: 1, ReserveFinalSummary: true}
+	if err := r.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	calls := []llm.ToolCall{{ID: "call-summary", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"summary.txt"}`}}}
+	state := r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{Type: turn.CommandAssistantReceived, SessionID: r.session.ID, TurnID: state.TurnID, StepID: state.StepID, Generation: state.Generation, HasTools: true, At: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	history := []llm.Message{
+		{Role: "assistant", ToolCalls: calls},
 		{Role: "tool", ToolCallID: "call-summary", Content: "tool result"},
-	}, 0)
+	}
+	if err := r.lifecycleRecordModelToolFacts(history, 0, calls); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.lifecycleAfterModelStep(turn.StepOutcome{}, history, 0); err != nil {
+		t.Fatal(err)
+	}
 	if started, err := r.lifecycleBeginContinuationStep(turn.TurnSourceHuman); err != nil {
 		t.Fatal(err)
 	} else if !started {
 		t.Fatal("reserved summary continuation should be accepted")
 	}
-	state := r.turnCoordinator.Snapshot()
+	state = r.turnCoordinator.Snapshot()
 	if !state.FinalSummary || state.StepIndex != 2 || state.Usage.SummarySteps != 1 {
 		t.Fatalf("summary continuation projection = %+v", state)
 	}

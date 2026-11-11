@@ -197,11 +197,10 @@ func TestSetRunRepositoryMarksOrphanedRunsInterrupted(t *testing.T) {
 func TestObserveChildEventPublishesRefreshableProgress(t *testing.T) {
 	hub := stream.NewHub(16, nil)
 	m := NewManager(Config{Enabled: true}, hub, "agent-1", nil)
-	agent := newActiveAgent("sess-parent", CreateInput{Purpose: "inspect files", MaxTurns: 8}, "child-1", time.Now().Add(time.Hour))
+	agent := newActiveAgent("sess-parent", CreateInput{Purpose: "inspect files"}, "child-1", time.Now().Add(time.Hour))
 	agent.ToolCallID = "call-child-1"
 	agent.Status = StatusActive
 	agent.Progress.Status = StatusActive
-	agent.Progress.MaxTurns = 8
 	m.mu.Lock()
 	m.activeByID[agent.ChildAgentID] = agent
 	m.activeIDsByParent[agent.ParentAgentID] = []string{agent.ChildAgentID}
@@ -246,7 +245,7 @@ func TestObserveChildEventPublishesRefreshableProgress(t *testing.T) {
 func TestObserveChildEventTracksRecentToolActivities(t *testing.T) {
 	hub := stream.NewHub(16, nil)
 	m := NewManager(Config{Enabled: true}, hub, "agent-1", nil)
-	agent := newActiveAgent("sess-parent", CreateInput{Purpose: "inspect files", MaxTurns: 8}, "child-1", time.Now().Add(time.Hour))
+	agent := newActiveAgent("sess-parent", CreateInput{Purpose: "inspect files"}, "child-1", time.Now().Add(time.Hour))
 	agent.ToolCallID = "call-child-1"
 	agent.Status = StatusActive
 	agent.Progress.Status = StatusActive

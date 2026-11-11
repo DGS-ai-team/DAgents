@@ -158,6 +158,11 @@ type BashCompressConfig struct {
 
 const EnvRawMessageHistoryEnabled = "AGENT_RAW_MESSAGE_HISTORY_ENABLED"
 
+const (
+	DefaultBashCompressMaxOutputChars       = 12000
+	DefaultBashCompressMaxOutputCharsStderr = 16000
+)
+
 // RawMessageHistoryConfig 控制原始消息 JSONL 审计侧车。
 type RawMessageHistoryConfig struct {
 	Enabled *bool `yaml:"enabled"`
@@ -168,8 +173,6 @@ type ChildAgentsConfig struct {
 	Enabled            bool `yaml:"enabled"`
 	DefaultTTLSeconds  int  `yaml:"default_ttl_seconds"`
 	MaxTTLSeconds      int  `yaml:"max_ttl_seconds"`
-	DefaultMaxTurns    int  `yaml:"default_max_turns"`
-	MaxMaxTurns        int  `yaml:"max_max_turns"`
 	MaxActivePerParent int  `yaml:"max_active_per_parent"`
 }
 
@@ -360,20 +363,20 @@ type LLMConfig struct {
 	Provider        string                      `yaml:"provider"`
 	BaseURL         string                      `yaml:"base_url"`
 	Model           string                      `yaml:"model"`
-	APIKeyEnv       string                      `yaml:"api_key_env"`
+	APIKeyEnv       string                      `yaml:"api_key_env"` // legacy import source; runtime credentials live in llm_configs.db
 	Mock            bool                        `yaml:"mock"`
 	Thinking        string                      `yaml:"thinking"` // provider thinking：enabled | disabled
 	ReasoningEffort string                      `yaml:"reasoning_effort"`
 	ThinkingBudget  *int                        `yaml:"thinking_budget,omitempty"`
-	// max_steps 属于 Agent config_snapshot（defaults.llm.max_steps），不写入 Node YAML。
+	// max_tool_calls 是每轮唯一工具调用限额，配置在 Agent defaults.llm 中，不在 Node YAML。
 }
 
-// LLMProfileConfig 为单个可切换的 LLM 连接档案（不含 max_steps）。
+// LLMProfileConfig 为单个可切换的 LLM 连接档案。
 type LLMProfileConfig struct {
 	Provider        string `yaml:"provider"`
 	BaseURL         string `yaml:"base_url"`
 	Model           string `yaml:"model"`
-	APIKeyEnv       string `yaml:"api_key_env"`
+	APIKeyEnv       string `yaml:"api_key_env"` // legacy import source only
 	Mock            bool   `yaml:"mock"`
 	Thinking        string `yaml:"thinking,omitempty"`
 	ReasoningEffort string `yaml:"reasoning_effort,omitempty"`
@@ -485,12 +488,6 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.ChildAgents.MaxTTLSeconds <= 0 {
 		c.ChildAgents.MaxTTLSeconds = 7200
-	}
-	if c.ChildAgents.DefaultMaxTurns <= 0 {
-		c.ChildAgents.DefaultMaxTurns = 20
-	}
-	if c.ChildAgents.MaxMaxTurns <= 0 {
-		c.ChildAgents.MaxMaxTurns = 50
 	}
 	if c.ChildAgents.MaxActivePerParent <= 0 {
 		c.ChildAgents.MaxActivePerParent = 8
@@ -732,6 +729,14 @@ func (c *Config) RawMessageHistoryEnabled() bool {
 		return *c.RawMessageHistory.Enabled
 	}
 	return true
+}
+
+// RawMessageHistorySource identifies the setting currently controlling raw history.
+func (c *Config) RawMessageHistorySource() string {
+	if _, ok := os.LookupEnv(EnvRawMessageHistoryEnabled); ok {
+		return "environment"
+	}
+	return "settings"
 }
 
 // RawMessageHistoryDir 返回未绑定 Agent 时的 JSONL 根目录（`<runtime>/history`）。

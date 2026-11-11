@@ -2,6 +2,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import McpSettings from "./McpSettings.vue";
+import SettingsDisclosure from "../../components/SettingsDisclosure.vue";
 import * as api from "../../api/node.js";
 
 const { route, routerReplace } = vi.hoisted(() => ({ route: { query: {} }, routerReplace: vi.fn() }));
@@ -67,7 +68,8 @@ describe("MCP settings draft consistency", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    expect(wrapper.get(".mcp-settings__advanced").element.open).toBe(true);
+    const advanced = wrapper.findComponent(SettingsDisclosure);
+    expect(advanced.get('[role="button"]').attributes("aria-expanded")).toBe("true");
     await wrapper.get(".mcp-settings__editor .btn--primary").trigger("click");
     await flushPromises();
 

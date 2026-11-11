@@ -238,13 +238,13 @@ defineExpose({ refresh });
             <template v-if="editingId === entry.id">
               <button
                 type="button"
-                class="btn btn--primary btn--xs"
+                class="btn btn--primary btn--sm"
                 :disabled="savingId === entry.id"
                 @click="saveEdit(entry)"
               >
                 {{ savingId === entry.id ? "保存中…" : "保存" }}
               </button>
-              <button type="button" class="btn btn--ghost btn--xs" :disabled="savingId === entry.id" @click="cancelEdit">
+              <button type="button" class="btn btn--ghost btn--sm" :disabled="savingId === entry.id" @click="cancelEdit">
                 取消
               </button>
             </template>
@@ -412,11 +412,6 @@ defineExpose({ refresh });
 
 .memory-panel__delete:hover:not(:disabled) {
   color: var(--color-danger);
-}
-
-.btn--xs {
-  padding: 3px 7px;
-  font-size: 11px;
 }
 
 .memory-panel__id {

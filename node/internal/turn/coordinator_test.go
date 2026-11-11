@@ -670,7 +670,7 @@ func TestTurnCoordinatorRestoresWaitingInteraction(t *testing.T) {
 func TestTurnCoordinatorTracksAndPreflightsTurnBudget(t *testing.T) {
 	now := time.Now().UTC()
 	c := NewTurnCoordinator("session-1", "agent-1")
-	budget := TurnBudget{MaxSteps: 1, MaxToolCalls: 1}
+	budget := TurnBudget{MaxToolCalls: 1}
 	for _, command := range []TurnCommand{
 		{Type: CommandStartTurn, SessionID: "session-1", TurnID: "turn-1", Generation: 1, Source: TurnSourceHuman, Budget: budget, At: now},
 		{Type: CommandStartStep, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1, At: now},
@@ -685,11 +685,23 @@ func TestTurnCoordinatorTracksAndPreflightsTurnBudget(t *testing.T) {
 	if state.Usage.Steps != 1 || state.Usage.ToolCalls != 1 {
 		t.Fatalf("budget usage = %+v", state.Usage)
 	}
+	if _, err := c.Dispatch(TurnCommand{
+		Type: CommandToolCallRecorded, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1,
+		ToolCallID: "call-1", At: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if state := c.Snapshot(); state.Usage.ToolCalls != 1 {
+		t.Fatalf("duplicate proposed call consumed quota twice: %+v", state.Usage)
+	}
 	if decision := c.BudgetDecisionFor(CommandStartStep); decision.Allowed {
 		t.Fatalf("next step should be rejected: %+v", decision)
 	}
-	if decision := c.BudgetDecisionFor(CommandToolCallRecorded); !decision.Allowed {
+	if decision := c.BudgetDecisionForToolCall("call-1"); !decision.Allowed {
 		t.Fatalf("exact tool-call budget should be allowed: %+v", decision)
+	}
+	if decision := c.BudgetDecisionForToolCall("unrecorded"); decision.Allowed || decision.Reason != "unknown_tool_call" {
+		t.Fatalf("unrecorded tool call should fail closed: %+v", decision)
 	}
 	if _, err := c.Dispatch(TurnCommand{
 		Type: CommandToolCallRecorded, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1,
@@ -697,16 +709,26 @@ func TestTurnCoordinatorTracksAndPreflightsTurnBudget(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if decision := c.BudgetDecisionFor(CommandToolCallRecorded); decision.Allowed || decision.Reason != "max_tool_calls" {
+	if decision := c.BudgetDecisionForToolCall("call-2"); decision.Allowed || decision.Reason != "max_tool_calls" {
 		t.Fatalf("over-limit tool batch should be rejected: %+v", decision)
+	}
+	withoutBatch := NewTurnCoordinator("session-empty", "agent-1")
+	if _, err := withoutBatch.Dispatch(TurnCommand{Type: CommandStartTurn, SessionID: "session-empty", TurnID: "turn-empty", Generation: 1, Budget: budget, At: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := withoutBatch.Dispatch(TurnCommand{Type: CommandStartStep, SessionID: "session-empty", TurnID: "turn-empty", StepID: "step-empty", Generation: 1, At: now}); err != nil {
+		t.Fatal(err)
+	}
+	if decision := withoutBatch.BudgetDecisionForToolCall("unknown"); decision.Allowed || decision.Reason != "unknown_tool_call" {
+		t.Fatalf("missing batch must fail closed under a finite quota: %+v", decision)
 	}
 }
 
-func TestTurnCoordinatorPreflightsToolRoundsSeparatelyFromToolCalls(t *testing.T) {
+func TestTurnCoordinatorTracksToolRoundsWithoutUsingThemAsLimits(t *testing.T) {
 	now := time.Now().UTC()
 	c := NewTurnCoordinator("session-rounds", "agent-1")
 	for _, command := range []TurnCommand{
-		{Type: CommandStartTurn, SessionID: "session-rounds", TurnID: "turn-rounds", Generation: 1, Source: TurnSourceTrigger, Budget: TurnBudget{MaxToolRounds: 1, MaxSteps: 4, ReserveFinalSummary: true}, At: now},
+		{Type: CommandStartTurn, SessionID: "session-rounds", TurnID: "turn-rounds", Generation: 1, Source: TurnSourceTrigger, Budget: TurnBudget{MaxToolCalls: 8, ReserveFinalSummary: true}, At: now},
 		{Type: CommandStartStep, SessionID: "session-rounds", TurnID: "turn-rounds", StepID: "step-1", Generation: 1, At: now},
 		{Type: CommandAssistantReceived, SessionID: "session-rounds", TurnID: "turn-rounds", StepID: "step-1", Generation: 1, HasTools: true, At: now},
 	} {
@@ -723,8 +745,8 @@ func TestTurnCoordinatorPreflightsToolRoundsSeparatelyFromToolCalls(t *testing.T
 	if got := c.Snapshot().Usage.ToolRounds; got != 1 {
 		t.Fatalf("duplicate assistant changed tool rounds=%d, want 1", got)
 	}
-	if decision := c.BudgetDecisionFor(CommandStartStep); decision.Allowed || decision.Reason != "max_tool_rounds" {
-		t.Fatalf("next tool round should be rejected: %+v", decision)
+	if decision := c.BudgetDecisionFor(CommandStartStep); !decision.Allowed {
+		t.Fatalf("tool rounds must not gate another step while calls remain: %+v", decision)
 	}
 	if decision := c.BudgetDecisionForCommand(TurnCommand{Type: CommandStartStep, FinalSummary: true}); !decision.Allowed {
 		t.Fatalf("final summary should remain allowed: %+v", decision)
@@ -799,11 +821,11 @@ func TestTurnCoordinatorRequiresReconciliationForUnknownExecution(t *testing.T) 
 	}
 }
 
-func TestTurnCoordinatorEnforcesUsageBudgets(t *testing.T) {
+func TestTurnCoordinatorRetainsUsageWithoutHiddenTokenCostBudgets(t *testing.T) {
 	now := time.Now().UTC()
 	c := NewTurnCoordinator("session-1", "agent-1")
 	for _, command := range []TurnCommand{
-		{Type: CommandStartTurn, SessionID: "session-1", TurnID: "turn-budget-usage", Generation: 1, Source: TurnSourceHuman, Budget: TurnBudget{MaxSteps: 1, MaxOutputTokens: 5, MaxCost: 1, ReserveFinalSummary: true}, At: now},
+		{Type: CommandStartTurn, SessionID: "session-1", TurnID: "turn-budget-usage", Generation: 1, Source: TurnSourceHuman, Budget: TurnBudget{MaxToolCalls: 64, ReserveFinalSummary: true}, At: now},
 		{Type: CommandStartStep, SessionID: "session-1", TurnID: "turn-budget-usage", StepID: "step-1", Generation: 1, At: now},
 		{Type: CommandModelRequestStarted, SessionID: "session-1", TurnID: "turn-budget-usage", StepID: "step-1", Generation: 1, At: now},
 		{Type: CommandModelUsageRecorded, SessionID: "session-1", TurnID: "turn-budget-usage", StepID: "step-1", Generation: 1, Usage: StepUsage{OutputTokens: 5, TotalTokens: 5, Cost: 1}, At: now},
@@ -812,33 +834,25 @@ func TestTurnCoordinatorEnforcesUsageBudgets(t *testing.T) {
 			t.Fatalf("dispatch %s: %v", command.Type, err)
 		}
 	}
-	if decision := c.BudgetDecisionFor(CommandStartStep); decision.Allowed || decision.Reason != "max_output_tokens" {
-		t.Fatalf("output budget decision = %+v", decision)
+	if decision := c.BudgetDecisionFor(CommandStartStep); !decision.Allowed {
+		t.Fatalf("usage counters must not act as hidden limits: %+v", decision)
 	}
-	if decision := c.BudgetDecisionForCommand(TurnCommand{Type: CommandStartStep, FinalSummary: true}); decision.Allowed || decision.Reason != "max_output_tokens" {
-		t.Fatalf("reserved summary bypassed output budget = %+v", decision)
+	if decision := c.BudgetDecisionForCommand(TurnCommand{Type: CommandStartStep, FinalSummary: true}); !decision.Allowed {
+		t.Fatalf("reserved summary should remain allowed: %+v", decision)
 	}
 }
 
-func TestTurnCoordinatorRejectsThirdRequestAndToolAfterTotalBudget(t *testing.T) {
+func TestTurnCoordinatorAllowsStepsPastLegacyThirtyTwoLimit(t *testing.T) {
 	now := time.Now().UTC()
 	c := NewTurnCoordinator("session-total", "agent-1")
-	budget := TurnBudget{MaxTotalTokens: 10, MaxSteps: 3, MaxToolCalls: 3}
-	for _, command := range []TurnCommand{
-		{Type: CommandStartTurn, SessionID: "session-total", TurnID: "turn-total", Generation: 1, Source: TurnSourceHuman, Budget: budget, At: now},
-		{Type: CommandStartStep, SessionID: "session-total", TurnID: "turn-total", StepID: "step-total", Generation: 1, At: now},
-		{Type: CommandModelRequestStarted, SessionID: "session-total", TurnID: "turn-total", StepID: "step-total", Generation: 1, At: now},
-		{Type: CommandModelUsageRecorded, SessionID: "session-total", TurnID: "turn-total", StepID: "step-total", Generation: 1, Usage: StepUsage{TotalTokens: 10}, At: now},
-	} {
-		if _, err := c.Dispatch(command); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := c.Dispatch(TurnCommand{Type: CommandStartTurn, SessionID: "session-total", TurnID: "turn-total", Generation: 1, Source: TurnSourceHuman, Budget: TurnBudget{MaxToolCalls: 64}, At: now}); err != nil {
+		t.Fatal(err)
 	}
-	if d := c.BudgetDecisionFor(CommandModelRequestStarted); d.Allowed || d.Reason != "max_total_tokens" {
-		t.Fatalf("third request decision=%+v", d)
-	}
-	if d := c.BudgetDecisionFor(CommandToolCallRecorded); d.Allowed || d.Reason != "max_total_tokens" {
-		t.Fatalf("tool decision=%+v", d)
+	c.mu.Lock()
+	c.turn.Usage.Steps = 33
+	c.mu.Unlock()
+	if d := c.BudgetDecisionFor(CommandStartStep); !d.Allowed {
+		t.Fatalf("step count 33 must be allowed while 31+ call slots remain: %+v", d)
 	}
 }
 
@@ -867,7 +881,7 @@ func TestTurnCoordinatorDurableDispatchRollsBackWhenPersistenceFails(t *testing.
 func TestTurnCoordinatorAllowsOnlyReservedFinalSummaryStep(t *testing.T) {
 	now := time.Now().UTC()
 	c := NewTurnCoordinator("session-1", "agent-1")
-	budget := TurnBudget{MaxSteps: 1, ReserveFinalSummary: true}
+	budget := TurnBudget{MaxToolCalls: 1, ReserveFinalSummary: true}
 	for _, command := range []TurnCommand{
 		{Type: CommandStartTurn, SessionID: "session-1", TurnID: "turn-summary", Generation: 1, Source: TurnSourceHuman, Budget: budget, At: now},
 		{Type: CommandStartStep, SessionID: "session-1", TurnID: "turn-summary", StepID: "step-1", Generation: 1, At: now},
@@ -876,16 +890,20 @@ func TestTurnCoordinatorAllowsOnlyReservedFinalSummaryStep(t *testing.T) {
 			t.Fatalf("dispatch %s: %v", command.Type, err)
 		}
 	}
-	if decision := c.BudgetDecisionFor(CommandStartStep); decision.Allowed {
-		t.Fatalf("ordinary next step should be rejected: %+v", decision)
-	}
 	for _, command := range []TurnCommand{
-		{Type: CommandAssistantReceived, SessionID: "session-1", TurnID: "turn-summary", StepID: "step-1", Generation: 1, At: now},
+		{Type: CommandAssistantReceived, SessionID: "session-1", TurnID: "turn-summary", StepID: "step-1", Generation: 1, HasTools: true, At: now},
+		{Type: CommandToolCallRecorded, SessionID: "session-1", TurnID: "turn-summary", StepID: "step-1", Generation: 1, ToolCallID: "summary-call", At: now},
+		{Type: CommandToolExecutionStarted, SessionID: "session-1", TurnID: "turn-summary", StepID: "step-1", Generation: 1, ToolExecutionID: "summary-call-execution", ToolCallID: "summary-call", ToolName: "read_file", At: now},
+		{Type: CommandToolExecutionFailed, SessionID: "session-1", TurnID: "turn-summary", StepID: "step-1", Generation: 1, ToolExecutionID: "summary-call-execution", ExecutionStatus: ToolExecutionStatusFailed, At: now},
+		{Type: CommandToolBatchSettled, SessionID: "session-1", TurnID: "turn-summary", StepID: "step-1", Generation: 1, At: now},
 		{Type: CommandCompleteStep, SessionID: "session-1", TurnID: "turn-summary", StepID: "step-1", Generation: 1, At: now},
 	} {
 		if _, err := c.Dispatch(command); err != nil {
 			t.Fatalf("finish first step: %v", err)
 		}
+	}
+	if decision := c.BudgetDecisionFor(CommandStartStep); decision.Allowed || decision.Reason != "max_tool_calls" {
+		t.Fatalf("ordinary continuation should be rejected after call quota: %+v", decision)
 	}
 	summary := TurnCommand{Type: CommandStartStep, SessionID: "session-1", TurnID: "turn-summary", StepID: "step-2", Generation: 1, FinalSummary: true, At: now}
 	if decision := c.BudgetDecisionForCommand(summary); !decision.Allowed {

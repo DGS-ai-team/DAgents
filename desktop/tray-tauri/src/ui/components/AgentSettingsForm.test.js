@@ -79,7 +79,8 @@ describe("AgentSettingsForm tool group tiles", () => {
     const input = wrapper.get('[aria-label="每轮最大工具调用数"]');
 
     expect(input.element.value).toBe("64");
-    expect(wrapper.text()).toContain("Auto 自主激活与 dreaming 使用各自的轮次上限");
+    expect(wrapper.text()).toContain("普通聊天、自主运行和每日经验整理每轮均受此上限约束");
+    expect(wrapper.text()).toContain("含失败或拒绝");
     await input.setValue("12");
     expect(draft.maxToolCalls).toBe(12);
     wrapper.unmount();

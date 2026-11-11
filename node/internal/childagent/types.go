@@ -27,17 +27,17 @@ type CreateInput struct {
 	AllowedTools []string
 	SkillNames   []string
 	TTLSeconds   int
-	MaxTurns     int
 }
 
 // Result 为交付给父 Agent 的终态结果。
 type Result struct {
-	ChildAgentID string   `json:"child_agent_id"`
-	Status       Status   `json:"status"`
-	Summary      string   `json:"summary"`
-	TurnCount    int      `json:"turn_count"`
-	Error        string   `json:"error,omitempty"`
-	Artifacts    []string `json:"artifacts"`
+	ChildAgentID string `json:"child_agent_id"`
+	Status       Status `json:"status"`
+	Summary      string `json:"summary"`
+	// TurnCount currently reflects the child's observed lifecycle step_index.
+	TurnCount int      `json:"turn_count"`
+	Error     string   `json:"error,omitempty"`
+	Artifacts []string `json:"artifacts"`
 }
 
 // ToolActivity 是父 Agent 可见的单条子 Agent 工具活动摘要。
@@ -66,7 +66,6 @@ type RunRecord struct {
 	LoadedSkills  []string
 	ProgressJSON  []byte
 	TurnCount     int
-	MaxTurns      int
 	Summary       string
 	Error         string
 	CreatedAt     time.Time
@@ -85,10 +84,10 @@ type RunRepository interface {
 // Progress 是父 Agent 可见的轻量子 Agent 运行快照。它描述当前阶段、有限的
 // 工具活动摘要与最近一次工具输出，不复制子 Agent 的完整 transcript。
 type Progress struct {
-	Status              Status         `json:"status"`
-	Phase               string         `json:"phase,omitempty"`
+	Status Status `json:"status"`
+	Phase  string `json:"phase,omitempty"`
+	// TurnCount currently reflects observed lifecycle step_index, not a quota.
 	TurnCount           int            `json:"turn_count"`
-	MaxTurns            int            `json:"max_turns"`
 	CurrentTool         string         `json:"current_tool,omitempty"`
 	CurrentToolCallID   string         `json:"current_tool_call_id,omitempty"`
 	CurrentToolStatus   string         `json:"current_tool_status,omitempty"`
@@ -114,7 +113,6 @@ type ActiveAgent struct {
 	Status        Status
 	CreatedAt     time.Time
 	ExpiresAt     time.Time
-	MaxTurns      int
 	TurnCount     int
 	Progress      Progress
 
@@ -133,11 +131,9 @@ func newActiveAgent(parentID string, input CreateInput, childID string, expiresA
 		Status:        StatusCreating,
 		CreatedAt:     time.Now(),
 		ExpiresAt:     expiresAt,
-		MaxTurns:      input.MaxTurns,
 		Progress: Progress{
-			Status:   StatusCreating,
-			Phase:    "creating",
-			MaxTurns: input.MaxTurns,
+			Status: StatusCreating,
+			Phase:  "creating",
 		},
 		settledCh: make(chan struct{}),
 	}
@@ -155,7 +151,6 @@ type ActiveAgentSnapshot struct {
 	Status        Status
 	CreatedAt     time.Time
 	ExpiresAt     time.Time
-	MaxTurns      int
 	TurnCount     int
 	Progress      Progress
 	FinishedAt    time.Time
@@ -180,7 +175,6 @@ func (a *ActiveAgent) Snapshot() ActiveAgentSnapshot {
 		Status:        a.Status,
 		CreatedAt:     a.CreatedAt,
 		ExpiresAt:     a.ExpiresAt,
-		MaxTurns:      a.MaxTurns,
 		TurnCount:     a.TurnCount,
 		Progress:      progress,
 		FinishedAt:    a.Progress.FinishedAt,

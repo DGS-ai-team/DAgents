@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Desktop 真实 LLM 工作流审查 · 2026-11-05</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f5f7f9;
+      --surface: #fff;
+      --surface-soft: #f8fafb;
+      --text: #24313d;
+      --muted: #667684;
+      --subtle: #85929c;
+      --border: #dbe2e8;
+      --border-soft: #e8edf1;
+      --accent: #557f91;
+      --accent-soft: #eaf1f4;
+      --pending: #7a705d;
+      --pending-bg: #f5f2eb;
+      --p1: #8f615a;
+      --p1-bg: #f6eeec;
+      --p0: #8a4c4b;
+      --p0-bg: #f7e9e8;
+      --p2: #6c718d;
+      --p2-bg: #f0f0f6;
+      --p3: #737d69;
+      --p3-bg: #f0f3ed;
+      --radius: 10px;
+      font: 14px/1.65 "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background: var(--page);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #476f82; text-underline-offset: 3px; }
+    a:hover { color: #315a6d; }
+    .layout { display: grid; grid-template-columns: 224px minmax(0, 1fr); min-height: 100vh; }
+    aside { position: sticky; top: 0; align-self: start; height: 100vh; overflow: auto; padding: 24px 16px; border-right: 1px solid var(--border); background: #f8fafb; }
+    .brand { margin: 0 0 5px; font-size: 15px; font-weight: 650; }
+    .meta { margin: 0 0 22px; color: var(--muted); font-size: 12px; }
+    .nav-title { margin: 18px 0 7px; color: var(--subtle); font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+    nav a { display: block; margin: 2px 0; padding: 7px 9px; border-radius: 7px; color: var(--muted); font-size: 13px; text-decoration: none; }
+    nav a:hover, nav a:focus-visible { background: var(--accent-soft); color: var(--text); outline: none; }
+    main { width: min(1120px, 100%); margin: 0 auto; padding: 36px clamp(20px, 4vw, 56px) 64px; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-size: 12px; font-weight: 650; }
+    h1 { margin: 0; font-size: clamp(26px, 3vw, 34px); line-height: 1.2; letter-spacing: -.025em; }
+    .lead { max-width: 780px; margin: 14px 0 0; color: var(--muted); font-size: 15px; }
+    .scope { display: flex; flex-wrap: wrap; gap: 7px; margin: 20px 0 30px; }
+    .chip { padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 11px; }
+    section { scroll-margin-top: 20px; margin-top: 28px; }
+    h2 { margin: 0 0 10px; font-size: 20px; line-height: 1.35; }
+    h3 { margin: 0 0 8px; font-size: 15px; }
+    p { margin: 8px 0; }
+    .summary, .finding, .note, .screens { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .summary { padding: 18px 20px; }
+    .summary p:last-child { margin-bottom: 0; }
+    .finding { margin: 12px 0; padding: 15px 17px; }
+    .finding-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 7px; }
+    .priority { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 650; }
+    .pending { color: var(--pending); background: var(--pending-bg); }
+    .p1 { color: var(--p1); background: var(--p1-bg); }
+    .p0 { color: var(--p0); background: var(--p0-bg); }
+    .p2 { color: var(--p2); background: var(--p2-bg); }
+    .p3 { color: var(--p3); background: var(--p3-bg); }
+    .tag { color: var(--subtle); font-size: 11px; }
+    .label { color: var(--muted); font-size: 12px; font-weight: 650; }
+    .finding p { margin: 5px 0; }
+    .accept { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: 13px; }
+    .screens { margin: 14px 0 20px; padding: 14px; background: var(--surface-soft); }
+    .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 12px; }
+    figure { min-width: 0; margin: 0; padding: 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+    figure a { display: block; }
+    figure img { display: block; width: 100%; height: auto; border-radius: 5px; }
+    figcaption { padding: 7px 2px 0; color: var(--muted); font-size: 12px; }
+    figcaption a { margin-left: 5px; font-size: 11px; }
+    .note { margin: 12px 0; padding: 14px 16px; background: var(--surface-soft); }
+    .note p:first-child { margin-top: 0; }
+    .note p:last-child { margin-bottom: 0; }
+    .evidence-empty { padding: 18px; border: 1px dashed var(--border); border-radius: 8px; color: var(--subtle); text-align: center; }
+    .evidence-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .evidence-table th, .evidence-table td { padding: 8px 9px; border-bottom: 1px solid var(--border-soft); text-align: left; vertical-align: top; }
+    .evidence-table th { color: var(--muted); font-weight: 650; }
+    .evidence-table td { min-width: 100px; }
+    .template { padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--surface-soft); color: var(--muted); font: 12px/1.65 Consolas, "Cascadia Code", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .limits { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+    .limits div { padding: 12px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--surface); }
+    .limits strong { display: block; margin-bottom: 4px; font-size: 13px; }
+    footer { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--subtle); font-size: 12px; }
+    @media (max-width: 760px) {
+      .layout { display: block; }
+      aside { position: static; width: 100%; height: auto; padding: 14px 18px; border-right: 0; border-bottom: 1px solid var(--border); }
+      nav { display: flex; flex-wrap: wrap; gap: 2px; }
+      .nav-title { width: 100%; margin: 10px 0 2px; }
+      nav a { padding: 5px 8px; }
+      main { padding-top: 24px; }
+      .evidence-table { display: block; overflow-x: auto; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <p class="brand">真实 LLM 工作流审查</p>
+      <p class="meta">2026-11-05 · Windows 原生 Desktop · 真实模型</p>
+      <nav aria-label="报告目录">
+        <p class="nav-title">结论</p>
+        <a href="#summary">整体方向</a>
+        <a href="#findings">优先改进</a>
+        <p class="nav-title">真实工作流</p>
+        <a href="#tools">分析与工具调用</a>
+        <a href="#approval">审批可见性</a>
+        <a href="#composer">错误恢复与续聊</a>
+        <a href="#delivery">引用与文件交付</a>
+        <a href="#evidence">证据索引</a>
+        <a href="#limits">范围与未验证项</a>
+      </nav>
+    </aside>
+    <main>
+      <header>
+        <p class="eyebrow">真实模型体验审查 · 原生操作与 API 时序</p>
+        <h1>工具执行可追踪，审批和错误恢复仍有关键断点</h1>
+        <p class="lead">本轮以隔离 Agent 和真实模型完成 CSV 核对、报告审批与交付。最大问题是长对话中的审批卡在视觉上消失；另有额度错误误分类、取消后的上下文延续、引用协议泄漏和窄资源区遮挡。</p>
+        <div class="scope" aria-label="审查范围">
+          <span class="chip">真实模型：DeepSeek / Qwen 探针</span>
+          <span class="chip">隔离 Agent 与本地工作区</span>
+          <span class="chip">原生截图 01–15 + API 时序</span>
+          <span class="chip">仅改隔离测试数据与本报告；未改产品代码</span>
+          <span class="chip">未自动点击审批控件</span>
+        </div>
+      </header>
+
+      <section id="summary">
+        <h2>结论摘要</h2>
+        <div class="summary">
+          <p><strong>已完成的真实流程：</strong>DeepSeek 读取 CSV 并分析重复与异常金额；报告写入请求进入审批；通过本地 API 批准了确切的工作区写入；原生 Desktop 打开报告、引用 CSV 并修正措辞；Agent 随后更新并回读报告。</p>
+          <p><strong>优先问题：</strong>长对话的审批卡在原生屏幕上仅剩一条分隔线，AX 仍读到完整审批内容；额度不足错误显示为配置错误；取消后相关后续请求仍会补做被取消任务的未完成部分。短对话中的批量审批卡可见，支持审批卡 flex 收缩假设，但未做 DOM 测量。</p>
+          <p><strong>证据边界：</strong>原生审批按钮与多选交互未验收；两次原生 Stop 尝试时回合已自然完成，不能算停止通过。实际取消由 API 接受后取消，follow-up 也由 Luna 脚本通过 API 发送；后续长回复仅由 history/SSE 核对，没有 native 截图。</p>
+        </div>
+        <div class="note">
+          <p><span class="label">请求轮次：</span>主 DeepSeek Agent 7 个人类请求轮次：前三轮分别有 3/2/4 个工具调用，两轮长文无工具，一轮 API 取消，一轮 API follow-up 后 completed。第二 Agent 2 轮：Qwen 额度失败，随后 DeepSeek 批量审批完成（1 项成功、1 项拒绝）。共 9 个人类请求轮次；这不是模型 API 调用总数，多步骤与恢复会产生多个模型步骤。</p>
+        </div>
+      </section>
+
+      <section id="findings">
+        <h2>优先改进</h2>
+        <p class="meta">P0–P3 表示本轮产品打磨顺序，不代表每项都是阻断性缺陷。</p>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p0">P0 · 审批阻断</span><h3>长对话审批卡片不可见，用户无法在 Desktop 中决策</h3><span class="tag">03 原生截图；AX可读；DOM根因未测</span></div>
+          <p><span class="label">实测：</span>DeepSeek 请求停在 pending_hitl。辅助功能树可见“需要确认”、中风险、purpose“生成 expense-review.md 复核报告”、拒绝和允许本次；原生屏幕仅在消息区末尾显示一条横线，卡片正文和按钮均不可见。连续两次 snapshot、向下滚动 560px、切换 Agent 再返回后仍一致。</p>
+          <p><span class="label">对照：</span>短会话中同批两个 <code>write_file</code> 审批清楚可见（12），因此问题与长消息流/布局空间相关的可能性高；当前没有 DOM 尺寸与 computed style 测量，不能宣称 flex 收缩已被证实。</p>
+          <p><span class="label">高概率根因：</span><code>.chat__stream</code> 是纵向 flex 滚动容器；ApprovalBubble 直接作为 flex 子项，根节点设置 <code>overflow:hidden</code> 且未锁定 flex shrink。拥挤时可能被压至仅剩边框高度。工具组本身显式使用 <code>flex:0 0 auto</code>，审批卡没有。下一步应在原生 DOM 记录审批框 rect、高度、flex-shrink、overflow 和 stream 的 scrollHeight/clientHeight；临时禁用 shrink 验证。</p>
+          <p><span class="label">建议：</span>审批请求始终保持可见并可滚动到达，必要时为卡片保留内容高度或单独确保审批区域进入视口；不得以无障碍树可读替代视觉可操作。原生审批按钮/checkbox 本轮未点击，API 批准仅用于完成隔离工作流。</p>
+          <p class="accept"><span class="label">验收：</span>长消息流和短对话中的待审批卡都完整显示标题、purpose、按钮；滚动、回到 Agent 和新事件更新不再将卡片压成细线；键盘与屏幕阅读器路径分别验证。</p>
+          <p class="code-ref"><a href="../../../../../desktop/tray-tauri/src/ui/components/MainChatPanel.vue#L378">MainChatPanel.vue:378–384</a> · <a href="../../../../../desktop/tray-tauri/src/ui/styles/workbench.css#L249">workbench.css:249–257</a> · <a href="../../../../../desktop/tray-tauri/src/ui/components/ApprovalBubble.vue#L178">ApprovalBubble.vue:178–185</a> · <a href="../../../../../desktop/tray-tauri/src/ui/components/ToolGroupRow.vue#L123">ToolGroupRow.vue:123–127</a></p>
+          <div class="screens"><div class="gallery">
+            <figure><a href="03-approval-not-visible.png" target="_blank" rel="noreferrer"><img src="03-approval-not-visible.png" alt="长对话中审批卡未显示，仅消息区底部留有一条线"></a><figcaption>03 · 长对话中的审批卡不可见 <a href="03-approval-not-visible.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+            <figure><a href="12-batch-approval-visible.png" target="_blank" rel="noreferrer"><img src="12-batch-approval-visible.png" alt="短对话中可见的两个文件写入批量审批卡"></a><figcaption>12 · 短对话批量审批可见（未点击控件） <a href="12-batch-approval-visible.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          </div></div>
+        </article>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p1">P1 · 错误恢复</span><h3>额度耗尽被归类为模型配置错误，错误旁没有恢复入口</h3><span class="tag">API 实测 + 04/11 原生截图 + 代码事实</span></div>
+          <p><span class="label">实测：</span>09:34:16，Qwen qwen3.7-plus 返回 HTTP 403，JSON <code>error.type/code=insufficient_quota</code>，原因为免费额度耗尽。Node 投影为 <code>provider_configuration</code>，Desktop 显示“模型请求或配置无效，请检查模型名称、接口地址和请求参数”。回合已失败终止，不是卡住。</p>
+          <p><span class="label">恢复路径：</span>错误文字旁没有设置/切换动作。失败后底栏 picker 可打开并选择 DeepSeek；列表显示 profile ID（如 <code>deepseek-v4-flash</code>），底栏显示模型名（如 <code>qwen3.7-plus</code>），两种标识没有说明，容易误读为不一致配置。</p>
+          <p><span class="label">代码佐证与建议：</span>Node provider error 按 HTTP 状态把 403 放入配置类、402 才归 quota；Desktop 虽已有 <code>provider_quota</code> 专用提示，但这次没有命中。让结构化错误优先识别额度信号，显示额度不足的准确原因，并就近给出切换模型/打开模型设置的明确路径；标签应区分“配置名称”和“实际模型名”。</p>
+          <p class="accept"><span class="label">验收：</span>相同响应显示额度不足而非配置错误；用户可从错误位置切换模型或打开设置；picker 中 profile 与模型名称的关系清楚。回合终态解除发送锁。</p>
+          <p class="code-ref"><a href="../../../../../node/internal/llm/provider_error.go#L44">provider_error.go:44–61</a> · <a href="../../../../../desktop/tray-tauri/src/ui/workbench-state.js#L90">workbench-state.js:90–107</a> · <a href="../../../../../desktop/tray-tauri/src/ui/components/MainChatPanel.vue#L402">MainChatPanel.vue:402</a></p>
+          <div class="screens"><div class="gallery">
+            <figure><a href="04-quota-misclassified.png" target="_blank" rel="noreferrer"><img src="04-quota-misclassified.png" alt="Qwen额度耗尽后显示模型请求或配置无效的错误文案"></a><figcaption>04 · 额度错误文案指向配置检查 <a href="04-quota-misclassified.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+            <figure><a href="11-model-recovery-picker.png" target="_blank" rel="noreferrer"><img src="11-model-recovery-picker.png" alt="失败页面底栏打开模型选择器，列表显示profile名称"></a><figcaption>11 · 可从底栏选择另一模型，但名称层级未说明 <a href="11-model-recovery-picker.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          </div></div>
+        </article>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p1">P1 · 取消语义</span><h3>取消回合后，相关后续请求仍可能完成被取消任务的剩余要求</h3><span class="tag">API accepted/cancelled 事件 + API follow-up + history/SSE</span></div>
+          <p><span class="label">实测：</span>Luna backend API 返回 accepted 后约 1 秒取消，终态为 <code>cancelled_by_user</code>。相关 follow-up 也由 Luna 脚本通过 API 发送；Agent 补做了取消前任务中尚未完成的 50 节以及新消息末尾的要求。History 保留连续两个 user 条目；新消息没有被吞，也不是队列重放。约 7300 字符的后续回复仅由 history/SSE 核验，没有 native 截图。</p>
+          <p><span class="label">影响与建议：</span>保留用户输入作为历史，但将该任务明确标记为已取消。后续生成应优先响应最新意图；只有用户明确选择“继续该任务”时才恢复旧任务。界面简洁显示“已停止”；若本轮已有文件变更，说明已写入内容仍保留。无需删除历史或增加技术确认步骤。</p>
+          <p class="accept"><span class="label">验收：</span>取消后发一条无关新请求，只回答新请求、不补做旧任务；明确选择“继续该任务”才续做；历史保留旧输入并标记已取消。Stop 按钮需在真实运行中单独验证。</p>
+        </article>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p1">P1 · 侧栏状态</span><h3>当前 Agent 已完成，侧栏仍显示审批中的橙色提示</h3><span class="tag">13–15 原生截图 + hydrate/API 字段 + 代码追踪</span></div>
+          <p><span class="label">实测与字段：</span>截图 13–15 中当前 Agent 仍有橙点；双方 hydrate 都是 <code>completed</code>、<code>active=false</code>、<code>pending=null</code>。<code>GET /v1/agents</code> 返回的 <code>has_pending_hitl</code> 在 false 时省略，而 <code>has_unread=true</code>。不能把省略的 false 解释为 Node 仍有待审批。</p>
+          <p><span class="label">代码佐证与可能原因：</span>Desktop 的橙点只读取 <code>agent.has_pending_hitl</code>（<code>DesktopApp.vue:2042</code>），不使用 unread；Node 的通知投影从 pending HITL 状态导出（<code>notify.go:131–147</code>）。更可能是 Desktop 未及时同步侧栏 Agent 列表，当前 Agent 的通知清除也没有被侧栏消费；根因尚未由事件追踪确认。</p>
+          <p class="code-ref"><a href="../../../../../desktop/tray-tauri/src/ui/DesktopApp.vue#L2042">DesktopApp.vue:2042</a> · <a href="../../../../../node/internal/session/notify.go#L131">notify.go:131–147</a></p>
+          <p><span class="label">建议：</span>终态 hydrate/审批解决后及时刷新或更新对应侧栏 Agent 行；unread 提示与 pending approval 使用独立视觉语义。</p>
+          <p class="accept"><span class="label">验收：</span>审批通过、拒绝或终态完成后橙点在一次状态更新内消失；切换 Agent 再返回仍与 <code>pending_hitl</code> 一致；仅 <code>has_unread</code> 时不显示审批橙点。</p>
+          <div class="screens"><div class="gallery"><figure><a href="13-partial-approval-result.png" target="_blank" rel="noreferrer"><img src="13-partial-approval-result.png" alt="终态回复已说明拒绝结果，但当前Agent侧栏仍有橙点"></a><figcaption>13 · 终态回复与侧栏橙点并存 <a href="13-partial-approval-result.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure></div></div>
+        </article>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p2">P2 · 信息层级</span><h3>工具引用的内部版本协议泄漏到用户消息，并与附件卡重复呈现</h3><span class="tag">08/10 原生截图</span></div>
+          <p>发送前，08 中的 CSV 引用 chip 清楚展示文件名。发送后，10 的用户消息正文又出现完整预览版本 hash 和“读取附近消息附带的工作区文件并结合位置查看内容”等内部协议文本，同时下方再次出现 CSV 附件卡。</p>
+          <p><span class="label">建议：</span>保留用户写的任务与一张清晰引用卡；把 revision、内部读取指令留在模型请求/可诊断细节，不拼回常规消息正文，也不要重复一个附件入口。</p>
+          <p class="accept"><span class="label">验收：</span>普通消息只显示用户原话；引用卡显示文件名和必要定位；hash 与内部协议不出现在用户可见正文。</p>
+          <div class="screens"><div class="gallery">
+            <figure><a href="08-resource-reference.png" target="_blank" rel="noreferrer"><img src="08-resource-reference.png" alt="发送前composer中清晰的CSV引用chip"></a><figcaption>08 · 发送前文件引用 chip <a href="08-resource-reference.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+            <figure><a href="10-reference-protocol-in-chat.png" target="_blank" rel="noreferrer"><img src="10-reference-protocol-in-chat.png" alt="发送后消息正文包含预览hash和内部指令，并重复显示文件卡"></a><figcaption>10 · 正文暴露预览协议并重复显示引用 <a href="10-reference-protocol-in-chat.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          </div></div>
+        </article>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p3">P3 · 结果摘要</span><h3>混合审批结果折叠后只突出被拒绝项</h3><span class="tag">14 原生截图</span></div>
+          <p>两项 <code>write_file</code> 经 API 分别批准和拒绝后，展开列表能清楚区分“已完成”和“已拒绝”。折叠父行只显示被拒绝项的 purpose，右侧显示“1项拒绝”，没有概括另一项已完成。</p>
+          <p><span class="label">建议：</span>折叠态用中性批次标题，状态简洁概括混合结果，例如“2 项工具操作”与“1 项完成 · 1 项未批准”；具体文件和结果仍在展开子行。</p>
+          <p class="accept"><span class="label">验收：</span>一完成一拒绝时，折叠态能同时表达两种结果和数量；展开后每项仍显示准确状态，不能暗示被拒绝项已执行或自动重试。</p>
+        </article>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p2">P2 · 资源可读性</span><h3>窄资源区压缩表格，展开 Dock 又遮住 CSV 末行</h3><span class="tag">06/07/09 原生截图</span></div>
+          <p>应用导航和工作区文件树形成双侧栏，预览列只剩较窄空间，报告中的四列表格字段与内容多处折行。CSV 视图能读到 7 行、4 列，但金额值左对齐，CSV 第一行字段名看起来与普通数据行相同。09 展开 Dock 后，底部消息卡覆盖 CSV 预览最后一行。</p>
+          <p><span class="label">建议：</span>宽窗口维持分栏；窄窗口把文件树收为较窄抽屉或可收起栏。预览滚动区为底部 Dock/输入栏保留空间，用户可滚动看到末行；CSV 表头和数值列分别用表头样式、右对齐数值强化扫读。不要再叠加一排常驻面板。</p>
+          <p class="accept"><span class="label">验收：</span>报告表格无需异常缩放即可阅读；Dock 展开时仍能滚到 CSV 最后一行；金额列右对齐且列名/首行语义清楚。</p>
+          <div class="screens"><div class="gallery">
+            <figure><a href="06-report-preview.png" target="_blank" rel="noreferrer"><img src="06-report-preview.png" alt="分栏工作区中的报告预览，表格字段挤压折行且底部Dock挡住内容"></a><figcaption>06 · 报告预览列较窄，Dock 覆盖底部内容 <a href="06-report-preview.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+            <figure><a href="07-csv-preview.png" target="_blank" rel="noreferrer"><img src="07-csv-preview.png" alt="CSV表格预览，金额左对齐且首行字段名与数据行同样式"></a><figcaption>07 · CSV 数据预览 <a href="07-csv-preview.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+            <figure><a href="09-resource-collaboration.png" target="_blank" rel="noreferrer"><img src="09-resource-collaboration.png" alt="展开的快速消息Dock覆盖CSV预览下方内容"></a><figcaption>09 · 展开 Dock 遮住 CSV 末行 <a href="09-resource-collaboration.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          </div></div>
+        </article>
+        <article class="finding">
+          <div class="finding-head"><span class="priority p2">P2 · 状态可读性</span><h3>等待状态扫光时文字对比度接近消失</h3><span class="tag">02 原生截图；缺连续帧</span></div>
+          <p>02 的生成状态截图中，底栏状态文字经过扫光时接近白色，和浅色背景对比不足。单张图只能证明该时刻可读性弱，当前没有连续帧，不能据此判断完整动画是否稳定或是否存在跳动。</p>
+          <p><span class="label">建议：</span>固定状态文字基色与足够对比度，让扫光仅作为轻微强调，不覆盖/漂白字形；统一状态文字与模型文字的字号、字体族和行高。</p>
+          <p class="accept"><span class="label">验收：</span>扫光的任一帧仍能读出状态和重试次数；实际长等待持续观察无布局跳动，并检查 reduced-motion 下的静态状态。</p>
+          <div class="screens"><div class="gallery"><figure><a href="02-generating-footer.png" target="_blank" rel="noreferrer"><img src="02-generating-footer.png" alt="生成状态时Composer底栏状态文字在扫光中变得很淡"></a><figcaption>02 · 生成状态扫光截图 <a href="02-generating-footer.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure></div></div>
+        </article>
+      </section>
+
+      <section id="tools">
+        <h2>1 · 工具执行与结果</h2>
+        <div class="finding">
+          <div class="finding-head"><span class="tag">真实 DeepSeek 生成；本轮没有连续视频证据</span></div>
+          <p>真实流程为：读入 CSV → 分析重复项与金额异常 → 请求写入报告 → 本地 API 批准确切工作区写入 → Desktop 打开 <code>expense-review.md</code> → 通过原生 CSV 引用补充措辞 → Agent 修改自有报告并回读。截图 01、05、06、07、08、10 分别记录分析、文件交付、报告/CSV 查看和引用流程。</p>
+          <p>静态图不能证明多个工具状态切换时的连续动画、折叠父行高度是否全程稳定或子行展开状态是否保持；本轮不把这些说成已验收。批量结果截图显示仅批准的 <code>review-checklist.md</code> 被创建（421B），拒绝的 <code>review-questions.md</code> 不存在；模型未擅自重试，并在最终回复中明确说明未创建。</p>
+          <p class="accept"><span class="label">P3机会：</span>结果详情目前突出字节数和编码，文件路径不可直接打开。可提供明确的“打开生成文件”入口；验收时入口应打开确切工作区路径，技术元数据保留为次要信息。</p>
+        </div>
+        <div class="screens"><div class="gallery"><figure><a href="01-analysis-result.png" target="_blank" rel="noreferrer"><img src="01-analysis-result.png" alt="真实模型对CSV的核对与异常分析"></a><figcaption>01 · CSV 核对与异常分析结果 <a href="01-analysis-result.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure><figure><a href="05-delivery-link.png" target="_blank" rel="noreferrer"><img src="05-delivery-link.png" alt="Agent给出expense-review.md报告链接并显示核对摘要"></a><figcaption>05 · 报告链接与生成摘要 <a href="05-delivery-link.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure><figure><a href="14-tool-outcomes-expanded.png" target="_blank" rel="noreferrer"><img src="14-tool-outcomes-expanded.png" alt="展开的批量工具组显示一项已完成和一项已拒绝"></a><figcaption>14 · 展开后两项工具终态清楚 <a href="14-tool-outcomes-expanded.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure><figure><a href="15-tool-parameters.png" target="_blank" rel="noreferrer"><img src="15-tool-parameters.png" alt="写入工具详情参数与结果路径整齐显示，但路径不是链接"></a><figcaption>15 · 参数字段可读，文件结果路径不可直接打开 <a href="15-tool-parameters.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure></div></div>
+      </section>
+
+      <section id="approval">
+        <h2>2 · 工具审批</h2>
+        <div class="finding">
+          <div class="finding-head"><span class="tag">原生审批控件未操作；决策经本地 API 完成</span></div>
+          <p>长对话里，审批请求“生成 expense-review.md 复核报告”进入 pending_hitl，但卡片视觉不可见（03）。短会话中的两个 <code>write_file</code> 批量请求正常显示风险、purpose、待确认状态、右侧 checkbox、拒绝本批和批准所选（12）。后续真实批次由本地 API 对 <code>review-checklist.md</code> 精确批准、对 <code>review-questions.md</code> 拒绝：前者创建 421B 文件，后者不存在；模型没有自行重试，最终答复明确报告未创建。13–15 记录结果、展开终态和参数详情。</p>
+          <p>原生审批卡实际批准/拒绝、多选 checkbox、展开参数均未在界面点击验收。API 决策验证了执行结果，不代表 UI 控件交互通过。</p>
+          <p>为避免通过自动化绕过安全决策，实际写入由本地 API 对确切的 workspace write 请求批准；不能把该工作流结果算作 UI 审批交互验收。</p>
+        </div>
+        <div class="screens"><div class="gallery"><figure><a href="03-approval-not-visible.png" target="_blank" rel="noreferrer"><img src="03-approval-not-visible.png" alt="长对话pending_hitl的审批正文不可见"></a><figcaption>03 · 长对话审批不可见 <a href="03-approval-not-visible.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure><figure><a href="12-batch-approval-visible.png" target="_blank" rel="noreferrer"><img src="12-batch-approval-visible.png" alt="短对话中批量文件写入审批卡可见"></a><figcaption>12 · 短会话批量审批可见 <a href="12-batch-approval-visible.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure><figure><a href="13-partial-approval-result.png" target="_blank" rel="noreferrer"><img src="13-partial-approval-result.png" alt="最终答复说明清单已创建、问题文件因拒绝未创建"></a><figcaption>13 · 批量审批后的最终说明 <a href="13-partial-approval-result.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure><figure><a href="14-tool-outcomes-expanded.png" target="_blank" rel="noreferrer"><img src="14-tool-outcomes-expanded.png" alt="展开的工具组显示一项已完成和一项已拒绝"></a><figcaption>14 · 子项执行结果 <a href="14-tool-outcomes-expanded.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure></div></div>
+      </section>
+
+      <section id="composer">
+        <h2>3 · 生成状态、模型选择、停止与续聊</h2>
+        <div class="finding">
+          <div class="finding-head"><span class="priority p1">P1 · 继续语义</span><h3>API 取消成功后，下一条相关消息接续了尚未完成的旧要求</h3></div>
+          <p>本地 API 报告 accepted 后约 1 秒发取消，终态明确为 <code>cancelled_by_user</code>。相关 follow-up 也由 Luna 脚本通过 API 发送，Agent 补完了旧任务中尚未完成的 50 节并完成新要求。History/SSE 显示两个连续 user message，新消息未吞掉；没有证据表明队列自动重放。约 7300 字符的回复没有 native 截图，因此不能说已在原生界面观察到后续结果。</p>
+          <p><span class="label">建议：</span>运行时保留原输入并标记任务已取消；后续请求只跟随新意图，用户明确选择“继续该任务”时才恢复。界面显示“已停止”；如已有文件变更，说明已写入内容保留。</p>
+          <p class="accept"><span class="label">验证边界：</span>本轮两次从原生界面点 Stop 时回合都已自然 completed，因此不算 Stop 控件通过。实际取消与续聊证据来自 API 终态、API follow-up 和 history/SSE；没有后续 native 回复截图。</p>
+        </div>
+        <div class="finding">
+          <div class="finding-head"><span class="priority p2">P2 · 状态可读性</span><span class="tag">02 原生截图，缺连续动画帧</span></div>
+          <p>等待中的扫光会使底栏状态字近白。静态截图只能证明该帧对比偏低；目前没有视频/连续帧证据判断状态是否跳动。建议让文字保持固定可读基色，扫光只强调底色/局部，不抹淡字形，并统一状态文字与模型名的字号、字体族与行高。</p>
+          <p class="accept"><span class="label">验收：</span>在完整长等待中每一帧都能读状态；停止/完成切换时槽位高度稳定；减少动态效果设置下状态仍清楚。</p>
+        </div>
+        <div class="finding">
+          <div class="finding-head"><span class="priority p1">P1 · 模型恢复</span><span class="tag">11 原生截图；失败原因旁无 CTA</span></div>
+          <p>额度错误旁没有直接恢复入口；底栏 picker 可以选择 DeepSeek。菜单项显示 profile ID，底栏当前显示模型名，这两种标签的对应关系不清楚。</p>
+          <p class="accept"><span class="label">验收：</span>错误处可明确打开模型设置或切换模型；菜单标识说明配置名与模型名的区别，失败回合不需要用户猜恢复入口。</p>
+        </div>
+        <div class="screens"><div class="gallery"><figure><a href="02-generating-footer.png" target="_blank" rel="noreferrer"><img src="02-generating-footer.png" alt="长等待状态底栏"></a><figcaption>02 · 长等待中的状态栏 <a href="02-generating-footer.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure><figure><a href="11-model-recovery-picker.png" target="_blank" rel="noreferrer"><img src="11-model-recovery-picker.png" alt="模型选择器打开状态"></a><figcaption>11 · 失败后可用的模型选择器 <a href="11-model-recovery-picker.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure></div></div>
+      </section>
+
+      <section id="delivery">
+        <h2>4 · 资源引用与文件交付</h2>
+        <div class="finding">
+          <div class="finding-head"><span class="tag">DeepSeek 真实工作区操作与原生预览</span></div>
+          <p>审批后按确切本地路径写入 <code>expense-review.md</code>，Agent 回复中给出可点开的文件 chip（05）；Desktop 成功打开该报告并展示 Markdown 预览（06）。随后打开原始 <code>sample-expenses.csv</code>，原生 CSV 网格显示 7 行、4 列；引用文件并修正报告措辞后，Agent-owned 报告更新并回读（07–10）。这条路径验证了报告链接可交付并能打开工作区文件。</p>
+          <p><span class="label">需改进：</span>见“资源布局”和“引用协议”两项；报告表格在窄预览列折行，Dock 遮住预览末行；CSV 数值列左对齐、表头缺少视觉层级。</p>
+          <p class="accept"><span class="label">保留：</span>报告 chip 能定位文件；CSV 能在原生工作区预览；引用前 composer chip 对用户清晰可识别。</p>
+        </div>
+        <div class="screens"><div class="gallery">
+          <figure><a href="05-delivery-link.png" target="_blank" rel="noreferrer"><img src="05-delivery-link.png" alt="Agent给出的报告文件入口"></a><figcaption>05 · 可打开的 expense-review.md 文件入口 <a href="05-delivery-link.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          <figure><a href="06-report-preview.png" target="_blank" rel="noreferrer"><img src="06-report-preview.png" alt="原生Desktop中打开的Markdown报告"></a><figcaption>06 · 报告原生预览 <a href="06-report-preview.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          <figure><a href="07-csv-preview.png" target="_blank" rel="noreferrer"><img src="07-csv-preview.png" alt="原生CSV预览"></a><figcaption>07 · CSV 表格预览 <a href="07-csv-preview.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          <figure><a href="08-resource-reference.png" target="_blank" rel="noreferrer"><img src="08-resource-reference.png" alt="composer待发送的CSV引用"></a><figcaption>08 · 发送前引用确认 <a href="08-resource-reference.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          <figure><a href="09-resource-collaboration.png" target="_blank" rel="noreferrer"><img src="09-resource-collaboration.png" alt="CSV工作区与展开的Agent Dock"></a><figcaption>09 · 工作区与展开 Dock <a href="09-resource-collaboration.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+          <figure><a href="10-reference-protocol-in-chat.png" target="_blank" rel="noreferrer"><img src="10-reference-protocol-in-chat.png" alt="文件引用生成的可见正文和chip"></a><figcaption>10 · 后续引用内容和报告修正 <a href="10-reference-protocol-in-chat.png" target="_blank" rel="noreferrer">打开原图</a></figcaption></figure>
+        </div></div>
+      </section>
+
+      <section id="evidence">
+        <h2>证据索引</h2>
+        <div class="screens">
+          <table class="evidence-table">
+            <thead><tr><th>编号</th><th>旅程阶段</th><th>操作/时序</th><th>观察结论</th><th>原图</th></tr></thead>
+            <tbody>
+              <tr><td>E01</td><td>真实模型分析</td><td>DeepSeek 读取并核对 CSV</td><td>分析重复项、金额异常和证据边界。</td><td><a href="01-analysis-result.png" target="_blank" rel="noreferrer">01 原图</a></td></tr>
+              <tr><td>E02</td><td>生成状态</td><td>原生生成状态截图</td><td>状态扫光帧中底栏文字接近白色；无连续帧判断动画稳定性。</td><td><a href="02-generating-footer.png" target="_blank" rel="noreferrer">02 原图</a></td></tr>
+              <tr><td>E03</td><td>长对话审批</td><td>pending_hitl；重复 snapshot、滚动、切 Agent</td><td>AX有审批文案，屏幕只见一条线；重复后仍不可见。</td><td><a href="03-approval-not-visible.png" target="_blank" rel="noreferrer">03 原图</a></td></tr>
+              <tr><td>E04</td><td>额度错误</td><td>09:34:16 · Qwen qwen3.7-plus HTTP 403</td><td><code>insufficient_quota</code> 被投影为 <code>provider_configuration</code>；终态 failed。</td><td><a href="04-quota-misclassified.png" target="_blank" rel="noreferrer">04 原图</a></td></tr>
+              <tr><td>E05</td><td>报告交付</td><td>本地 API 批准精确写入；Desktop 打开文件 chip</td><td><code>expense-review.md</code> chip 可点并打开工作区。</td><td><a href="05-delivery-link.png" target="_blank" rel="noreferrer">05 原图</a></td></tr>
+              <tr><td>E06/E07</td><td>报告与 CSV 预览</td><td>原生工作区打开 Markdown 和 CSV</td><td>报告表格窄列折行；CSV金额左对齐、表头层级弱。</td><td><a href="06-report-preview.png" target="_blank" rel="noreferrer">06</a> · <a href="07-csv-preview.png" target="_blank" rel="noreferrer">07</a></td></tr>
+              <tr><td>E08/E10</td><td>资源引用</td><td>发送前引用 CSV；后续原生引用修正报告</td><td>发送前 chip 清楚；消息正文泄漏 hash/内部指令并重复附件卡。</td><td><a href="08-resource-reference.png" target="_blank" rel="noreferrer">08</a> · <a href="10-reference-protocol-in-chat.png" target="_blank" rel="noreferrer">10</a></td></tr>
+              <tr><td>E09</td><td>Dock 与工作区</td><td>打开快速消息 Dock</td><td>Dock 遮挡 CSV 预览底部内容。</td><td><a href="09-resource-collaboration.png" target="_blank" rel="noreferrer">09 原图</a></td></tr>
+              <tr><td>E11</td><td>模型恢复</td><td>错误后打开模型 picker</td><td>可选 DeepSeek，但 profile 名称与底栏 model 标签不易对应。</td><td><a href="11-model-recovery-picker.png" target="_blank" rel="noreferrer">11 原图</a></td></tr>
+              <tr><td>E12</td><td>短会话批量审批</td><td>两项 write_file 请求待批</td><td>卡片可见；只截图观察，未点选择或审批动作。</td><td><a href="12-batch-approval-visible.png" target="_blank" rel="noreferrer">12 原图</a></td></tr>
+              <tr><td>E13</td><td>审批结果回复</td><td>本地 API 批准 checklist、拒绝 questions</td><td>仅 checklist 421B 创建；questions 不存在；模型未重试并清楚说明。</td><td><a href="13-partial-approval-result.png" target="_blank" rel="noreferrer">13 原图</a></td></tr>
+              <tr><td>E14</td><td>展开工具结果</td><td>检查批次子项终态</td><td>一项“已完成”，一项“已拒绝”；折叠父标题只突出被拒绝 purpose。</td><td><a href="14-tool-outcomes-expanded.png" target="_blank" rel="noreferrer">14 原图</a></td></tr>
+              <tr><td>E15</td><td>工具参数与文件结果</td><td>查看 checklist 写入详情</td><td>参数字段对齐、无挤压；路径不可点，结果优先展示字节数/编码。</td><td><a href="15-tool-parameters.png" target="_blank" rel="noreferrer">15 原图</a></td></tr>
+              <tr><td>E16</td><td>取消与续聊</td><td>API accepted → 约 1 秒后 cancel → API follow-up</td><td>终态 cancelled_by_user；history/SSE 保留两条 user 输入，后续回复补做旧任务剩余内容；无 native 回复截图。</td><td>API 时序 / history / SSE 核对</td></tr>
+              <tr><td>E17</td><td>侧栏状态同步</td><td>终态后比对截图、hydrate 与 GET /v1/agents</td><td>接口不再报告 pending HITL 但截图仍有橙点；橙点实际绑定 has_pending_hitl，未证明 Node 仍有待审批。</td><td><a href="13-partial-approval-result.png" target="_blank" rel="noreferrer">13</a> · <a href="14-tool-outcomes-expanded.png" target="_blank" rel="noreferrer">14</a> · <a href="15-tool-parameters.png" target="_blank" rel="noreferrer">15</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>单条证据记录格式</h3>
+        <div class="template">证据编号：E01–E15（同目录 PNG）；E16 为 API/history/SSE 时序
+环境：Windows 原生 Desktop；隔离 Agent 与工作区；真实 DeepSeek 流程 + Qwen qwen3.7-plus 额度探针
+流程：CSV读取/分析 → 审批写报告 → 原生打开 → 引用CSV修正 → Agent更新并回读
+取消：API accepted 后约 1 秒取消；Luna 脚本通过 API 发送 follow-up；通过 history/SSE 核对，无后续 native 回复截图
+原生审批：未自动点击按钮/checkbox；API仅批准确切 workspace write
+原生 Stop：两次尝试时回合均已自然 completed，不算停止通过
+动画：有静态等待截图，没有连续视频帧</div>
+      </section>
+
+      <section id="limits">
+        <h2>范围与未验证项</h2>
+        <div class="limits">
+          <div><strong>本轮环境</strong>Windows 原生 Desktop，隔离 Agent 与本地工作区；真实 DeepSeek 流程，另做 Qwen 额度错误探针。未记录窗口像素/缩放值。</div>
+          <div><strong>审批边界</strong>为避免安全权限 UI 自动化，审批决策通过本地 API 对确切写入完成。原生审批点击、多选、参数展开和拒绝反馈未验收。</div>
+          <div><strong>停止边界</strong>两次原生 Stop 尝试均已自然 completed，不能算通过；取消/follow-up 结论来自 API accepted/cancelled_by_user 与 history/SSE，没有后续 native 回复截图。</div>
+          <div><strong>动画边界</strong>长等待状态只有静态截图，没有视频或连续帧；不据此评价所有工具组动画和高度变化。</div>
+          <div><strong>改动范围</strong>本轮只创建/修改隔离测试数据与本审计报告；未改产品代码，也未操作正式环境。</div>
+          <div><strong>未覆盖项</strong>本轮未验收单/多项原生审批控件操作、键盘与读屏流程、连续工具动画、其他窗口尺寸和更多模型的额度错误格式；原生 Stop 仍待在实际运行中验证。</div>
+        </div>
+      </section>
+      <footer>真实 LLM 工作流审查 · 2026-11-05 · 本轮仅改隔离测试数据与本报告，未改产品代码；证据为本目录 01–15 原生截图与 API/history/SSE 时序，审批原生交互、停止控件和连续动画未验收。</footer>
+    </main>
+  </div>
+</body>
+</html>

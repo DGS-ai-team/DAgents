@@ -31,7 +31,6 @@ type DreamingAttempt struct {
 	TurnID                 string               `json:"turn_id"`
 	ExperienceRevision     int64                `json:"experience_revision"`
 	LocalDate              string               `json:"local_date"`
-	MaxToolRounds          int                  `json:"max_tool_rounds"`
 	State                  DreamingAttemptState `json:"state"`
 	AssistantMessageID     string               `json:"assistant_message_id,omitempty"`
 	FinalMessage           string               `json:"final_message,omitempty"`
@@ -48,7 +47,7 @@ func (a DreamingAttempt) Validate() error {
 	if strings.TrimSpace(a.AgentID) == "" || strings.TrimSpace(a.SessionID) == "" || strings.TrimSpace(a.TurnID) == "" {
 		return fmt.Errorf("dreaming attempt identity is required")
 	}
-	if a.ExperienceRevision < 0 || a.MaxToolRounds <= 0 {
+	if a.ExperienceRevision < 0 {
 		return fmt.Errorf("invalid dreaming attempt budget or experience revision")
 	}
 	switch a.State {

@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it } from "vitest";
 import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 import ComposerToolbar from "./ComposerToolbar.vue";
 
 describe("ComposerToolbar status", () => {
@@ -34,6 +35,28 @@ describe("ComposerToolbar status", () => {
     expect(wrapper.find('[role="status"]').element).toBe(slot);
     expect(wrapper.find('[role="status"]').text()).toBe('');
     expect(wrapper.text()).toContain("deepseek-chat");
+    wrapper.unmount();
+  });
+
+  it("keeps the trigger compact and shows each profile model above its config name", async () => {
+    const wrapper = mount(ComposerToolbar, {
+      props: {
+        llmSettings: { model: "deepseek-chat", active_profile: "production-deepseek", profiles: ["production-deepseek", "backup-qwen"] },
+        profileCatalog: [
+          { id: "production-deepseek", model: "deepseek-chat" },
+          { id: "backup-qwen", model: "qwen-plus" },
+        ],
+        desktopCompact: true,
+      },
+    });
+    expect(wrapper.find(".composer-toolbar__trigger-label > span:first-child").text()).toBe("deepseek-chat");
+    expect(wrapper.find(".composer-toolbar__profile-label").exists()).toBe(false);
+    expect(wrapper.find(".composer-toolbar__trigger").attributes("title")).toContain("配置: production-deepseek");
+    await wrapper.find(".composer-toolbar__trigger").trigger("click");
+    const options = wrapper.findAll('[role="option"]');
+    expect(options.map(option => option.find(".composer-toolbar__option-model").text())).toEqual(["deepseek-chat", "qwen-plus"]);
+    expect(options.map(option => option.find(".composer-toolbar__option-profile").text())).toEqual(["production-deepseek", "backup-qwen"]);
+    expect(options[0].attributes("aria-selected")).toBe("true");
     wrapper.unmount();
   });
 
@@ -75,6 +98,19 @@ describe("ComposerToolbar status", () => {
     await settingsAction.trigger('click');
     expect(wrapper.emitted('open-model-settings')).toEqual([['profile-a']]);
     expect(wrapper.find('[role="listbox"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("exposes the same keyboard-focused profile picker for an error recovery action", async () => {
+    const wrapper = mount(ComposerToolbar, {
+      props: { llmSettings: { model: "model-a", active_profile: "profile-a", profiles: ["profile-a", "profile-b"] }, desktopCompact: true },
+      attachTo: document.body,
+    });
+
+    expect(wrapper.vm.openPicker()).toBe(true);
+    await nextTick();
+    expect(wrapper.find('[role="listbox"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-selected="true"]').element).toBe(document.activeElement);
     wrapper.unmount();
   });
 

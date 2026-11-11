@@ -1,8 +1,9 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import * as api from "../../api/node.js";
 import SettingsPageHeader from "../../components/SettingsPageHeader.vue";
+import SettingsDisclosure from "../../components/SettingsDisclosure.vue";
 import UiIcon from "../../components/UiIcon.vue";
 import { notifyConfigurationChanged } from "../../utils/configurationEvents.js";
 
@@ -25,6 +26,8 @@ const draft = reactive({ configText: "" });
 const REDACTED_SECRET = "__DAGENTS_SECRET_REDACTED__";
 const configBusy = computed(() => loading.value || saving.value || Boolean(toolSaving.value) || Boolean(refreshing.value));
 const createFlow = computed(() => route.query.create === "1" && String(route.query.returnAgentId || "").trim());
+const advancedOpen = ref(Boolean(createFlow.value));
+watch(createFlow, (open) => { advancedOpen.value = Boolean(open); });
 
 function returnToAgent() {
   const agentId = String(route.query.returnAgentId || "").trim();
@@ -266,12 +269,13 @@ onMounted(() => {
       </template>
     </SettingsPageHeader>
 
-      <details class="mcp-settings__advanced" :open="Boolean(createFlow)">
-      <summary>
-        <span>高级：编辑 mcpServers JSON</span>
-        <small>适用于导入、批量修改或配置 stdio 服务</small>
-      </summary>
-      <section class="mcp-settings__editor settings-section settings-section--standalone">
+      <SettingsDisclosure
+        v-model:expanded="advancedOpen"
+        class="mcp-settings__advanced"
+        title="MCP JSON 配置"
+      >
+        <p class="settings-section__desc">适用于导入、批量修改或配置 stdio 服务。</p>
+      <section class="mcp-settings__editor">
       <div class="settings-section__head">
         <div>
           <h2 class="settings-section__title">原始配置</h2>
@@ -286,7 +290,7 @@ onMounted(() => {
       </div>
       <textarea
         v-model="draft.configText"
-        class="mcp-settings__textarea"
+        class="settings-field__input settings-field__input--multiline mcp-settings__textarea"
         spellcheck="false"
         autocomplete="off"
         aria-label="MCP 原始配置"
@@ -297,7 +301,7 @@ onMounted(() => {
       ></textarea>
       <p class="mcp-settings__hint">stdio 示例：command、args、env；远程服务示例：type、url、headers。不要把访问令牌提交到截图、日志或聊天记录中。</p>
       </section>
-    </details>
+      </SettingsDisclosure>
 
     <p v-if="loading" class="mcp-settings__muted">加载中…</p>
     <p v-if="error" class="mcp-settings__error">{{ error }}</p>
@@ -312,7 +316,7 @@ onMounted(() => {
         <span class="mcp-settings__count">{{ servers.length }} 个服务</span>
       </div>
       <div v-if="!servers.length && !loading" class="mcp-settings__empty settings-empty-state">
-        还没有配置 MCP 服务。使用上方高级编辑添加服务；保存后会返回发起配置的智能体。
+        还没有配置 MCP 服务。使用上方「MCP JSON 配置」添加服务；保存后会返回发起配置的智能体。
       </div>
       <div v-else class="mcp-settings__server-list">
         <button
@@ -344,7 +348,7 @@ onMounted(() => {
     <section v-if="activeServer" class="mcp-settings__detail settings-section settings-section--standalone">
       <div class="settings-section__head">
         <div>
-          <button type="button" class="mcp-settings__back" @click="activeServerId = ''">‹ 返回服务列表</button>
+          <button type="button" class="btn btn--ghost btn--sm mcp-settings__back" @click="activeServerId = ''">‹ 返回服务列表</button>
           <h2 class="settings-section__title">{{ activeServer.display_name || activeServer.id }} 的工具</h2>
           <p class="settings-section__desc">只启用确实需要暴露给智能体的工具。</p>
         </div>
@@ -387,49 +391,18 @@ onMounted(() => {
 .mcp-settings__detail { margin-top: 16px; }
 .mcp-settings__advanced {
   margin-top: 18px;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background: var(--color-surface-muted, #fbfcfd);
-}
-.mcp-settings__advanced > summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 14px;
-  color: var(--color-text);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  list-style-position: inside;
-}
-.mcp-settings__advanced > summary::marker { color: var(--color-primary); }
-.mcp-settings__advanced > summary small {
-  color: var(--color-text-muted);
-  font-size: 11px;
-  font-weight: 400;
-}
-.mcp-settings__advanced[open] > summary {
-  border-bottom: 1px solid var(--color-border);
 }
 .mcp-settings__advanced .mcp-settings__editor {
-  margin-top: 0;
-  padding: 16px 14px 14px;
-  border-top: 0;
+  margin: 0;
+  padding: 4px 0 0;
 }
 .mcp-settings__textarea {
-  display: block;
   width: 100%;
+  max-width: none;
   min-height: 260px;
   margin-top: 14px;
-  padding: 14px;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--color-bg, #fff) 88%, #dcecff);
-  color: var(--color-text);
-  font: 12px/1.6 var(--font-mono, ui-monospace, monospace);
-  resize: vertical;
   box-sizing: border-box;
+  font-family: var(--font-mono, ui-monospace, monospace);
 }
 .mcp-settings__hint,
 .mcp-settings__muted,
@@ -471,7 +444,6 @@ onMounted(() => {
 .mcp-settings__status[data-status="ready"] { color: var(--color-success, #3d9a5f); }
 .mcp-settings__status[data-status="error"] { color: var(--color-danger); }
 .mcp-settings__server-arrow { color: var(--color-text-muted); font-size: 20px; }
-.mcp-settings__back { padding: 0; border: 0; background: transparent; color: var(--color-accent, #5594d6); font-size: 12px; cursor: pointer; }
 .mcp-settings__back + .settings-section__title { margin-top: 8px; }
 .mcp-settings__tool-toolbar { margin-top: 14px; color: var(--color-text-muted); font-size: 12px; }
 .mcp-settings__tool-toolbar input { flex: 1; min-width: 180px; }

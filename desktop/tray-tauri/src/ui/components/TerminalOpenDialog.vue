@@ -55,15 +55,15 @@ function trapFocus(event) {
 </script>
 
 <template>
-  <div v-if="open" class="terminal-open-scrim" @click.self="emit('cancel')">
-    <section ref="dialogRoot" class="terminal-open-dialog" role="dialog" aria-modal="true" aria-labelledby="terminal-open-title" tabindex="-1" @keydown="trapFocus">
-      <header><h2 id="terminal-open-title">打开终端</h2><button class="desktop-icon-button" type="button" aria-label="取消" title="关闭" @click="emit('cancel')"><UiIcon name="close" :size="16" /></button></header>
+  <div v-if="open" class="ui-dialog-backdrop terminal-open-scrim" @click.self="emit('cancel')">
+      <section ref="dialogRoot" class="ui-dialog terminal-open-dialog" role="dialog" aria-modal="true" aria-labelledby="terminal-open-title" tabindex="-1" @keydown="trapFocus">
+      <header><h2 id="terminal-open-title">打开终端</h2><button class="btn btn--ghost btn--sm desktop-icon-button" type="button" aria-label="取消" title="关闭" @click="emit('cancel')"><UiIcon name="close" :size="16" /></button></header>
       <section v-if="sessionsLoading || sessionsError || sessions.length" class="terminal-open-section">
         <h3>已有终端</h3>
         <div v-if="sessionsLoading" class="terminal-open-state">正在加载终端…</div>
-        <div v-else-if="sessionsError" class="terminal-open-state terminal-open-error"><span :title="sessionsError">终端列表加载失败</span><button type="button" @click="emit('retry-sessions')">重试</button></div>
+        <div v-else-if="sessionsError" class="terminal-open-state terminal-open-error"><span :title="sessionsError">终端列表加载失败</span><button class="btn btn--ghost btn--sm" type="button" @click="emit('retry-sessions')">重试</button></div>
         <div v-else-if="sessions.length" class="terminal-open-sessions">
-          <button v-for="session in sessions" :key="session.terminal_id" type="button" class="terminal-open-session" @click="emit('resume', session)">
+          <button v-for="session in sessions" :key="session.terminal_id" type="button" class="btn btn--default terminal-open-session" @click="emit('resume', session)">
             <span><strong>{{ session.display_name || session.name || session.shell || '终端' }}</strong><small :title="sessionDescription(session)">{{ sessionDescription(session) }}</small></span><span>打开</span>
           </button>
         </div>
@@ -72,26 +72,24 @@ function trapFocus(event) {
         <h3>终端配置</h3>
         <UiSelect v-model="selectedId" :options="choiceOptions" aria-label="终端配置" search-placeholder="搜索名称或地址" searchable contained />
         <div v-if="channelsLoading" class="terminal-open-state">正在加载配置…</div>
-        <div v-else-if="channelsError" class="terminal-open-state terminal-open-error"><span :title="channelsError">Linux 配置加载失败</span><button type="button" @click="emit('retry-channels')">重试</button></div>
+        <div v-else-if="channelsError" class="terminal-open-state terminal-open-error"><span :title="channelsError">Linux 配置加载失败</span><button class="btn btn--ghost btn--sm" type="button" @click="emit('retry-channels')">重试</button></div>
       </section>
       <footer>
-        <button type="button" class="terminal-open-settings" @click="emit('open-settings')">Linux 设置</button>
+        <button type="button" class="btn btn--ghost btn--sm terminal-open-settings" @click="emit('open-settings')">Linux 设置</button>
         <span class="terminal-open-spacer"></span>
-        <button type="button" @click="emit('cancel')">取消</button>
-        <button type="button" class="terminal-open-create" :disabled="!selectedChoice" @click="selectedChoice && emit('create', selectedChoice)">打开</button>
+        <button class="btn btn--ghost btn--sm" type="button" @click="emit('cancel')">取消</button>
+        <button type="button" class="btn btn--primary btn--sm terminal-open-create" :disabled="!selectedChoice" @click="selectedChoice && emit('create', selectedChoice)">打开</button>
       </footer>
     </section>
   </div>
 </template>
 
 <style scoped>
-.terminal-open-scrim{position:fixed;inset:0;z-index:1100;display:grid;place-items:center;padding:24px;background:#10191d99}
-.terminal-open-dialog{width:min(520px,100%);border:1px solid #d6dfe2;border-radius:14px;background:#fff;color:#263740;box-shadow:0 20px 64px #10212b40;padding:20px}
+.terminal-open-scrim{position:fixed;inset:0;z-index:1100;display:grid;place-items:center;padding:24px}
+.terminal-open-dialog{width:min(520px,100%);max-height:min(88vh,760px);overflow:auto}
 .terminal-open-dialog header,.terminal-open-dialog footer{display:flex;align-items:center;gap:10px}
 .terminal-open-dialog header{justify-content:space-between;margin-bottom:20px}
 .terminal-open-dialog h2{margin:0;font-size:18px}
-.terminal-open-dialog button{min-height:34px;border:1px solid #d1d9de;border-radius:7px;background:#fff;color:#263740;padding:6px 11px;cursor:pointer}
-.terminal-open-dialog header button{display:grid;place-items:center;flex:0 0 32px;width:32px;height:32px;padding:0;line-height:0}.terminal-open-dialog button:disabled{opacity:.5;cursor:default}
-.terminal-open-dialog{max-height:min(88vh,760px);overflow:auto}.terminal-open-section{margin:16px 0}.terminal-open-section h3{margin:0 0 8px;font-size:13px;font-weight:500}.terminal-open-sessions{display:grid;gap:6px;max-height:190px;overflow:auto}.terminal-open-session{display:flex;align-items:center;justify-content:space-between;text-align:left;gap:14px;width:100%;padding:9px 11px!important}.terminal-open-session span:first-child{display:grid;min-width:0;gap:3px}.terminal-open-session small{color:#667982;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.terminal-open-session span:last-child{white-space:nowrap;font-size:12px}
-.terminal-open-state{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;color:#667982;font-size:12px}.terminal-open-error{color:#9a332f}.terminal-open-dialog .terminal-open-error button{min-height:28px;padding:2px 8px;font-size:12px}.terminal-open-dialog footer{margin-top:22px}.terminal-open-spacer{flex:1}.terminal-open-dialog .terminal-open-settings{display:inline-flex;align-items:center;gap:6px;margin-right:auto;padding:4px 0;border-color:transparent;background:transparent;color:#66747c;font-size:12px}.terminal-open-dialog .terminal-open-settings:hover{color:#263740}.terminal-open-dialog .terminal-open-create{min-width:64px;background:#353c40;color:#fff;border-color:#353c40}.terminal-open-dialog button:focus-visible{outline:2px solid #7a858b;outline-offset:2px}
+.terminal-open-section{margin:16px 0}.terminal-open-section h3{margin:0 0 8px;font-size:13px;font-weight:500}.terminal-open-sessions{display:grid;gap:6px;max-height:190px;overflow:auto}.terminal-open-session{display:flex;align-items:center;justify-content:space-between;text-align:left;gap:14px;width:100%;padding:9px 11px}.terminal-open-session span:first-child{display:grid;min-width:0;gap:3px}.terminal-open-session small{color:#667982;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.terminal-open-session span:last-child{white-space:nowrap;font-size:12px}
+.terminal-open-state{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;color:#667982;font-size:12px}.terminal-open-error{color:#9a332f}.terminal-open-dialog footer{margin-top:22px}.terminal-open-spacer{flex:1}.terminal-open-settings{margin-right:auto}
 </style>

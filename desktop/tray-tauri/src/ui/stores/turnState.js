@@ -224,11 +224,7 @@ export function applyDesktopTurnEvent(event, activeAgentId) {
 }
 
 const BUDGET_REASON_LABELS = Object.freeze({
-  max_input_tokens: "输入令牌数上限",
-  max_steps: "模型步骤数上限",
-  max_summary_steps: "收尾摘要步骤预算",
   max_tool_calls: "工具调用数上限",
-  max_tool_rounds: "工具轮次上限",
 });
 
 export function budgetExhaustionMessage(reason) {

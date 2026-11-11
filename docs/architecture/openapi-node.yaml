@@ -446,11 +446,13 @@ paths:
 
   /v1/agents/{agent_id}/child-agents:
     get:
-      x-contract-status: surface-only
-      summary: Route registered in the Node HTTP server
+      summary: List the parent Agent's temporary child agents
       responses:
         "200":
-          description: OK
+          description: Child-agent progress snapshots. turn_count is an observed lifecycle step count, not a quota.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChildAgentList'}
 
   /v1/agents/{agent_id}/context:
     get:
@@ -1293,6 +1295,8 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/NodeSettingsView'}
+        "400":
+          description: Invalid patch or an explicit raw_message_history_enabled update while AGENT_RAW_MESSAGE_HISTORY_ENABLED is present; the entire patch is rejected without persistence
 
   /v1/llm/probe-models:
     post:
@@ -1485,6 +1489,49 @@ components:
         has_node_token: {type: boolean, description: Indicates a stored token without returning it}
         registration_interval_seconds: {type: integer}
         registration_ttl_seconds: {type: integer}
+    NodeChildAgentLimits:
+      type: object
+      required: [default_ttl_seconds, max_ttl_seconds, max_active_per_parent]
+      properties:
+        default_ttl_seconds: {type: integer, minimum: 0}
+        max_ttl_seconds: {type: integer, minimum: 0}
+        max_active_per_parent: {type: integer, minimum: 0}
+      description: Child-agent lifetime and concurrency limits. No child turn-count quota is configured here.
+    NodeChildAgentLimitsPatch:
+      type: object
+      properties:
+        default_ttl_seconds: {type: integer, minimum: 0}
+        max_ttl_seconds: {type: integer, minimum: 0}
+        max_active_per_parent: {type: integer, minimum: 0}
+      description: Optional child-agent lifetime and concurrency limits; no max_turns field exists.
+    ChildAgentList:
+      type: object
+      required: [parent_agent_id, items]
+      properties:
+        parent_agent_id: {type: string}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ChildAgentView'}
+    ChildAgentView:
+      type: object
+      required: [child_agent_id, status, purpose, allowed_tools, loaded_skills, created_at, expires_at, turn_count, progress]
+      properties:
+        child_agent_id: {type: string}
+        tool_call_id: {type: string}
+        status: {type: string}
+        purpose: {type: string}
+        allowed_tools: {type: array, nullable: true, items: {type: string}}
+        loaded_skills: {type: array, nullable: true, items: {type: string}}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        turn_count: {type: integer, description: "Observed child lifecycle step_index count; informational statistic, not an execution limit."}
+        progress:
+          type: object
+          description: Current child-agent progress snapshot; any turn_count value is informational and does not enforce a quota.
+          properties:
+            turn_count: {type: integer, description: "Observed lifecycle step_index count; informational statistic, not an execution limit."}
+          additionalProperties: true
     NodeCompressionSettings:
       type: object
       description: Whole-block settings; GET and merge before PATCH. Idle boundaries apply only to new human turns of ordinary Agents, require an archive, and do not replace token-threshold compression.
@@ -1508,7 +1555,7 @@ components:
           description: Node listener only; Desktop endpoint is stored by Desktop.
         llm: {type: object, additionalProperties: true}
         manage: {$ref: '#/components/schemas/NodeManageSettingsView'}
-        features: {type: object, additionalProperties: true}
+        features: {$ref: '#/components/schemas/NodeFeatureSettingsView'}
         compression: {$ref: '#/components/schemas/NodeCompressionSettings'}
         memory: {type: object, additionalProperties: true}
         runtime: {type: object, additionalProperties: true}
@@ -1528,15 +1575,23 @@ components:
           description: Node profile setup state only; completion does not imply that an LLM is configured or reachable.
           properties:
             node_profile_completed: {type: boolean}
-        child_agents: {type: object, additionalProperties: true}
+        child_agents: {$ref: '#/components/schemas/NodeChildAgentLimits'}
         browser: {type: object, additionalProperties: true}
         wecom: {type: object, additionalProperties: true}
-        tools: {type: object, additionalProperties: true}
+        tools: {$ref: '#/components/schemas/NodeToolsSettingsView'}
         hooks: {type: object, additionalProperties: true}
         available_tool_groups: {type: array, items: {type: string}}
     NodeSettingsPatch:
       type: object
       properties:
+        runtime:
+          type: object
+          description: Optional runtime identity and log settings. A changed node_id requires Node restart; runtime_root is ignored.
+          properties:
+            node_id: {type: string}
+            log_level: {type: string, enum: [debug, info, warn, error]}
+        features: {$ref: '#/components/schemas/NodeFeatureSettingsPatch'}
+        tools: {$ref: '#/components/schemas/NodeToolsSettingsPatch'}
         compression: {$ref: '#/components/schemas/NodeCompressionSettings'}
         agent:
           type: object
@@ -1554,6 +1609,7 @@ components:
           description: node_profile_completed tracks Node profile setup and does not indicate LLM readiness; use profile configuration and model probing to assess LLM availability.
           properties:
             node_profile_completed: {type: boolean}
+        child_agents: {$ref: '#/components/schemas/NodeChildAgentLimitsPatch'}
         manage:
           type: object
           properties:
@@ -1568,26 +1624,77 @@ components:
             registration_ttl_seconds: {type: integer, minimum: 1}
           additionalProperties: true
       additionalProperties: true
+    NodeFeatureSettingsView:
+      type: object
+      required: [skills_enabled, triggers_enabled, child_agents_enabled, browser_enabled, wecom_enabled, multimodal_enabled, skills_max_in_prompt, triggers_poll_seconds, raw_message_history_enabled, raw_message_history_source]
+      properties:
+        skills_enabled: {type: boolean}
+        triggers_enabled: {type: boolean}
+        child_agents_enabled: {type: boolean}
+        browser_enabled: {type: boolean}
+        wecom_enabled: {type: boolean}
+        multimodal_enabled: {type: boolean}
+        skills_max_in_prompt: {type: integer}
+        triggers_poll_seconds: {type: integer}
+        raw_message_history_enabled: {type: boolean, description: Effective value after environment override}
+        raw_message_history_source: {type: string, enum: [settings, environment], description: Indicates whether the effective raw-history setting comes from Node settings or AGENT_RAW_MESSAGE_HISTORY_ENABLED}
+    NodeFeatureSettingsPatch:
+      type: object
+      description: Sparse patch. Omitted fields retain their current values. Process-level gates remain explicitly writable for clients that send them; setup panels should send only fields they own.
+      properties:
+        skills_enabled: {type: boolean, description: Optional explicit process-level Skills gate}
+        triggers_enabled: {type: boolean, description: Optional explicit process-level trigger gate}
+        child_agents_enabled: {type: boolean, description: Optional explicit process-level child-agent gate}
+        browser_enabled: {type: boolean}
+        wecom_enabled: {type: boolean}
+        multimodal_enabled: {type: boolean}
+        skills_max_in_prompt: {type: integer, minimum: 1}
+        triggers_poll_seconds: {type: integer, minimum: 1}
+        raw_message_history_enabled: {type: boolean, description: Omit when AGENT_RAW_MESSAGE_HISTORY_ENABLED is present. Explicit updates return 400 and reject the entire patch without saving other fields. Invalid environment text still counts as environment-controlled and uses the documented default effective value.}
+    NodeToolsSettingsView:
+      type: object
+      properties:
+        bash_output_encoding: {type: string}
+        file_encoding: {type: string}
+        bash_compress_enabled: {type: boolean}
+        bash_compress_max_output_chars: {type: integer, minimum: 1}
+        bash_compress_max_stderr_chars: {type: integer, minimum: 1}
+        bash_compress_default_max_output_chars: {type: integer, minimum: 1, readOnly: true, description: Product default exposed to support explicit reset}
+        bash_compress_default_max_stderr_chars: {type: integer, minimum: 1, readOnly: true, description: Product default exposed to support explicit reset}
+        bash_compress_output_mode: {type: string}
+        bash_compress_tail_chars: {type: integer, minimum: 0}
+        bash_compress_tail_stderr_chars: {type: integer, minimum: 0}
+    NodeToolsSettingsPatch:
+      type: object
+      description: Sparse patch. Omitted fields are preserved; output limits must be positive integers. reset_bash_compress_limits explicitly restores both product defaults.
+      properties:
+        bash_output_encoding: {type: string}
+        file_encoding: {type: string}
+        bash_compress_enabled: {type: boolean}
+        bash_compress_max_output_chars: {type: integer, minimum: 1}
+        bash_compress_max_stderr_chars: {type: integer, minimum: 1}
+        bash_compress_output_mode: {type: string}
+        bash_compress_tail_chars: {type: integer, minimum: 0}
+        bash_compress_tail_stderr_chars: {type: integer, minimum: 0}
+        reset_bash_compress_limits: {type: boolean, description: Explicit reset of both output limits to product defaults}
     AutonomyV2Profile:
       type: object
-      required: [agent_id, revision, responsibility, wake_interval_seconds, max_tool_rounds, dreaming_enabled, dreaming_time, timezone]
+      required: [agent_id, revision, responsibility, wake_interval_seconds, dreaming_enabled, dreaming_time, timezone]
       properties:
         agent_id: {type: string}
         revision: {type: integer, format: int64}
         responsibility: {type: string}
         wake_interval_seconds: {type: integer, format: int64, minimum: 0}
-        max_tool_rounds: {type: integer, minimum: 1}
         dreaming_enabled: {type: boolean}
         dreaming_time: {type: string, description: 本地时间 HH:MM}
         timezone: {type: string}
     AutonomyV2ProfileUpdate:
       type: object
-      required: [expected_revision, responsibility, wake_interval_seconds, max_tool_rounds, dreaming_enabled, dreaming_time, timezone]
+      required: [expected_revision, responsibility, wake_interval_seconds, dreaming_enabled, dreaming_time, timezone]
       properties:
         expected_revision: {type: integer, format: int64, minimum: 0}
         responsibility: {type: string}
         wake_interval_seconds: {type: integer, format: int64, minimum: 0}
-        max_tool_rounds: {type: integer, minimum: 1}
         dreaming_enabled: {type: boolean}
         dreaming_time: {type: string}
         timezone: {type: string}

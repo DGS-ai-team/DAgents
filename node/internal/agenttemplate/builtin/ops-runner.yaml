@@ -8,7 +8,6 @@ defaults:
     role: ops
     description: 执行运维与自动化任务
   llm:
-    max_steps: 24
   tools:
     enabled_groups: [fs, bash, terminal, memory]
   skills:

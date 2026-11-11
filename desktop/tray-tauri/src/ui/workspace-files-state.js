@@ -123,6 +123,11 @@ export function workspaceFileLocation(value) {
   return { path, name, parent: parts.join('/') }
 }
 
+export function workspaceDockScrollInset(collapsed, occupiedHeight) {
+  if (collapsed) return 12
+  return Math.max(12, Math.ceil(Number(occupiedHeight) || 0) + 26)
+}
+
 export function shouldClearWorkspaceUploadError(currentError, failedUploadError, batchHadFailure = false) {
   return !batchHadFailure && Boolean(failedUploadError) && currentError === failedUploadError
 }

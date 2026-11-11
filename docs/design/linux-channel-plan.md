@@ -89,7 +89,7 @@ prod-app-01
 建议支持：
 
 - `password`：密码；
-- `private_key`：私钥文件或密钥内容引用；
+- `private_key`：完整、未加密的 PEM/OpenSSH 私钥内容；可直接输入或通过环境变量引用提供。私钥文件路径引用尚未实现；Node 不生成或覆盖 SSH 身份密钥。
 - 后续 `certificate`：SSH certificate。
 
 用户要求的 IP、用户名、密码可以映射为 `host + username + credential(password)`，但设计上不把 password 直接放到 channel profile 或 Agent snapshot。
@@ -197,7 +197,9 @@ CREATE TABLE linux_credentials (
 - `env:NAME`：从 Node 进程环境变量解析；
 - `literal:<ciphertext>`：由直接输入接口生成，使用 Node runtime 的 SecretBox 加密，接口不接受调用方直接提交该内部格式。
 
-直接输入的密码或私钥会保存到 Node 本地配置数据库，密文只在建立 SSH 连接时解密。环境变量引用仍然兼容旧配置，但修改环境变量后需要重启 Node 才能让进程看到新值。推荐优先级：
+直接输入的密码或私钥会保存到 Node 本地配置数据库，密文只在建立 SSH 连接时解密。`private_key` 直接输入会在保存时验证格式；环境变量值在连接测试时验证。对于完整 PEM/OpenSSH BEGIN/END 边界内的字面 `\n`，解析时会规范化为换行；密码不会经过此处理。环境变量引用仍然兼容旧配置，但修改环境变量后需要重启 Node 才能让进程看到新值。
+
+当前实现只支持直接加密保存和 `env:NAME` 两种来源。操作系统 Secret Store/Keyring 是后续安全方向，不是当前可配置来源。Node runtime 的 `.llm_secret_key` 只加密本地存储数据，不是 SSH 登录身份密钥；本地私钥路径和自动生成 SSH 身份均未实现。推荐后续评估顺序：
 
 1. 操作系统 Secret Store/Keyring；
 2. Node 本地加密 secret store，密钥由安装实例保护；
@@ -236,7 +238,7 @@ Agent snapshot 中只保存 channel ID、绑定开关和非敏感执行选项；
 
 ```text
 password     → SSH password authentication
-private_key  → 本地 key path / OS secret ref
+private_key  → 直接输入或 env:NAME 中的未加密 PEM/OpenSSH 私钥内容
 certificate  → 后续扩展
 ```
 
@@ -475,9 +477,9 @@ GET 只返回：`credential_id`、显示名、认证类型、更新时间和是�
 {"auth_type":"password","secret_value":"本地 SSH 密码"}
 ```
 
-私钥也可以使用同样的 `secret_value` 字段直接输入，服务端会加密保存。
+私钥也可以使用同样的 `secret_value` 字段直接输入，服务端会先验证为未加密 PEM/OpenSSH 私钥内容，再加密保存。粘贴内容须包含完整 BEGIN/END 边界；错误内容（包括文件路径）不会保存。完整 key 边界内的转义 `\n` 会在解析时还原为换行。
 
-`secret_value` 支持 `password` 和 `private_key` 认证，响应只返回 `secret_source`（`environment` 或 `direct`），不返回密码、私钥或内部 `secret_ref`。
+`secret_value` 支持 `password` 和 `private_key` 认证。环境变量值必须是私钥内容本身，不能是文件路径。加密私钥目前不支持；保存时会返回明确提示，环境变量中的加密私钥在连接测试时归类为 `private_key_invalid` 并提示使用未加密 key。响应只返回 `secret_source`（`environment` 或 `direct`），不返回密码、私钥或内部 `secret_ref`。
 
 ### 10.3 Agent 绑定
 

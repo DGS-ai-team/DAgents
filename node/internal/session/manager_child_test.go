@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
+	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
@@ -155,12 +157,229 @@ func TestHydrateIncludesActiveChildProgressAndParentToolCall(t *testing.T) {
 	if child.ToolCallID != "call-parent-child-1" || child.Purpose != "hydrate test" {
 		t.Fatalf("hydrate child = %+v", child)
 	}
-	if child.Progress.Status != childagent.StatusActive || child.Progress.MaxTurns <= 0 {
+	if child.Progress.Status != childagent.StatusActive {
 		t.Fatalf("hydrate progress = %+v", child.Progress)
 	}
 	if err := <-created; err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestChildRuntimeInheritsParentToolCallBudget(t *testing.T) {
+	hub := stream.NewHub(16, logx.Discard())
+	registry, err := tools.NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Mirror the production path: NewManager is built with process-wide options,
+	// then the Agent API replaces the parent runtime with Agent-specific options.
+	manager := NewManager("agent-1", hub, &llm.MockClient{}, registry, policy.NewDefaultEngine(), nil,
+		TurnOptions{}, logx.Discard())
+	t.Cleanup(manager.Stop)
+	children := childagent.NewManager(childagent.Config{Enabled: true}, hub, "agent-1", nil)
+	manager.SetChildAgentManager(children)
+	parent, _, err := manager.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentOptions := TurnOptions{Budget: turn.TurnBudget{MaxToolCalls: 7, ReserveFinalSummary: true}}
+	if _, _, err := manager.ReplaceWithOptionsAndLLM(parent.ID, parentOptions, registry, policy.NewDefaultEngine(), &llm.MockClient{}, "agent-1"); err != nil {
+		t.Fatalf("replace parent with Agent-specific runtime: %v", err)
+	}
+	parentRuntime := manager.getRuntime(parent.ID)
+	if parentRuntime == nil {
+		t.Fatal("parent runtime is missing after replacement")
+	}
+	if parentRuntime.turnBudget.MaxToolCalls != 7 {
+		t.Fatalf("parent runtime budget = %+v, want Agent max_tool_calls=7", parentRuntime.turnBudget)
+	}
+	if err := manager.SpawnChild(childagent.SpawnSpec{
+		ChildAgentID: "child-budget-test", ParentAgentID: parent.ID,
+		AllowedTools: []string{"read_file"}, Purpose: "budget inheritance",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	child := manager.getRuntime("child-budget-test")
+	if child == nil {
+		t.Fatal("child runtime was not created")
+	}
+	if child.turnBudget.MaxToolCalls != 7 || !child.turnBudget.ReserveFinalSummary {
+		t.Fatalf("child budget = %+v, want the parent's max_tool_calls=7", child.turnBudget)
+	}
+	manager.StopChild("child-budget-test")
+}
+
+func TestSpawnChildDoesNotInvertLifecycleNotificationLocks(t *testing.T) {
+	previousProcs := goruntime.GOMAXPROCS(1)
+	defer goruntime.GOMAXPROCS(previousProcs)
+	mgr, _, hub := newManagerWithChildAgents(t, &llm.MockClient{})
+	t.Cleanup(mgr.Stop)
+	parent, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub.SetEventListener(mgr.OnStreamEvent)
+	parentRuntime := mgr.getRuntime(parent.ID)
+	if parentRuntime == nil {
+		t.Fatal("parent runtime is missing")
+	}
+
+	// Keep the lifecycle transition lock held while SpawnChild snapshots the
+	// parent budget. Then trigger the same terminal-notification listener chain
+	// used in production: it reads NotificationState through Manager.getRuntime.
+	// SpawnChild must not hold Manager.mu while waiting for lifecycleMu.
+	parentRuntime.lifecycleMu.Lock()
+	parentLifecycleLocked := true
+	unlockParentLifecycle := func() {
+		if parentLifecycleLocked {
+			parentLifecycleLocked = false
+			parentRuntime.lifecycleMu.Unlock()
+		}
+	}
+	defer unlockParentLifecycle()
+	spawnReady := make(chan struct{})
+	spawnDone := make(chan error, 1)
+	go func() {
+		close(spawnReady)
+		spawnDone <- mgr.SpawnChild(childagent.SpawnSpec{
+			ChildAgentID: "child-lock-order-test", ParentAgentID: parent.ID,
+			AllowedTools: []string{"read_file"}, Purpose: "lock order regression",
+		})
+	}()
+	<-spawnReady
+	// Yield once so the spawn goroutine reaches its lifecycle snapshot wait.
+	goruntime.Gosched()
+
+	listenerDone := make(chan struct{})
+	go func() {
+		hub.Publish(parent.ID, "turn_state", map[string]any{"phase": "cancelled", "terminal": true})
+		close(listenerDone)
+	}()
+	select {
+	case <-listenerDone:
+		// Listener got Manager.mu while SpawnChild was waiting on lifecycleMu.
+	case <-time.After(time.Second):
+		unlockParentLifecycle()
+		select {
+		case <-listenerDone:
+		case <-time.After(time.Second):
+			t.Error("notification listener remained blocked after releasing lifecycleMu")
+		}
+		select {
+		case <-spawnDone:
+		case <-time.After(time.Second):
+			t.Error("SpawnChild remained blocked after releasing lifecycleMu")
+		}
+		t.Fatal("notification listener deadlocked with SpawnChild while acquiring Manager.mu")
+	}
+
+	unlockParentLifecycle()
+	select {
+	case err := <-spawnDone:
+		if err != nil {
+			t.Fatalf("SpawnChild failed: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SpawnChild did not finish after lifecycleMu was released")
+	}
+	if child := mgr.getRuntime("child-lock-order-test"); child == nil {
+		t.Fatal("child runtime was not installed")
+	}
+	mgr.StopChild("child-lock-order-test")
+}
+
+func TestSpawnChildRejectsParentReplacedDuringBudgetSnapshot(t *testing.T) {
+	previousProcs := goruntime.GOMAXPROCS(1)
+	defer goruntime.GOMAXPROCS(previousProcs)
+	mgr, _, _ := newManagerWithChildAgents(t, &llm.MockClient{})
+	t.Cleanup(mgr.Stop)
+	parent, _, err := mgr.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentRuntime := mgr.getRuntime(parent.ID)
+	if parentRuntime == nil {
+		t.Fatal("parent runtime is missing")
+	}
+
+	parentRuntime.lifecycleMu.Lock()
+	parentLifecycleLocked := true
+	unlockParentLifecycle := func() {
+		if parentLifecycleLocked {
+			parentLifecycleLocked = false
+			parentRuntime.lifecycleMu.Unlock()
+		}
+	}
+	defer unlockParentLifecycle()
+	spawnReady := make(chan struct{})
+	spawnDone := make(chan error, 1)
+	go func() {
+		close(spawnReady)
+		spawnDone <- mgr.SpawnChild(childagent.SpawnSpec{
+			ChildAgentID: "child-replaced-parent-test", ParentAgentID: parent.ID,
+			AllowedTools: []string{"read_file"}, Purpose: "parent replacement regression",
+		})
+	}()
+	<-spawnReady
+	// With one P, the sender continues from close(spawnReady) until it blocks
+	// on parentRuntime.lifecycleMu. Replace the runtime in exactly that window.
+
+	replacement := &runtime{
+		session:  Session{ID: parent.ID, AgentID: "agent-1"},
+		inputBox: NewInputBox(),
+		queue:    queue.NewMessageQueue(),
+	}
+	replacementDone := make(chan bool, 1)
+	go func() {
+		mgr.mu.Lock()
+		defer mgr.mu.Unlock()
+		if mgr.sessions[parent.ID] != parentRuntime {
+			replacementDone <- false
+			return
+		}
+		mgr.sessions[parent.ID] = replacement
+		replacementDone <- true
+	}()
+	select {
+	case replaced := <-replacementDone:
+		if !replaced {
+			unlockParentLifecycle()
+			t.Fatal("parent runtime changed before replacement setup")
+		}
+	case <-time.After(time.Second):
+		unlockParentLifecycle()
+		select {
+		case <-spawnDone:
+		case <-time.After(time.Second):
+			t.Error("SpawnChild remained blocked after releasing lifecycleMu")
+		}
+		select {
+		case <-replacementDone:
+		case <-time.After(time.Second):
+			t.Error("parent replacement remained blocked after releasing lifecycleMu")
+		}
+		t.Fatal("SpawnChild held Manager.mu while waiting for parent lifecycleMu")
+	}
+	unlockParentLifecycle()
+
+	select {
+	case err := <-spawnDone:
+		if err == nil || !strings.Contains(err.Error(), "parent session not found") {
+			t.Fatalf("SpawnChild error=%v, want rejection after parent replacement", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SpawnChild did not finish after parent replacement")
+	}
+	if child := mgr.getRuntime("child-replaced-parent-test"); child != nil {
+		t.Fatal("child was created with the replaced parent's budget snapshot")
+	}
+
+	// Restore the original live runtime for Manager.Stop and close the temporary
+	// replacement runtime explicitly.
+	replacement.requestStop()
+	mgr.mu.Lock()
+	mgr.sessions[parent.ID] = parentRuntime
+	mgr.mu.Unlock()
 }
 
 type delayedEchoMock struct {

@@ -1,7 +1,7 @@
 {
   "name": "dagents-shell",
   "private": true,
-  "version": "1.0.5",
+  "version": "1.0.6",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -41,8 +41,10 @@
     "eslint-plugin-vue": "^10.10.0",
     "globals": "^17.11.0",
     "jsdom": "^26.1.0",
-    "vitest": "^4.1.11",
-    "vite": "^6.0.3"
+    "postcss": "8.5.30",
+    "postcss-selector-parser": "7.1.7",
+    "vite": "^6.0.3",
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "exceljs": {

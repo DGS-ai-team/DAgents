@@ -52,7 +52,7 @@ func TestRunDreamingReadOnlyReturnsContentWithoutChange(t *testing.T) {
 		t.Fatalf("lease: ok=%v err=%v", ok, err)
 	}
 	defer release()
-	result, err := mgr.RunDreaming(ctx, sessionID, "整理经验", 4)
+	result, err := mgr.RunDreaming(ctx, sessionID, "整理经验")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,11 +72,11 @@ func TestRunDreamingDoesNotOverwriteUnackedCompletedAttempt(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("lease: ok=%v err=%v", ok, err)
 	}
-	if _, err := mgr.RunDreaming(ctx, sessionID, "一次整理", 2); err != nil {
+	if _, err := mgr.RunDreaming(ctx, sessionID, "一次整理"); err != nil {
 		t.Fatal(err)
 	}
 	calls := client.calls
-	if _, err := mgr.RunDreaming(ctx, sessionID, "重复整理", 2); err == nil {
+	if _, err := mgr.RunDreaming(ctx, sessionID, "重复整理"); err == nil {
 		t.Fatal("unacked completed attempt was overwritten")
 	}
 	release()
@@ -93,7 +93,7 @@ func TestRunDreamingUsesHandbookToolsAndReturnsFinalExperience(t *testing.T) {
 		t.Fatalf("lease: ok=%v err=%v", ok, err)
 	}
 	defer release()
-	result, err := mgr.RunDreaming(ctx, sessionID, "整理并总结经验", 5)
+	result, err := mgr.RunDreaming(ctx, sessionID, "整理并总结经验")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,16 +106,20 @@ func TestRunDreamingUsesHandbookToolsAndReturnsFinalExperience(t *testing.T) {
 	}
 }
 
-func TestRunDreamingMaxToolRoundsLeavesFinalRequestToolFree(t *testing.T) {
+func TestRunDreamingLeavesFinalRequestToolFree(t *testing.T) {
 	client := &handbookRoundClient{}
 	mgr, _, sessionID, cleanup := dreamingFixture(t, client)
 	defer cleanup()
+	mgr.mu.RLock()
+	r := mgr.sessions[sessionID]
+	mgr.mu.RUnlock()
+	r.turnBudget = turn.TurnBudget{MaxToolCalls: 1, ReserveFinalSummary: true}
 	ctx, release, ok, err := mgr.TryAcquireMaintenanceContext(context.Background(), "agent-1")
 	if err != nil || !ok {
 		t.Fatalf("lease: ok=%v err=%v", ok, err)
 	}
 	defer release()
-	result, err := mgr.RunDreaming(ctx, sessionID, "整理经验", 1)
+	result, err := mgr.RunDreaming(ctx, sessionID, "整理经验")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +133,12 @@ func TestRunDreamingMaxToolRoundsLeavesFinalRequestToolFree(t *testing.T) {
 	if len(final.Tools) != 0 {
 		t.Fatalf("final summary exposed tools: %d", len(final.Tools))
 	}
+	if len(client.requests[0].Tools) == 0 {
+		t.Fatal("dreaming tool request did not receive tools")
+	}
+	if snapshot := r.turnCoordinator.Snapshot(); snapshot.Usage.ToolCalls != 1 {
+		t.Fatalf("dreaming should share the configured one-call quota: usage=%+v", snapshot.Usage)
+	}
 	for _, phrase := range []string{
 		"本轮执行预算已达到上限",
 		"不要发起或请求任何工具调用",
@@ -141,7 +151,7 @@ func TestRunDreamingMaxToolRoundsLeavesFinalRequestToolFree(t *testing.T) {
 	}
 }
 
-func TestRunDreamingIgnoresChatBudgetAndRestoresIt(t *testing.T) {
+func TestRunDreamingUsesSameToolCallBudget(t *testing.T) {
 	mgr, _, sessionID, cleanup := dreamingFixture(t, &handbookRoundClient{})
 	defer cleanup()
 	mgr.mu.RLock()
@@ -152,7 +162,7 @@ func TestRunDreamingIgnoresChatBudgetAndRestoresIt(t *testing.T) {
 	}
 	r.lifecycleMu.Lock()
 	r.budgetResolver = func() (turn.TurnBudget, error) {
-		return turn.TurnBudget{MaxTotalTokens: 1, MaxToolRounds: 99}, nil
+		return turn.TurnBudget{MaxToolCalls: 1, ReserveFinalSummary: true}, nil
 	}
 	r.lifecycleMu.Unlock()
 	ctx, release, ok, err := mgr.TryAcquireMaintenanceContext(context.Background(), "agent-1")
@@ -160,17 +170,17 @@ func TestRunDreamingIgnoresChatBudgetAndRestoresIt(t *testing.T) {
 		t.Fatalf("lease: ok=%v err=%v", ok, err)
 	}
 	defer release()
-	if _, err := mgr.RunDreaming(ctx, sessionID, "整理经验", 2); err != nil {
+	if _, err := mgr.RunDreaming(ctx, sessionID, "整理经验"); err != nil {
 		t.Fatal(err)
 	}
 	r.lifecycleMu.Lock()
 	budget, resolveErr := r.budgetResolver()
 	restored := r.turnBudget
 	r.lifecycleMu.Unlock()
-	if resolveErr != nil || budget.MaxTotalTokens != 1 || budget.MaxToolRounds != 99 {
+	if resolveErr != nil || budget.MaxToolCalls != 1 {
 		t.Fatalf("chat budget resolver was not restored: budget=%+v err=%v", budget, resolveErr)
 	}
-	if restored != (turn.TurnBudget{}) {
+	if restored.MaxToolCalls != 1 || !restored.ReserveFinalSummary {
 		t.Fatalf("dreaming budget leaked into later chat: %+v", restored)
 	}
 }
@@ -204,7 +214,7 @@ func TestRunDreamingHonorsHandbookApproval(t *testing.T) {
 		t.Fatalf("lease: ok=%v err=%v", ok, err)
 	}
 	defer release()
-	result, runErr := mgr.RunDreaming(ctx, rt.ID, "整理经验", 2)
+	result, runErr := mgr.RunDreaming(ctx, rt.ID, "整理经验")
 	if runErr == nil || result.Content != "" {
 		t.Fatalf("approval was bypassed: result=%+v err=%v", result, runErr)
 	}
@@ -225,7 +235,7 @@ func TestRunDreamingDoesNotRequireKnownUsage(t *testing.T) {
 		t.Fatalf("lease: ok=%v err=%v", ok, err)
 	}
 	defer release()
-	result, err := mgr.RunDreaming(ctx, sessionID, "整理经验", 5)
+	result, err := mgr.RunDreaming(ctx, sessionID, "整理经验")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +259,7 @@ func TestRunDreamingCancellationDoesNotReportSuccess(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, runErr := mgr.RunDreaming(leaseCtx, sessionID, "整理经验", 2)
+		_, runErr := mgr.RunDreaming(leaseCtx, sessionID, "整理经验")
 		done <- runErr
 	}()
 	select {

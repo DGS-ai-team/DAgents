@@ -20,7 +20,7 @@ import (
 
 func TestAutonomyV2ConfigSyncsStableDefaultTriggerAndReconcilesFailure(t *testing.T) {
 	s, _ := autonomyV2TestServer(t)
-	body := `{"expected_revision":0,"responsibility":"keep","wake_interval_seconds":60,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`
+	body := `{"expected_revision":0,"responsibility":"keep","wake_interval_seconds":60,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`
 	w := autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", body)
 	if w.Code != http.StatusOK {
 		t.Fatalf("first put=%d %s", w.Code, w.Body)
@@ -30,7 +30,7 @@ func TestAutonomyV2ConfigSyncsStableDefaultTriggerAndReconcilesFailure(t *testin
 		t.Fatalf("default trigger=%+v ok=%v", def, ok)
 	}
 	firstRevision, firstNext := def.Revision, *def.NextFireAt
-	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":1,"responsibility":"keep","wake_interval_seconds":60,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
+	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":1,"responsibility":"keep","wake_interval_seconds":60,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("repeat put=%d %s", w.Code, w.Body)
 	}
@@ -47,7 +47,7 @@ func TestAutonomyV2ConfigSyncsStableDefaultTriggerAndReconcilesFailure(t *testin
 	if err := os.Mkdir(originalPath, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":2,"responsibility":"changed","wake_interval_seconds":120,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
+	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":2,"responsibility":"changed","wake_interval_seconds":120,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
 	if w.Code != http.StatusServiceUnavailable || !bytes.Contains(w.Body.Bytes(), []byte("saved_profile")) {
 		t.Fatalf("sync failure=%d %s", w.Code, w.Body)
 	}
@@ -76,7 +76,7 @@ func TestAutonomyV2ConfigSyncsStableDefaultTriggerAndReconcilesFailure(t *testin
 		t.Fatalf("reconcile changed profile=%+v", profile)
 	}
 
-	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":3,"responsibility":"changed","wake_interval_seconds":0,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
+	w = autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":3,"responsibility":"changed","wake_interval_seconds":0,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("disable=%d %s", w.Code, w.Body)
 	}
@@ -89,8 +89,8 @@ func TestAutonomyV2ConfigSyncsStableDefaultTriggerAndReconcilesFailure(t *testin
 func TestAutonomyV2DefaultTriggerSyncIsSerialized(t *testing.T) {
 	s, _ := autonomyV2TestServer(t)
 	requests := []string{
-		`{"expected_revision":0,"responsibility":"a","wake_interval_seconds":60,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`,
-		`{"expected_revision":0,"responsibility":"b","wake_interval_seconds":120,"max_tool_rounds":4,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`,
+		`{"expected_revision":0,"responsibility":"a","wake_interval_seconds":60,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`,
+		`{"expected_revision":0,"responsibility":"b","wake_interval_seconds":120,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`,
 	}
 	var wg sync.WaitGroup
 	results := make(chan int, len(requests))
@@ -139,7 +139,7 @@ func TestAutonomyV2DefaultTriggerSyncIsSerialized(t *testing.T) {
 
 func TestAutonomyV2TriggerRoundProviderRequiresExactDefaultDelivery(t *testing.T) {
 	s, _ := autonomyV2TestServer(t)
-	if w := autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":0,"responsibility":"x","wake_interval_seconds":60,"max_tool_rounds":7,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`); w.Code != http.StatusOK {
+	if w := autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":0,"responsibility":"x","wake_interval_seconds":60,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`); w.Code != http.StatusOK {
 		t.Fatalf("put=%d %s", w.Code, w.Body)
 	}
 	id := triggers.AutoDefaultTriggerID("auto-v2")
@@ -155,18 +155,18 @@ func TestAutonomyV2TriggerRoundProviderRequiresExactDefaultDelivery(t *testing.T
 		t.Fatal(err)
 	}
 	s.triggerStore.MarkPendingDelivery(id)
-	limit, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", id, delivery)
-	if err != nil || !trusted || limit != 7 {
-		t.Fatalf("provider=(%d,%v,%v)", limit, trusted, err)
+	trusted, err := s.triggerActivationProvider(context.Background(), "auto-v2", id, delivery)
+	if err != nil || !trusted {
+		t.Fatalf("provider=(%v,%v)", trusted, err)
 	}
 	defaultOptions := s.sessions.DefaultTurnOptions()
-	if defaultOptions.TriggerToolRoundProvider == nil {
-		t.Fatal("NewServer did not wire trigger round provider into default session options")
+	if defaultOptions.TriggerActivationProvider == nil {
+		t.Fatal("NewServer did not wire trigger activation validator into default session options")
 	}
-	if limit, trusted, err := defaultOptions.TriggerToolRoundProvider(context.Background(), "auto-v2", id, delivery); err != nil || !trusted || limit != 7 {
-		t.Fatalf("wired provider=(%d,%v,%v)", limit, trusted, err)
+	if trusted, err := defaultOptions.TriggerActivationProvider(context.Background(), "auto-v2", id, delivery); err != nil || !trusted {
+		t.Fatalf("wired provider=(%v,%v)", trusted, err)
 	}
-	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", id, "wrong-delivery"); err == nil || trusted {
+	if trusted, err := s.triggerActivationProvider(context.Background(), "auto-v2", id, "wrong-delivery"); err == nil || trusted {
 		t.Fatalf("wrong delivery accepted: trusted=%v err=%v", trusted, err)
 	}
 	ordinary, err := triggers.NewDefinitionFromCreate(triggers.CreateInput{Name: "ordinary", Condition: map[string]any{"interval_seconds": 60}, TargetAgentID: "auto-v2"}, "auto-v2", time.Now().UTC())
@@ -176,23 +176,23 @@ func TestAutonomyV2TriggerRoundProviderRequiresExactDefaultDelivery(t *testing.T
 	if _, err := s.triggerStore.CreateTrigger(ordinary); err != nil {
 		t.Fatal(err)
 	}
-	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", ordinary.TriggerID, "delivery"); err != nil || trusted {
+	if trusted, err := s.triggerActivationProvider(context.Background(), "auto-v2", ordinary.TriggerID, "delivery"); err != nil || trusted {
 		t.Fatalf("ordinary trigger accepted: trusted=%v err=%v", trusted, err)
 	}
-	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", "auto-default:other-agent", delivery); err == nil || trusted {
+	if trusted, err := s.triggerActivationProvider(context.Background(), "auto-v2", "auto-default:other-agent", delivery); err == nil || trusted {
 		t.Fatalf("other Auto trigger should be rejected: trusted=%v err=%v", trusted, err)
 	}
 	if err := s.agents.Save(context.Background(), store.AgentRecord{AgentID: "auto-v2", ConfigSnapshot: []byte(`{"agent_type":"normal","defaults":{}}`), RuntimeRevision: 2}); err != nil {
 		t.Fatal(err)
 	}
-	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", id, delivery); err == nil || trusted {
+	if trusted, err := s.triggerActivationProvider(context.Background(), "auto-v2", id, delivery); err == nil || trusted {
 		t.Fatalf("changed Agent type should reject old default: trusted=%v err=%v", trusted, err)
 	}
 }
 
 func TestAutonomyV2TriggerRoundProviderCapsOwnedUserTrigger(t *testing.T) {
 	s, _ := autonomyV2TestServer(t)
-	if w := autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":0,"responsibility":"x","wake_interval_seconds":0,"max_tool_rounds":7,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`); w.Code != http.StatusOK {
+	if w := autonomyV2Request(s, http.MethodPut, "/v1/agents/auto-v2/auto-config", `{"expected_revision":0,"responsibility":"x","wake_interval_seconds":0,"dreaming_enabled":false,"dreaming_time":"03:00","timezone":"UTC"}`); w.Code != http.StatusOK {
 		t.Fatalf("profile put=%d %s", w.Code, w.Body)
 	}
 	targetSession := "auto-v2"
@@ -216,10 +216,10 @@ func TestAutonomyV2TriggerRoundProviderCapsOwnedUserTrigger(t *testing.T) {
 		s.triggerStore.MarkPendingDelivery(def.TriggerID)
 	}
 	setPending("owned-delivery")
-	if limit, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", def.TriggerID, "owned-delivery"); err != nil || !trusted || limit != 7 {
-		t.Fatalf("owned user trigger=(%d,%v,%v)", limit, trusted, err)
+	if trusted, err := s.triggerActivationProvider(context.Background(), "auto-v2", def.TriggerID, "owned-delivery"); err != nil || !trusted {
+		t.Fatalf("owned user trigger=(%v,%v)", trusted, err)
 	}
-	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", def.TriggerID, "stale"); err == nil || trusted {
+	if trusted, err := s.triggerActivationProvider(context.Background(), "auto-v2", def.TriggerID, "stale"); err == nil || trusted {
 		t.Fatalf("stale delivery accepted: trusted=%v err=%v", trusted, err)
 	}
 	current, _ := s.triggerStore.GetTrigger(def.TriggerID)
@@ -227,7 +227,7 @@ func TestAutonomyV2TriggerRoundProviderCapsOwnedUserTrigger(t *testing.T) {
 	if err := s.triggerStore.ReplaceTrigger(*current); err != nil {
 		t.Fatal(err)
 	}
-	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", def.TriggerID, "owned-delivery"); err == nil || trusted {
+	if trusted, err := s.triggerActivationProvider(context.Background(), "auto-v2", def.TriggerID, "owned-delivery"); err == nil || trusted {
 		t.Fatalf("recovery delivery accepted: trusted=%v err=%v", trusted, err)
 	}
 	current.RecoveryRequired = false
@@ -236,7 +236,7 @@ func TestAutonomyV2TriggerRoundProviderCapsOwnedUserTrigger(t *testing.T) {
 	if err := s.triggerStore.ReplaceTrigger(*current); err != nil {
 		t.Fatal(err)
 	}
-	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", def.TriggerID, "owned-delivery"); err == nil || trusted {
+	if trusted, err := s.triggerActivationProvider(context.Background(), "auto-v2", def.TriggerID, "owned-delivery"); err == nil || trusted {
 		t.Fatalf("non-main session accepted: trusted=%v err=%v", trusted, err)
 	}
 	cross, err := triggers.NewDefinitionFromCreate(triggers.CreateInput{Name: "cross", Condition: map[string]any{"interval_seconds": 17}, TargetAgentID: "other-auto", TargetSessionID: &targetSession, SessionTargetMode: triggers.SessionTargetFixed}, "other-auto", time.Now().UTC())
@@ -246,7 +246,7 @@ func TestAutonomyV2TriggerRoundProviderCapsOwnedUserTrigger(t *testing.T) {
 	if _, err := s.triggerStore.CreateTrigger(cross); err != nil {
 		t.Fatal(err)
 	}
-	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "auto-v2", cross.TriggerID, "cross-delivery"); err == nil || trusted {
+	if trusted, err := s.triggerActivationProvider(context.Background(), "auto-v2", cross.TriggerID, "cross-delivery"); err == nil || trusted {
 		t.Fatalf("cross-agent trigger accepted: trusted=%v err=%v", trusted, err)
 	}
 	if err := s.agents.Save(context.Background(), store.AgentRecord{AgentID: "normal-1", ConfigSnapshot: []byte(`{"agent_type":"normal","defaults":{}}`), RuntimeRevision: 1}); err != nil {
@@ -260,7 +260,7 @@ func TestAutonomyV2TriggerRoundProviderCapsOwnedUserTrigger(t *testing.T) {
 	if _, err := s.triggerStore.CreateTrigger(normal); err != nil {
 		t.Fatal(err)
 	}
-	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "normal-1", normal.TriggerID, "normal-delivery"); err != nil || trusted {
+	if trusted, err := s.triggerActivationProvider(context.Background(), "normal-1", normal.TriggerID, "normal-delivery"); err != nil || trusted {
 		t.Fatalf("normal Agent trigger changed behavior: trusted=%v err=%v", trusted, err)
 	}
 	normalOtherSession := "normal-other"
@@ -268,7 +268,7 @@ func TestAutonomyV2TriggerRoundProviderCapsOwnedUserTrigger(t *testing.T) {
 	if err := s.triggerStore.ReplaceTrigger(normal); err != nil {
 		t.Fatal(err)
 	}
-	if _, trusted, err := s.triggerToolRoundProvider(context.Background(), "normal-1", normal.TriggerID, "normal-delivery"); err != nil || trusted {
+	if trusted, err := s.triggerActivationProvider(context.Background(), "normal-1", normal.TriggerID, "normal-delivery"); err != nil || trusted {
 		t.Fatalf("normal non-main trigger changed behavior: trusted=%v err=%v", trusted, err)
 	}
 }
@@ -353,7 +353,7 @@ func TestNewServerStartupRebuildsOnlyAutoDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := autonomyStore.PutProfile(autonomy.Profile{AgentID: "startup-auto", WakeIntervalSeconds: 60, MaxToolRounds: 4, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
+	if err := autonomyStore.PutProfile(autonomy.Profile{AgentID: "startup-auto", WakeIntervalSeconds: 60, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	triggerStore, err := triggers.OpenStore(cfg.TriggersStorePath(), 20)
@@ -415,10 +415,10 @@ func TestNewServerStartupKeepsPendingAutoDefaultFrozen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := autonomyStore.PutProfile(autonomy.Profile{AgentID: "pending-auto", WakeIntervalSeconds: 0, MaxToolRounds: 4, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
+	if err := autonomyStore.PutProfile(autonomy.Profile{AgentID: "pending-auto", WakeIntervalSeconds: 0, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := autonomyStore.PutProfile(autonomy.Profile{AgentID: "healthy-auto", WakeIntervalSeconds: 60, MaxToolRounds: 4, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
+	if err := autonomyStore.PutProfile(autonomy.Profile{AgentID: "healthy-auto", WakeIntervalSeconds: 60, DreamingTime: "03:00", Timezone: "UTC"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	triggerStore, err := triggers.OpenStore(cfg.TriggersStorePath(), 20)
@@ -471,7 +471,7 @@ func TestNewServerStartupKeepsPendingAutoDefaultFrozen(t *testing.T) {
 	if got.Enabled || got.PendingDeliveryID != nil || got.RecoveryRequired {
 		t.Fatalf("recovered auto trigger should remain disabled: %+v", got)
 	}
-	if err := s.autonomyStore.PutProfile(autonomy.Profile{AgentID: "pending-auto", WakeIntervalSeconds: 60, MaxToolRounds: 4, DreamingTime: "03:00", Timezone: "UTC"}, 1); err != nil {
+	if err := s.autonomyStore.PutProfile(autonomy.Profile{AgentID: "pending-auto", WakeIntervalSeconds: 60, DreamingTime: "03:00", Timezone: "UTC"}, 1); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/v1/agents/pending-auto/auto-config/reconcile", bytes.NewBufferString(`{}`))

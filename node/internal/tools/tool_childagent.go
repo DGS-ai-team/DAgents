@@ -40,7 +40,6 @@ func createTemporaryAgentToolDef() ToolDef {
 						"description": "创建时预加载的 skills 名称（可选）；directory_name 须对应 `<runtime_root>/skills/` 下的子目录，整组替换语义同 load_skills",
 					},
 					"ttl_seconds": map[string]any{"type": "integer", "description": "临时 Agent 生命周期（秒）"},
-					"max_turns":   map[string]any{"type": "integer", "description": "临时 Agent 最大回合数；达到上限将以失败终态返回"},
 				},
 				"required":             []string{"task", "purpose"},
 				"additionalProperties": false,

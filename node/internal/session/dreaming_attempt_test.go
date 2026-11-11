@@ -9,7 +9,7 @@ import (
 )
 
 func validDreamingAttempt() DreamingAttempt {
-	return DreamingAttempt{AgentID: "agent-1", SessionID: "session-1", TurnID: "turn-7", ExperienceRevision: 4, LocalDate: "2026-09-09", MaxToolRounds: 8, State: DreamingAttemptWaiting}
+	return DreamingAttempt{AgentID: "agent-1", SessionID: "session-1", TurnID: "turn-7", ExperienceRevision: 4, LocalDate: "2026-09-09", State: DreamingAttemptWaiting}
 }
 
 func TestDreamingAttemptCompletionRequiresExactTurnResult(t *testing.T) {

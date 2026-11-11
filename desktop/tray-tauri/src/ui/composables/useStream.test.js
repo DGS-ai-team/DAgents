@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildStream } from "./useStream.js";
-import { toolStepIsActiveInGroup } from "../utils/toolUserLabel.js";
+import { resolveToolStepPhase, toolStepIsActiveInGroup } from "../utils/toolUserLabel.js";
 import { applyTurnState, resetTurnState } from "../stores/turnState.js";
 
 function entry(id, kind, extra = {}) {
@@ -121,5 +121,32 @@ describe("buildStream", () => {
     expect(step.kind).toBe("tool_step");
     expect(step.executionHint).toBe("active");
     expect(toolStepIsActiveInGroup(step)).toBe(true);
+  });
+
+  it("uses cancelled coordinator status when a persisted tool result says succeeded", () => {
+    applyTurnState({
+      authority: "turn_coordinator",
+      phase: "cancelled",
+      turn_id: "turn-cancelled",
+      generation: 1,
+      lifecycle_seq: 8,
+      terminal: true,
+      tool_executions: [{ tool_call_id: "write-cancelled", tool_name: "write_file", status: "cancelled" }],
+    }, { source: "hydrate" });
+
+    const [step] = buildStream([
+      entry(1, "tool_call", {
+        blockId: "write-cancelled",
+        data: { tool_call_id: "write-cancelled", tool_name: "write_file", arguments: '{"path":"native-approval-cancel.md"}' },
+      }),
+      entry(2, "tool_result", {
+        blockId: "write-cancelled",
+        data: { tool_call_id: "write-cancelled", tool_name: "write_file", status: "succeeded", content: "工具调用已被用户取消。" },
+      }),
+    ]);
+
+    expect(step.resultEntry.data.status).toBe("succeeded");
+    expect(step.lifecycleStatus).toBe("cancelled");
+    expect(resolveToolStepPhase(step)).toBe("cancelled");
   });
 });

@@ -57,16 +57,16 @@ func (c *turnFinishFixtureClient) capturedRequests() []llm.ChatRequest {
 	return append([]llm.ChatRequest(nil), c.requests...)
 }
 
-func newAgentTurnFixture(t *testing.T, maxSteps int, client *turnFinishFixtureClient) (*session.Manager, *stream.Hub, *store.SQLiteStore, *session.Session, Built) {
-	return newAgentTurnFixtureWithBudget(t, maxSteps, 0, true, client)
+func newAgentTurnFixture(t *testing.T, maxToolCalls int, client *turnFinishFixtureClient) (*session.Manager, *stream.Hub, *store.SQLiteStore, *session.Session, Built) {
+	return newAgentTurnFixtureWithBudget(t, maxToolCalls, true, client)
 }
 
-func newAgentTurnFixtureWithBudget(t *testing.T, maxSteps, maxToolCalls int, reserveSummary bool, client *turnFinishFixtureClient) (*session.Manager, *stream.Hub, *store.SQLiteStore, *session.Session, Built) {
+func newAgentTurnFixtureWithBudget(t *testing.T, maxToolCalls int, reserveSummary bool, client *turnFinishFixtureClient) (*session.Manager, *stream.Hub, *store.SQLiteStore, *session.Session, Built) {
 	t.Helper()
 	root := t.TempDir()
 	cfg := &config.Config{NodeID: "node-1", RuntimeRoot: filepath.Join(root, "runtime")}
 	cfg.ApplyDefaults()
-	llmDefaults := map[string]any{"max_steps": float64(maxSteps)}
+	llmDefaults := map[string]any{}
 	if maxToolCalls > 0 {
 		llmDefaults["max_tool_calls"] = float64(maxToolCalls)
 	}
@@ -116,7 +116,7 @@ func newAgentTurnFixtureWithBudget(t *testing.T, maxSteps, maxToolCalls int, res
 
 func awaitTurnFinished(t *testing.T, events <-chan stream.Event) []stream.Event {
 	t.Helper()
-	deadline := time.NewTimer(8 * time.Second)
+	deadline := time.NewTimer(30 * time.Second)
 	defer deadline.Stop()
 	var received []stream.Event
 	finished, terminalState := false, false
@@ -139,7 +139,7 @@ func awaitTurnFinished(t *testing.T, events <-chan stream.Event) []stream.Event 
 	}
 }
 
-func TestAgentMaxStepsReservesToolFreeFinalSummary(t *testing.T) {
+func TestAgentMaxToolCallsReservesToolFreeFinalSummary(t *testing.T) {
 	client := &turnFinishFixtureClient{first: []llm.ToolCall{{
 		ID: "read-one", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"input.txt"}`},
 	}}}
@@ -204,13 +204,130 @@ func TestAgentMaxStepsReservesToolFreeFinalSummary(t *testing.T) {
 	}
 }
 
+func TestAgentMaxToolCallsAllowsExactly64AndRejects65thCall(t *testing.T) {
+	const callsCount = 65
+	calls := make([]llm.ToolCall, 0, callsCount)
+	for index := 0; index < callsCount; index++ {
+		calls = append(calls, llm.ToolCall{
+			ID: fmt.Sprintf("call-%02d", index), Type: "function",
+			Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"input.txt"}`},
+		})
+	}
+	client := &turnFinishFixtureClient{first: calls}
+	manager, hub, st, created, built := newAgentTurnFixture(t, 64, client)
+	if err := os.WriteFile(filepath.Join(built.WorkspaceRoot, "input.txt"), []byte("quota fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	events := hub.Subscribe(hub.CurrentSeq())
+	defer hub.Unsubscribe(events)
+	if _, err := manager.EnqueueMessage(context.Background(), created.ID, "message", "read the file repeatedly", nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	seen := awaitTurnFinished(t, events)
+	requests := client.capturedRequests()
+	if len(requests) != 2 || len(requests[0].Tools) == 0 || len(requests[1].Tools) != 0 {
+		t.Fatalf("requests=%d tool-counts=%v, want one 65-call batch followed by a tool-free summary", len(requests), requestToolCounts(requests))
+	}
+	results := 0
+	resultContent := map[string]string{}
+	for _, event := range seen {
+		if event.Type == "tool_result" {
+			results++
+			id, _ := event.Data["tool_call_id"].(string)
+			content, _ := event.Data["content"].(string)
+			resultContent[id] = content
+		}
+	}
+	if results != callsCount {
+		t.Fatalf("tool results=%d, want %d (64 executed + 1 rejected)", results, callsCount)
+	}
+	if !strings.Contains(resultContent["call-63"], "quota fixture") || !strings.Contains(resultContent["call-64"], "turn budget exhausted") {
+		t.Fatalf("parallel boundary result mismatch: call64=%q call65=%q", resultContent["call-63"], resultContent["call-64"])
+	}
+	stored, err := st.ListTurnEvents(context.Background(), created.ID, 0, 2000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, recorded := 0, 0
+	for _, event := range stored {
+		switch event.EventType {
+		case turn.EventToolExecutionStarted:
+			started++
+		case turn.EventToolCallRecorded:
+			recorded++
+		}
+	}
+	if started != 64 || recorded != callsCount {
+		t.Fatalf("tool lifecycle started/recorded=%d/%d, want 64 executed and 65 recorded", started, recorded)
+	}
+}
+
+func TestAgentMaxToolCallsRuns64SequentialCallsBeforeToolFreeSummary(t *testing.T) {
+	const callsCount = 64
+	steps := make([][]llm.ToolCall, 0, callsCount)
+	for index := 0; index < callsCount; index++ {
+		steps = append(steps, []llm.ToolCall{{
+			ID: fmt.Sprintf("sequential-%02d", index), Type: "function",
+			Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"input.txt"}`},
+		}})
+	}
+	client := &turnFinishFixtureClient{steps: steps}
+	manager, hub, st, created, built := newAgentTurnFixture(t, 64, client)
+	if err := os.WriteFile(filepath.Join(built.WorkspaceRoot, "input.txt"), []byte("sequential quota fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	events := hub.Subscribe(hub.CurrentSeq())
+	defer hub.Unsubscribe(events)
+	if _, err := manager.EnqueueMessage(context.Background(), created.ID, "message", "read the file 64 times", nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	seen := awaitTurnFinished(t, events)
+	requests := client.capturedRequests()
+	if len(requests) != callsCount+1 || len(requests[callsCount].Tools) != 0 {
+		t.Fatalf("requests=%d tool-counts=%v, want 64 tool requests followed by a tool-free summary", len(requests), requestToolCounts(requests))
+	}
+	results, denied := 0, 0
+	for _, event := range seen {
+		if event.Type != "tool_result" {
+			continue
+		}
+		results++
+		content, _ := event.Data["content"].(string)
+		if strings.Contains(content, "turn budget exhausted") {
+			denied++
+		}
+	}
+	if results != callsCount || denied != 0 {
+		t.Fatalf("sequential results=%d denied=%d, want 64 successful executions", results, denied)
+	}
+	stored, err := st.ListTurnEvents(context.Background(), created.ID, 0, 2000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, recorded := 0, 0
+	for _, event := range stored {
+		switch event.EventType {
+		case turn.EventToolExecutionStarted:
+			started++
+		case turn.EventToolCallRecorded:
+			recorded++
+		}
+	}
+	if started != callsCount || recorded != callsCount {
+		t.Fatalf("sequential lifecycle started/recorded=%d/%d, want 64", started, recorded)
+	}
+}
+
 func TestAgentToolCallOverflowClosesBatchAndUsesReservedSummary(t *testing.T) {
 	calls := []llm.ToolCall{
 		{ID: "overflow-one", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"one.txt"}`}},
 		{ID: "overflow-two", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"two.txt"}`}},
 	}
 	client := &turnFinishFixtureClient{first: calls}
-	manager, hub, st, created, _ := newAgentTurnFixtureWithBudget(t, 4, 1, true, client)
+	manager, hub, st, created, built := newAgentTurnFixtureWithBudget(t, 1, true, client)
+	if err := os.WriteFile(filepath.Join(built.WorkspaceRoot, "one.txt"), []byte("first call can execute"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	events := hub.Subscribe(hub.CurrentSeq())
 	defer hub.Unsubscribe(events)
 	if _, err := manager.EnqueueMessage(context.Background(), created.ID, "message", "read both", nil, nil, ""); err != nil {
@@ -276,7 +393,7 @@ func TestAgentToolCallOverflowClosesBatchAndUsesReservedSummary(t *testing.T) {
 			completed = true
 		}
 	}
-	if executionsStarted != 0 || resultsRecorded != 2 || summaries != 1 || !completed {
+	if executionsStarted != 1 || resultsRecorded != 2 || summaries != 1 || !completed {
 		t.Fatalf("overflow lifecycle incomplete: starts=%d results=%d summaries=%d completed=%t events=%v", executionsStarted, resultsRecorded, summaries, completed, eventTypes(stored))
 	}
 }
@@ -295,7 +412,10 @@ func TestAgentToolCallOverflowTerminatesWithoutReservedSummary(t *testing.T) {
 		{ID: "no-summary-two", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"two.txt"}`}},
 	}
 	client := &turnFinishFixtureClient{first: calls}
-	manager, hub, st, created, _ := newAgentTurnFixtureWithBudget(t, 4, 1, false, client)
+	manager, hub, st, created, built := newAgentTurnFixtureWithBudget(t, 1, false, client)
+	if err := os.WriteFile(filepath.Join(built.WorkspaceRoot, "one.txt"), []byte("first call can execute"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	events := hub.Subscribe(hub.CurrentSeq())
 	defer hub.Unsubscribe(events)
 	if _, err := manager.EnqueueMessage(context.Background(), created.ID, "message", "read both", nil, nil, ""); err != nil {
@@ -336,8 +456,14 @@ func TestAgentToolCallOverflowTerminatesWithoutReservedSummary(t *testing.T) {
 			resultFacts++
 		}
 	}
-	if budgetTerminals != 1 || resultFacts != 2 {
-		t.Fatalf("budget terminal/result facts = %d/%d, events=%v", budgetTerminals, resultFacts, eventTypes(stored))
+	starts := 0
+	for _, event := range stored {
+		if event.EventType == turn.EventToolExecutionStarted {
+			starts++
+		}
+	}
+	if starts != 1 || budgetTerminals != 1 || resultFacts != 2 {
+		t.Fatalf("execution/terminal/result facts = %d/%d/%d, events=%v", starts, budgetTerminals, resultFacts, eventTypes(stored))
 	}
 }
 
@@ -348,8 +474,11 @@ func TestAgentLaterOverflowBatchPreservesEarlierToolResultInSummary(t *testing.T
 		{ID: "later-overflow-two", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"two.txt"}`}},
 	}
 	client := &turnFinishFixtureClient{steps: [][]llm.ToolCall{{first}, second}}
-	manager, hub, st, created, built := newAgentTurnFixtureWithBudget(t, 5, 2, true, client)
+	manager, hub, st, created, built := newAgentTurnFixtureWithBudget(t, 2, true, client)
 	if err := os.WriteFile(filepath.Join(built.WorkspaceRoot, "input.txt"), []byte("earlier tool evidence"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(built.WorkspaceRoot, "one.txt"), []byte("second batch allowed call"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	events := hub.Subscribe(hub.CurrentSeq())
@@ -371,7 +500,7 @@ func TestAgentLaterOverflowBatchPreservesEarlierToolResultInSummary(t *testing.T
 			providerResults[message.ToolCallID] = message.Content
 		}
 	}
-	if !strings.Contains(providerResults[first.ID], "earlier tool evidence") || !strings.Contains(providerResults[second[0].ID], "turn budget exhausted") || !strings.Contains(providerResults[second[1].ID], "turn budget exhausted") {
+	if !strings.Contains(providerResults[first.ID], "earlier tool evidence") || !strings.Contains(providerResults[second[0].ID], "second batch allowed call") || !strings.Contains(providerResults[second[1].ID], "turn budget exhausted") {
 		t.Fatalf("summary provider request lost or misrepresented tool results: %#v", providerResults)
 	}
 	resultContents := map[string]string{}
@@ -389,8 +518,8 @@ func TestAgentLaterOverflowBatchPreservesEarlierToolResultInSummary(t *testing.T
 			terminalStates++
 		}
 	}
-	if !strings.Contains(resultContents[first.ID], "earlier tool evidence") || !strings.Contains(resultContents[second[0].ID], "turn budget exhausted") || !strings.Contains(resultContents[second[1].ID], "turn budget exhausted") {
-		t.Fatalf("tool result events do not cover the successful and rejected calls: %#v", resultContents)
+	if !strings.Contains(resultContents[first.ID], "earlier tool evidence") || !strings.Contains(resultContents[second[0].ID], "second batch allowed call") || !strings.Contains(resultContents[second[1].ID], "turn budget exhausted") {
+		t.Fatalf("tool result events do not cover the successful, in-budget, and rejected calls: %#v", resultContents)
 	}
 	if terminalFinished != 1 || terminalStates != 1 {
 		t.Fatalf("expected one terminal publication, got finished=%d states=%d", terminalFinished, terminalStates)
@@ -416,7 +545,7 @@ func TestAgentLaterOverflowBatchPreservesEarlierToolResultInSummary(t *testing.T
 			}
 		}
 	}
-	if starts != 1 || resultFacts != 3 || summaries != 1 {
+	if starts != 2 || resultFacts != 3 || summaries != 1 {
 		t.Fatalf("later overflow execution/lifecycle counts = starts:%d results:%d summaries:%d events:%v", starts, resultFacts, summaries, eventTypes(stored))
 	}
 }

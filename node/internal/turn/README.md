@@ -52,7 +52,7 @@ sequenceDiagram
 - `SetChildAgentManager(mgr)`：父 session 注入临时 Agent 管理器
 - `SetChildSession(true)`：子 session 禁止管理类工具与 `ask_user`
 
-`policy == nil` 时加载默认策略；Agent snapshot 的 `defaults.llm.max_steps` 与 `defaults.llm.max_tool_calls` 分别装入 `TurnBudget.MaxSteps` 和 `TurnBudget.MaxToolCalls`。达到任一上限后由生命周期预算禁止继续调用工具，并尝试进行一次无工具收尾。Auto 自主激活和 dreaming 使用各自的 `MaxToolRounds` 预算。
+每轮工具调用上限只来自 Agent snapshot 的 `defaults.llm.max_tool_calls`（默认 64，允许 1–4096）。普通对话、Auto 激活和 dreaming 共用该限制；每个模型提出的唯一 tool-call ID 计一次，拒绝与失败也计入，审批恢复不会重复计数。并行批次只执行额度内的前 N 项，超出的调用逐项拒绝。额度耗尽后最多保留一次无工具总结机会；`step_index` 仅记录生命周期序号，不构成第二个限制。
 
 ---
 

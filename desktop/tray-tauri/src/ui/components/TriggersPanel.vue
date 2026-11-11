@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import * as api from "../api/node.js";
 import { confirmDesktopAction } from "../utils/desktopDialogs.js";
 import TriggerEditor from "./settings/TriggerEditor.vue";
+import SettingsDisclosure from "./SettingsDisclosure.vue";
 import { formatTriggerCondition, formatUnixTime, shortId, truncateText, triggerFireStatusMessage } from "../utils/panelFormat.js";
 import {
   buildCreatePayload,
@@ -396,15 +397,14 @@ onMounted(load);
                   <div v-if="item.task_template" class="command-card__preview">
                     任务：{{ truncateText(item.task_template, 80) }}
                   </div>
-                  <details class="trigger-technical-details">
-                    <summary>技术详情</summary>
+                  <SettingsDisclosure class="trigger-technical-details" title="技术详情">
                     <dl>
                       <template v-if="item.trigger_id"><dt>任务 ID</dt><dd><code>{{ item.trigger_id }}</code></dd></template>
                       <template v-if="item.target_agent_id || item.owner_agent_id"><dt>智能体 ID</dt><dd><code>{{ item.target_agent_id || item.owner_agent_id }}</code></dd></template>
                       <template v-if="item.target_session_id"><dt>会话 ID</dt><dd><code>{{ item.target_session_id }}</code></dd></template>
                       <template v-if="item.task_template"><dt>完整任务</dt><dd class="trigger-technical-details__task">{{ item.task_template }}</dd></template>
                     </dl>
-                  </details>
+                  </SettingsDisclosure>
                   <p v-if="isAutoOwnerUnavailable(item)" class="command-panel__hint">所属智能体不可用，无法打开 Auto 设置</p>
                   <p v-else-if="isRetired(item)" class="command-panel__hint">{{ isAutoManaged(item) ? "请在 Auto 设置中调整默认唤醒。" : "这是已退役的历史触发器，仅供查看。" }}</p>
                   <div v-if="item.recovery_required && (!isRetired(item) || isAutoManaged(item))" class="command-panel__error">
@@ -475,8 +475,7 @@ onMounted(load);
 </template>
 
 <style scoped>
-.trigger-technical-details { margin-top: 8px; color: var(--color-text-muted); font-size: 12px; }
-.trigger-technical-details summary { width: fit-content; cursor: pointer; }
+.trigger-technical-details { margin-top: 8px; }
 .trigger-technical-details dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 6px 10px; margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-alt, var(--color-surface)); }
 .trigger-technical-details dt { color: var(--color-text-muted); }
 .trigger-technical-details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--color-text); }

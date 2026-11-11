@@ -120,6 +120,47 @@ func TestOrchestratorDoesNotRetryHTTP401Or402(t *testing.T) {
 	}
 }
 
+func TestOrchestratorClassifies403InsufficientQuotaWithoutRetry(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = fmt.Fprint(w, `{"error":{"message":"insufficient quota","type":"insufficient_quota","code":"insufficient_quota"}}`)
+	}))
+	defer server.Close()
+	client := retryTestOpenAIClient{OpenAIClient: llm.NewOpenAIClient(llm.OpenAIConfig{BaseURL: server.URL, Model: "test-model", APIKey: "test-key"})}
+	orch := testOrchestrator(t, stream.NewHub(16, logx.Discard()), client)
+	var commands []TurnCommand
+	orch.SetLifecycleCommandSink(func(_ string, command TurnCommand) error {
+		commands = append(commands, command)
+		return nil
+	})
+	var history []llm.Message
+	_, _, err := runMessageTurnInline(t, orch, context.Background(), "session-403-quota", &history, "hello", nil)
+	if err == nil {
+		t.Fatal("expected quota failure")
+	}
+	if got := atomic.LoadInt32(&requests); got != 1 {
+		t.Fatalf("provider requests = %d, want one request without retry", got)
+	}
+	failureFound := false
+	for _, command := range commands {
+		if command.Type == CommandModelRequestFailed {
+			failureFound = true
+			if command.ErrorKind != "provider_quota" || command.Retryable {
+				t.Fatalf("failure classification = kind %q retryable %v, want provider_quota and false", command.ErrorKind, command.Retryable)
+			}
+		}
+		if command.Type == CommandModelRequestRetrying {
+			t.Fatal("quota error must not emit a retrying lifecycle command")
+		}
+	}
+	if !failureFound {
+		t.Fatal("missing terminal model request failure lifecycle command")
+	}
+}
+
 func TestOrchestratorExhausted503ReturnsTerminalError(t *testing.T) {
 	var requests int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -246,53 +287,13 @@ func TestWaitModelRetryStopsPromptlyWhenCancelled(t *testing.T) {
 	}
 }
 
-func TestModelRetryBudgetDenialDoesNotPublishProviderError(t *testing.T) {
-	client := &transientModelFailureMock{}
-	hub := stream.NewHub(16, logx.Discard())
-	events := hub.SubscribeAgent(0, "session-budget-retry")
-	defer hub.Unsubscribe(events)
-	orch := testOrchestrator(t, hub, client)
-	orch.SetModelRetryCheck(func(string) (bool, string) { return false, "max_retries" })
-	var commands []TurnCommand
-	orch.SetLifecycleCommandSink(func(_ string, command TurnCommand) error {
-		commands = append(commands, command)
-		return nil
-	})
-	var history []llm.Message
-	_, _, err := runMessageTurnInline(t, orch, context.Background(), "session-budget-retry", &history, "hello", nil)
-	if !errors.Is(err, ErrBudgetExhausted) {
-		t.Fatalf("turn error = %v, want budget exhaustion", err)
-	}
-	if countLifecycleCommands(commands, CommandModelRequestRetrying) != 1 || countLifecycleCommands(commands, CommandModelRequestFailed) != 0 {
-		t.Fatalf("model attempt lifecycle commands = %+v", commands)
-	}
-	var finishReason string
-	for {
-		select {
-		case event := <-events:
-			if event.Type == "error" {
-				t.Fatalf("budget denial published a provider error: %#v", event.Data)
-			}
-			if event.Type == "turn_finished" {
-				finishReason, _ = event.Data["finish_reason"].(string)
-				if finishReason != "budget_exhausted" {
-					t.Fatalf("finish_reason = %q, want budget_exhausted", finishReason)
-				}
-				return
-			}
-		case <-time.After(time.Second):
-			t.Fatalf("missing budget terminal event, finish_reason=%q", finishReason)
-		}
-	}
-}
-
 func TestOrchestratorChecksToolBudgetBeforeSideEffect(t *testing.T) {
 	reg := testRegistry(t)
 	executor := &countingExecutor{Registry: reg}
 	pol := policy.NewDefaultEngine()
 	orch := NewOrchestrator("a1", t.TempDir(), stream.NewHub(16, logx.Discard()), alwaysToolMock{}, executor, pol, SkillAccess{}, nil, nil,
 		hooks.RuntimeConfig{Duplicate: hooks.DefaultDuplicateConfig(), ToolResult: hooks.ToolResultConfigOrDefault(hooks.ToolResultConfig{WorkspaceRoot: t.TempDir()})}, logx.Discard())
-	orch.SetToolBudgetCheck(func(string) (bool, string) { return false, "max_tool_calls" })
+	orch.SetToolBudgetCheck(func(string, string) (bool, string) { return false, "max_tool_calls" })
 
 	var history []llm.Message
 	outcome := orch.RunHumanMessageTurn(context.Background(), "session-1", &history, llm.UserMessage("run", llm.UserNameHuman))

@@ -112,7 +112,7 @@ func TestProcessRestartRecovery(t *testing.T) {
 		agentID := createProcessAutoAgent(t, baseURL)
 		postProcessJSON(t, http.MethodPut, baseURL+"/v1/agents/"+agentID+"/auto-config", map[string]any{
 			"expected_revision": 0, "responsibility": "process test", "wake_interval_seconds": 1,
-			"max_tool_rounds": 2, "dreaming_enabled": false, "dreaming_time": "03:00", "timezone": "UTC",
+			"dreaming_enabled": false, "dreaming_time": "03:00", "timezone": "UTC",
 		})
 		triggerID := "auto-default:" + agentID
 		waitProcessTriggerFireCount(t, baseURL, triggerID, 1, 15*time.Second)
@@ -130,7 +130,7 @@ func TestProcessRestartRecovery(t *testing.T) {
 		// than the disabled path.
 		postProcessJSON(t, http.MethodPut, baseURL+"/v1/agents/"+agentID+"/auto-config", map[string]any{
 			"expected_revision": 1, "responsibility": "process test", "wake_interval_seconds": 60,
-			"max_tool_rounds": 2, "dreaming_enabled": false, "dreaming_time": "03:00", "timezone": "UTC",
+			"dreaming_enabled": false, "dreaming_time": "03:00", "timezone": "UTC",
 		})
 		first.Kill(t)
 		second := newNodeProcess(t, binary, root)
@@ -411,7 +411,7 @@ func createProcessAgent(t *testing.T, baseURL string, groups []string) string {
 	resp := postProcessJSON(t, http.MethodPost, baseURL+"/v1/agents", map[string]any{
 		"display_name": "process-e2e-agent",
 		"defaults": map[string]any{
-			"llm":   map[string]any{"max_steps": 4},
+			"llm":   map[string]any{"max_tool_calls": 4},
 			"tools": map[string]any{"enabled_groups": groups},
 		},
 	})
@@ -432,7 +432,7 @@ func createProcessAutoAgent(t *testing.T, baseURL string) string {
 	resp := postProcessJSON(t, http.MethodPost, baseURL+"/v1/agents", map[string]any{
 		"display_name": "process-e2e-auto",
 		"agent_type":   "auto",
-		"defaults":     map[string]any{"llm": map[string]any{"max_steps": 4}, "tools": map[string]any{"enabled_groups": []any{}}},
+		"defaults":     map[string]any{"llm": map[string]any{"max_tool_calls": 4}, "tools": map[string]any{"enabled_groups": []any{}}},
 	})
 	var body struct {
 		AgentID string `json:"agent_id"`

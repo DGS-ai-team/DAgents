@@ -24,7 +24,7 @@ function normalizeResult(item) {
     status: String(item.status || "").trim(),
     summary: String(item.summary || "").trim(),
     error: String(item.error || "").trim(),
-    turn_count: intVal(item.turn_count),
+    step_count: intVal(item.turn_count),
     artifacts,
   };
 }
@@ -39,7 +39,7 @@ function formatCreateResult(payload) {
   if (item.error) detailParts.push(`error: ${item.error}`);
   if (item.summary) detailParts.push(item.summary);
   if (item.artifacts.length) detailParts.push(`artifacts: ${item.artifacts.join(", ")}`);
-  if (item.turn_count > 0) detailParts.push(`turn_count=${item.turn_count}`);
+  if (item.step_count > 0) detailParts.push(`步骤数：${item.step_count}`);
   return { summary, detail: detailParts.join("\n") };
 }
 

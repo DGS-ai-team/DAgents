@@ -415,7 +415,7 @@ onMounted(() => {
 
       <footer v-if="!loading" class="agent-create-page__footer">
         <div class="agent-create-page__footer-left">
-          <button type="button" class="agent-create-page__back" :disabled="saving" @click="onBack">
+          <button type="button" class="btn btn--ghost agent-create-page__back" :disabled="saving" @click="onBack">
             {{ backLabel }}
           </button>
           <p v-if="error" class="agent-create-page__error">{{ error }}</p>
@@ -591,29 +591,9 @@ onMounted(() => {
   margin-left: auto;
 }
 
-.agent-create-page__back,
-.agent-create-page__link {
+.agent-create-page__back {
   flex: 0 0 auto;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.4;
-  cursor: pointer;
   white-space: nowrap;
-}
-
-.agent-create-page__back:hover:not(:disabled),
-.agent-create-page__link:hover:not(:disabled) {
-  color: var(--color-text);
-}
-
-.agent-create-page__back:disabled,
-.agent-create-page__link:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .agent-create-page__error {

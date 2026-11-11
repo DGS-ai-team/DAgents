@@ -112,13 +112,16 @@ describe("ContextConfigPanel save errors", () => {
   it("saves the idle new-conversation duration and explains its trigger", async () => {
     const wrapper = mount(ContextConfigPanel);
     await flushPromises();
-    expect(wrapper.text()).toContain("自动压缩：启用；空闲归档：关闭。");
-    expect(wrapper.text()).toContain("普通 Agent 空闲达到设定时间后，下条用户消息");
+    expect(wrapper.text()).not.toContain("自动压缩：启用");
+    expect(wrapper.text()).toContain("自动压缩");
+    expect(wrapper.text()).toContain("提示内容");
+    expect(wrapper.text()).toContain("普通 Agent 达到此时长后，下条消息");
     expect(wrapper.text()).toContain("开启新对话并归档旧上下文");
-    expect(wrapper.text()).toContain("自动压缩阈值或空闲时长设为 0 可关闭对应行为；工具摘要阈值必须至少为 1。");
+    expect(wrapper.text()).toContain("阈值设为 0 可关闭");
+    expect(wrapper.text()).toContain("至少为 1");
     const idle = numberField(wrapper, "空闲时长");
     await idle.setValue("3600");
-    expect(wrapper.text()).toContain("自动压缩：启用；空闲归档：3600 秒后启用。");
+    expect(wrapper.text()).not.toContain("空闲归档：3600 秒后启用");
     await wrapper.get(".setup-config-panel__actions button").trigger("click");
     await flushPromises();
 
@@ -160,18 +163,14 @@ describe("ContextConfigPanel save errors", () => {
     wrapper.unmount();
   });
 
-  it("keeps advanced controls collapsed and preserves their loaded values", async () => {
+  it("groups related context controls and preserves their loaded values", async () => {
     const wrapper = mount(ContextConfigPanel);
     await flushPromises();
-    const advanced = wrapper.get(".context-settings__advanced");
-    expect(advanced.element.open).toBe(false);
-    expect(wrapper.text()).toContain("启用工具结果摘要");
-    expect(advanced.find('input[type="checkbox"]').exists()).toBe(true);
-
-    await advanced.get("summary").trigger("click");
+    expect(wrapper.findAll(".settings-group")).toHaveLength(3);
+    expect(wrapper.text()).toContain("自动摘要");
     expect(numberField(wrapper, "空闲时长").element.value).toBe("0");
     expect(numberField(wrapper, "静默压缩阈值").element.value).toBe("64000");
-    const dateToggle = advanced.get('input[type="checkbox"]');
+    const dateToggle = wrapper.get('input[aria-label="当天日期提示"]');
     expect(dateToggle.element.checked).toBe(false);
     await dateToggle.setValue(true);
     await wrapper.get(".setup-config-panel__actions button").trigger("click");

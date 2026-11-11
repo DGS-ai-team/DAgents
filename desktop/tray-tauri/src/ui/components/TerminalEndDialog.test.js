@@ -11,7 +11,7 @@ describe('TerminalEndDialog', () => {
     wrapper = mount(TerminalEndDialog, { attachTo: document.body, props: { open: true, terminalName: 'Build' } })
     await flushPromises()
     const cancel = wrapper.get('.dialog-actions button').element
-    const confirm = wrapper.get('.dialog-actions .danger').element
+    const confirm = wrapper.get('.dialog-actions .btn--danger').element
     expect(document.activeElement).toBe(cancel)
     await wrapper.get('[role="alertdialog"]').trigger('keydown', { key: 'Tab', shiftKey: true })
     expect(document.activeElement).toBe(confirm)
@@ -25,7 +25,7 @@ describe('TerminalEndDialog', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Agent 或模型也可能正在使用')
     expect(wrapper.emitted('confirm')).toBeUndefined()
-    await wrapper.get('.dialog-actions .danger').trigger('click')
+    await wrapper.get('.dialog-actions .btn--danger').trigger('click')
     expect(wrapper.emitted('confirm')).toHaveLength(1)
     expect(wrapper.emitted('cancel')).toBeUndefined()
   })

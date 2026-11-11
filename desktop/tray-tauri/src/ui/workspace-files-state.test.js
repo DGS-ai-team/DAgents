@@ -1,7 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { agentMediaId, cancelWorkspaceAttachmentBatch, createWorkspaceAttachmentBatch, createWorkspaceCsvPreviewParser, decodeWorkspaceText, deserializeWorkspaceDraft, encodeWorkspaceText, isWorkspaceAttachmentBatchCurrent, isWorkspaceRequestCurrent, isWorkspaceWriteRequestCurrent, normalizeWorkspacePath, parseWorkspaceCsvPreview, serializeWorkspaceDraft, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceContentType, workspaceDraftKey, workspaceFileLocation, workspaceImageBlob, workspaceRasterBlob, workspaceTextFormat, workspaceWriteProgressLabel } from './workspace-files-state.js'
+import { agentMediaId, cancelWorkspaceAttachmentBatch, createWorkspaceAttachmentBatch, createWorkspaceCsvPreviewParser, decodeWorkspaceText, deserializeWorkspaceDraft, encodeWorkspaceText, isWorkspaceAttachmentBatchCurrent, isWorkspaceRequestCurrent, isWorkspaceWriteRequestCurrent, normalizeWorkspacePath, parseWorkspaceCsvPreview, serializeWorkspaceDraft, shouldClearWorkspaceUploadError, toNodeFileReference, workspaceContentType, workspaceDockScrollInset, workspaceDraftKey, workspaceFileLocation, workspaceImageBlob, workspaceRasterBlob, workspaceTextFormat, workspaceWriteProgressLabel } from './workspace-files-state.js'
 import { createWorkspaceFile, listWorkspace, pickWorkspaceImport, readWorkspaceFile, readWorkspaceTextChunk, revealWorkspacePath, saveWorkspaceFile, saveWorkspaceFileAs, uploadWorkspaceFile } from './workspace-files-api.js'
+
+test('workspace dock inset follows measured expansion and stays small when collapsed', () => {
+  assert.equal(workspaceDockScrollInset(false, 450), 476)
+  assert.equal(workspaceDockScrollInset(true, 450), 12)
+})
 
 test('text editor round-trips UTF-8 BOM and dominant line endings, including new files', () => {
   const encoder = new TextEncoder()

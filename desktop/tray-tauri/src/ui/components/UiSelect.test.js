@@ -24,6 +24,12 @@ describe('UiSelect', () => {
     expect(document.activeElement).toBe(wrapper.get('.ui-select__trigger').element)
   })
 
+  it('exposes invalid state on the actual trigger button', () => {
+    wrapper = mount(UiSelect, { props: { ariaInvalid: true, options: ['one'] } })
+    expect(wrapper.attributes('aria-invalid')).toBeUndefined()
+    expect(wrapper.get('.ui-select__trigger').attributes('aria-invalid')).toBe('true')
+  })
+
   it('skips disabled search results and closes when the selector becomes disabled', async () => {
     wrapper = mount(UiSelect, {
       attachTo: document.body,

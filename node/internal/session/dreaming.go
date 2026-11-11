@@ -270,8 +270,8 @@ func (r *runtime) messagesForDreaming(attempt DreamingAttempt) []llm.Message {
 // RunDreaming runs on an already-created main session while its maintenance
 // lease is held. It uses the real Agent model and handbook tools, but has no
 // receipt, token-budget, or external-fact side channel.
-func (m *Manager) RunDreaming(ctx context.Context, sessionID, prompt string, maxToolRounds int, metadata ...DreamingMetadata) (DreamingTurnResult, error) {
-	if m == nil || ctx == nil || maxToolRounds <= 0 {
+func (m *Manager) RunDreaming(ctx context.Context, sessionID, prompt string, metadata ...DreamingMetadata) (DreamingTurnResult, error) {
+	if m == nil || ctx == nil {
 		return DreamingTurnResult{}, fmt.Errorf("dreaming executor unavailable")
 	}
 	m.mu.RLock()
@@ -303,20 +303,6 @@ func (m *Manager) RunDreaming(ctx context.Context, sessionID, prompt string, max
 		return DreamingTurnResult{}, err
 	}
 	mutationBefore := reg.HandbookMutationCount()
-	dreamBudget := turn.TurnBudget{MaxToolRounds: maxToolRounds, ReserveFinalSummary: true}
-	r.lifecycleMu.Lock()
-	previousBudget, previousResolver := r.turnBudget, r.budgetResolver
-	// A configured resolver normally supplies the user-chat budget. Dreaming
-	// has its own bounded tool-round budget, so suspend that resolver only for
-	// this lifecycle start and restore it before returning.
-	r.turnBudget = dreamBudget
-	r.budgetResolver = func() (turn.TurnBudget, error) { return dreamBudget, nil }
-	r.lifecycleMu.Unlock()
-	defer func() {
-		r.lifecycleMu.Lock()
-		r.turnBudget, r.budgetResolver = previousBudget, previousResolver
-		r.lifecycleMu.Unlock()
-	}()
 
 	user := llm.UserMessage(strings.TrimSpace(prompt), llm.UserNameHuman)
 	r.mu.Lock()
@@ -339,7 +325,7 @@ func (m *Manager) RunDreaming(ctx context.Context, sessionID, prompt string, max
 		meta = metadata[0]
 	}
 	attempt := &DreamingAttempt{AgentID: r.agentID, SessionID: r.session.ID, TurnID: state.TurnID,
-		ExperienceRevision: meta.ExperienceRevision, LocalDate: strings.TrimSpace(meta.LocalDate), MaxToolRounds: maxToolRounds, State: DreamingAttemptRunning,
+		ExperienceRevision: meta.ExperienceRevision, LocalDate: strings.TrimSpace(meta.LocalDate), State: DreamingAttemptRunning,
 		Boundary: boundary, HistoryStart: boundaryValue.Index, HandbookMutationBefore: mutationBefore, StartedAt: time.Now().UTC()}
 	if err := r.saveDreamingAttempt(attempt); err != nil {
 		return DreamingTurnResult{TurnID: state.TurnID, Boundary: boundary}, err

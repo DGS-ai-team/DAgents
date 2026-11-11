@@ -53,6 +53,17 @@ export function approvalQueueKey(data) {
   return "parent:anonymous";
 }
 
+/** Stable presentation identity: SSE/hydrate repeats retain local selection, a new HITL ID resets it. */
+export function approvalRequestKey(data) {
+  const child = String(data?.child_agent_id || "").trim();
+  const id = String(data?.request_id || data?.approval_id || data?.hitl_id || data?.interaction_id || "").trim();
+  if (id) return `approval:${child}:${id}`;
+  const calls = extractToolApprovals(data).map((item) => item.callId).filter(Boolean).sort();
+  const turn = String(data?.turn_id || data?.parent_turn_id || "").trim();
+  const step = String(data?.step_id || "").trim();
+  return `approval:${child}:turn:${turn}:step:${step}:calls:${calls.join(",") || "anonymous"}`;
+}
+
 import { normalizeToolCallItem } from "@shared-frontend/utils/toolCalls.js";
 
 function attachApprovalRouting(data, resume) {
@@ -83,46 +94,15 @@ export function extractToolApprovals(data) {
     .filter((it) => it.callId);
 }
 
-export function buildApprovalSelectionResume(data, approvedByCallId) {
+export function buildApprovalSelectionResume(data, approvedCallIds = []) {
   const items = extractToolApprovals(data);
   if (!items.length) {
     return attachApprovalRouting(data, { type: "reject" });
   }
-  const approved = [];
-  const rejected = [];
-  for (const it of items) {
-    if (approvedByCallId[it.callId]) approved.push(it.callId);
-    else rejected.push(it.callId);
-  }
+  const selected = new Set(Array.isArray(approvedCallIds) ? approvedCallIds.map(String) : []);
+  const approved = items.filter((it) => selected.has(it.callId)).map((it) => it.callId);
+  const rejected = items.filter((it) => !selected.has(it.callId)).map((it) => it.callId);
   return attachApprovalRouting(data, { type: "selection", approved, rejected });
-}
-
-/** 单条批准：仅执行所选工具，其余拒绝。单条拒绝：整批全部拒绝（不自动批准 siblings）。 */
-export function buildApprovalOneResume(data, callId, approve) {
-  const items = extractToolApprovals(data);
-  if (!items.length) {
-    return attachApprovalRouting(data, { type: "reject" });
-  }
-  if (approve) {
-    const approved = items.filter((it) => it.callId === callId).map((it) => it.callId);
-    const rejected = items.filter((it) => it.callId !== callId).map((it) => it.callId);
-    return attachApprovalRouting(data, { type: "selection", approved, rejected });
-  }
-  const rejected = items.map((it) => it.callId);
-  return attachApprovalRouting(data, { type: "selection", approved: [], rejected });
-}
-
-export function buildApprovalResume(data, { approveAll, approved = [], rejected = [] }) {
-  const items = extractToolApprovals(data);
-  const rv = { type: "selection", approved: [...approved], rejected: [...rejected] };
-  if (approveAll === true) {
-    rv.approved = items.map((it) => it.callId);
-    rv.rejected = [];
-  } else if (approveAll === false) {
-    rv.approved = [];
-    rv.rejected = items.map((it) => it.callId);
-  }
-  return attachApprovalRouting(data, rv);
 }
 
 export function extractUserInfo(data) {

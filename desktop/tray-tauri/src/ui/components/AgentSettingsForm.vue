@@ -13,6 +13,7 @@ import {
 } from "../utils/agentTemplateForm.js";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
 import UiSelect from "./UiSelect.vue";
+import SettingsDisclosure from "./SettingsDisclosure.vue";
 
 const draft = defineModel("draft", { type: Object, required: true });
 
@@ -175,7 +176,7 @@ const memoryScopeOptions = computed(() =>
 );
 const agentTypeOptions = [
   { value: "normal", label: "普通 Agent" },
-  { value: "auto", label: "Auto Agent（自主任务）" },
+  { value: "auto", label: "Auto Agent（自主运行）" },
 ];
 </script>
 
@@ -197,68 +198,75 @@ const agentTypeOptions = [
     >
       <h3 v-if="isFull && !hideBasicHeading" class="agent-settings-section__title">基础信息</h3>
       <div :class="{ 'agent-settings-section__body': isFull }">
-        <label class="agent-settings-field agent-settings-field--type">
-          <span class="agent-settings-field__label">智能体类型</span>
+        <label class="settings-field agent-settings-field--type" :class="{ 'settings-row settings-row--field': isFull }">
+          <span class="settings-row__copy"><span class="settings-field__label settings-row__title">智能体类型</span></span>
           <UiSelect v-model="draft.agentType" :options="agentTypeOptions" />
         </label>
-        <label class="agent-settings-field">
-          <span
+        <label class="settings-field" :class="{ 'settings-row settings-row--field': isFull }">
+          <span class="settings-row__copy">
+            <span
             :class="{
-              'agent-settings-field__label': true,
-              'agent-settings-field__label--error': !!fieldErrors?.name,
+              'settings-field__label settings-row__title': true,
+              'settings-field__label--error': !!fieldErrors?.name,
             }"
           >
             {{ nameLabel }}
+            </span>
           </span>
           <input
             v-model="draft.displayName"
             type="text"
-            class="agent-settings-input"
-            :class="{ 'agent-settings-input--error': !!fieldErrors?.name }"
+            class="settings-field__input"
+            :aria-invalid="fieldErrors?.name ? 'true' : undefined"
             :placeholder="useConversationalLabels ? '' : '智能体名称'"
             @input="onNameInput"
           />
         </label>
-        <label class="agent-settings-field" :class="{ 'agent-settings-field--grow': isCreateBasics }">
-          <span class="agent-settings-field__label">
+        <label class="settings-field" :class="{ 'agent-settings-field--grow': isCreateBasics, 'settings-row settings-row--field': isFull }">
+          <span class="settings-row__copy">
+            <span class="settings-field__label settings-row__title">
             {{ useConversationalLabels ? "介绍一下你的智能体吧，如果你愿意的话" : "简介" }}
+            </span>
           </span>
           <textarea
             v-model="draft.description"
-            class="agent-settings-input agent-settings-input--area"
+            class="settings-field__input settings-field__input--multiline"
             :rows="isCreateBasics ? 4 : 2"
             :placeholder="useConversationalLabels ? '' : '可选，简短说明它擅长什么'"
           />
         </label>
-        <label class="agent-settings-field">
-          <span
+        <label class="settings-field" :class="{ 'settings-row settings-row--field': isFull }">
+          <span class="settings-row__copy">
+            <span
             :class="{
-              'agent-settings-field__label': true,
-              'agent-settings-field__label--error': !!fieldErrors?.llm,
+              'settings-field__label settings-row__title': true,
+              'settings-field__label--error': !!fieldErrors?.llm,
             }"
           >
             {{ llmLabel }}
+            </span>
           </span>
           <UiSelect
             v-model="draft.llmProfileId"
             :options="llmProfileOptions"
             placeholder="请选择"
             :disabled="!llmProfileOptions.length"
+            :aria-invalid="!!fieldErrors?.llm"
             :menu-placement="isCreateBasics ? 'above' : 'auto'"
             @update:model-value="onLlmChange"
           />
         </label>
-        <p v-if="!llmProfiles.length" class="agent-settings-hint">
+        <p v-if="!llmProfiles.length" class="settings-field__hint">
           {{
             useConversationalLabels
               ? "还没有模型配置，先去「设置 › 连接」加一条吧。"
               : "请先在「设置 › 连接」中添加模型配置"
           }}
         </p>
-        <label v-if="isFull" class="agent-settings-field agent-settings-field--tool-call-limit">
-          <span class="agent-settings-field__label">
-            最大工具调用数
-            <small>每次人工对话中模型发起的调用总数，范围 1–4096；并行调用逐个计数。Auto 自主激活与 dreaming 使用各自的轮次上限。</small>
+        <label v-if="isFull" class="settings-field settings-row settings-row--field agent-settings-field--tool-call-limit">
+          <span class="settings-row__copy">
+            <span class="settings-field__label settings-row__title">最大工具调用数</span>
+            <small class="settings-row__description">普通聊天、自主运行和每日经验整理每轮均受此上限约束。模型每提出一次工具调用计 1 次（含失败或拒绝），并行调用逐个计数；范围 1–4096。</small>
           </span>
           <input
             v-model.number="draft.maxToolCalls"
@@ -266,11 +274,11 @@ const agentTypeOptions = [
             min="1"
             max="4096"
             step="1"
-            class="agent-settings-input"
+            class="settings-field__input"
             aria-label="每轮最大工具调用数"
           />
         </label>
-        <p v-if="isCreateBasics" class="agent-settings-hint agent-settings-hint--later">
+        <p v-if="isCreateBasics" class="settings-field__hint agent-settings-hint--later">
           角色设定、技能白名单等，创建后可在智能体设置里慢慢调。
         </p>
       </div>
@@ -280,7 +288,7 @@ const agentTypeOptions = [
       <div class="agent-settings-workspace-readonly__row">
         <div>
           <h3 class="agent-settings-section__title agent-settings-section__title--inline">工作目录</h3>
-          <p class="agent-settings-hint">创建时绑定，不能在设置页修改。</p>
+          <p class="settings-field__hint">创建时绑定，不能在设置页修改。</p>
         </div>
         <code v-if="draft.workspaceMode === 'custom' && draft.workspacePath">{{ draft.workspacePath }}</code>
         <span v-else-if="draft.workspaceMode === 'private'">Agent 私有目录</span>
@@ -314,23 +322,15 @@ const agentTypeOptions = [
 
     <template v-if="isFull">
       <section class="agent-settings-section agent-settings-section--flat">
-        <details
-          class="agent-settings-disclosure-wrap"
-          :open="advancedOpen"
-          @toggle="advancedOpen = $event.currentTarget.open"
+        <SettingsDisclosure
+          v-model:expanded="advancedOpen"
+          title="能力与角色"
         >
-          <summary class="agent-settings-disclosure">
-            <span>
-              <strong>能力与角色</strong>
-              <small>工具、技能白名单、角色设定与记忆范围</small>
-            </span>
-            <span class="agent-settings-disclosure__action">展开</span>
-          </summary>
-
+          <p class="settings-section__desc">配置工具、技能白名单、角色设定与记忆范围。</p>
           <div class="agent-settings-advanced agent-settings-section__body">
           <div class="agent-settings-advanced__block">
             <h4 class="agent-settings-subsection__title">工具能力</h4>
-            <p class="agent-settings-hint">点选启用；都不选则不开放任何工具。</p>
+            <p class="settings-field__hint">点选启用；都不选则不开放任何工具。</p>
             <div class="agent-settings-toggles agent-settings-toggles--tiles">
               <button
                 v-for="g in visibleToolGroups"
@@ -354,11 +354,11 @@ const agentTypeOptions = [
 
           <div v-if="skillsToolEnabled" class="agent-settings-advanced__block">
             <h4 class="agent-settings-subsection__title">可见技能</h4>
-            <p class="agent-settings-hint">
+            <p class="settings-field__hint">
               选择该智能体可发现和加载的技能。全选表示不限制（新技能会自动出现）；否则仅白名单内可用。
             </p>
             <div class="agent-settings-field__head">
-              <span class="agent-settings-hint" style="margin: 0">
+              <span class="settings-field__hint" style="margin: 0">
                 <template v-if="draft.visibleSkills === null">当前：不限制（全部）</template>
                 <template v-else>当前：已选 {{ draft.visibleSkills.length }} 项</template>
               </span>
@@ -371,9 +371,9 @@ const agentTypeOptions = [
                 </button>
               </div>
             </div>
-            <p v-if="catalogLoading" class="agent-settings-hint">加载目录中…</p>
-            <p v-else-if="catalogError" class="agent-settings-hint">{{ catalogError }}</p>
-            <p v-else-if="!catalogSkills.length" class="agent-settings-hint">暂无可用技能。</p>
+            <p v-if="catalogLoading" class="settings-field__hint">加载目录中…</p>
+            <p v-else-if="catalogError" class="settings-field__hint">{{ catalogError }}</p>
+            <p v-else-if="!catalogSkills.length" class="settings-field__hint">暂无可用技能。</p>
             <div v-else class="agent-settings-skill-list">
               <label
                 v-for="s in catalogSkills"
@@ -381,6 +381,7 @@ const agentTypeOptions = [
                 class="agent-settings-check agent-settings-check--skill"
               >
                 <input
+                  class="form-checkbox"
                   type="checkbox"
                   :checked="isSkillVisible(s.skill_name)"
                   @change="toggleSkillVisible(s.skill_name)"
@@ -395,34 +396,34 @@ const agentTypeOptions = [
 
           <div class="agent-settings-advanced__block">
             <h4 class="agent-settings-subsection__title">角色与记忆</h4>
-            <p class="agent-settings-hint">
+            <p class="settings-field__hint">
               填写后会注入到系统提示；留空则不注入。开启「记忆」工具后可选择记忆范围。
             </p>
-            <label class="agent-settings-field">
-              <span class="agent-settings-field__label">角色设定</span>
+            <label class="settings-field">
+              <span class="settings-field__label">角色设定</span>
               <textarea
                 v-model="draft.promptSoulMd"
-                class="agent-settings-input agent-settings-input--area"
+                class="settings-field__input settings-field__input--multiline"
                 rows="4"
                 placeholder="它应该是怎样的角色、语气与边界…"
               />
             </label>
-            <label class="agent-settings-field">
-              <span class="agent-settings-field__label">临时指令</span>
+            <label class="settings-field">
+              <span class="settings-field__label">临时指令</span>
               <textarea
                 v-model="draft.promptCustomMd"
-                class="agent-settings-input agent-settings-input--area"
+                class="settings-field__input settings-field__input--multiline"
                 rows="3"
                 placeholder="仅对当前智能体生效的补充说明…"
               />
             </label>
-            <label v-if="memoryToolEnabled" class="agent-settings-field">
-              <span class="agent-settings-field__label">记忆范围</span>
+            <label v-if="memoryToolEnabled" class="settings-field">
+              <span class="settings-field__label">记忆范围</span>
               <UiSelect v-model="draft.promptMemoryScope" :options="memoryScopeOptions" />
             </label>
           </div>
           </div>
-        </details>
+        </SettingsDisclosure>
       </section>
     </template>
   </div>
@@ -470,107 +471,6 @@ const agentTypeOptions = [
   padding-top: 24px;
 }
 
-.agent-settings-form--full .agent-settings-section__body {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 16px;
-}
-
-.agent-settings-form--full .agent-settings-section__body > .agent-settings-field {
-  min-width: 0;
-  margin: 0;
-}
-
-.agent-settings-form--full .agent-settings-section__body > .agent-settings-field:nth-of-type(1) {
-  grid-column: 1;
-  grid-row: 1;
-}
-
-.agent-settings-form--full .agent-settings-section__body > .agent-settings-field:nth-of-type(2) {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-}
-
-.agent-settings-form--full .agent-settings-section__body > .agent-settings-field:nth-of-type(3) {
-  grid-column: 1;
-  grid-row: 2;
-}
-
-.agent-settings-form--full .agent-settings-section__body > .agent-settings-hint {
-  grid-column: 1 / -1;
-}
-
-.agent-settings-disclosure-wrap {
-  width: 100%;
-}
-
-.agent-settings-disclosure {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  gap: 16px;
-  margin: 0;
-  padding: 0 0 10px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  list-style: none;
-  text-align: left;
-}
-
-.agent-settings-disclosure::-webkit-details-marker {
-  display: none;
-}
-
-.agent-settings-disclosure > span:first-child {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.agent-settings-disclosure strong {
-  color: var(--color-text);
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.agent-settings-disclosure small {
-  color: var(--color-text-muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.agent-settings-disclosure__action {
-  margin-left: auto;
-  color: var(--color-primary-strong);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.agent-settings-disclosure__action::before {
-  content: "查看";
-}
-
-.agent-settings-disclosure-wrap[open] .agent-settings-disclosure__action::before {
-  content: "收起";
-}
-
-.agent-settings-disclosure__action {
-  font-size: 0;
-}
-
-.agent-settings-disclosure__action::before {
-  font-size: 12px;
-}
-
-.agent-settings-disclosure__chevron {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  font-weight: 400;
-}
-
 .agent-settings-subsection__title {
   margin: 0 0 6px;
   font-size: 12.5px;
@@ -587,34 +487,6 @@ const agentTypeOptions = [
 .agent-settings-form--full .agent-settings-section--flat .agent-settings-section__body {
   display: flex;
   flex-direction: column;
-}
-
-.agent-settings-form--full .agent-settings-section--flat .agent-settings-field {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr);
-  align-items: center;
-  gap: 24px;
-  margin: 0;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--border-subtle, var(--color-border));
-}
-
-.agent-settings-form--full .agent-settings-section--flat .agent-settings-input {
-  max-width: 100%;
-}
-
-/* Detail settings are intentionally one field per row; the create wizard
-   keeps its compact conversational layout above. */
-.agent-settings-form--full .agent-settings-section--flat .agent-settings-section__body {
-  display: flex;
-  flex-direction: column;
-}
-
-@media (max-width: 640px) {
-  .agent-settings-form--full .agent-settings-section--flat .agent-settings-field {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
 }
 
 .agent-settings-form--create {
@@ -645,11 +517,9 @@ const agentTypeOptions = [
   flex: 0 0 auto;
 }
 
-.agent-settings-form--create-basics .agent-settings-field {
+.agent-settings-form--create-basics .settings-field {
   gap: 6px;
   margin-bottom: 0;
-  font-size: inherit;
-  color: inherit;
   flex: 0 0 auto;
 }
 
@@ -657,17 +527,6 @@ const agentTypeOptions = [
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-}
-
-.agent-settings-form--create-basics .agent-settings-field--grow .agent-settings-input--area {
-  flex: 0 0 auto;
-  min-height: 96px;
-  height: 96px;
-  resize: none;
-}
-
-.agent-settings-form--create .agent-settings-input {
-  background: var(--color-input, var(--color-surface));
 }
 
 .agent-settings-form--create-basics .agent-settings-hint--later {
@@ -764,31 +623,6 @@ const agentTypeOptions = [
   overflow-wrap: anywhere;
 }
 
-.agent-settings-field__label {
-  margin: 0;
-  font-size: 12.5px;
-  font-weight: 500;
-  line-height: 1.4;
-  color: var(--color-text-muted);
-}
-
-.agent-settings-field__label small {
-  display: block;
-  margin-top: 4px;
-  color: var(--color-text-subtle);
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 1.45;
-}
-
-.agent-settings-field__label--error {
-  color: var(--color-danger);
-}
-
-.agent-settings-input--error {
-  border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
-}
-
 .agent-settings-section__title {
   margin: 0 0 12px;
   font-size: 16px;
@@ -800,31 +634,8 @@ const agentTypeOptions = [
   margin: 0;
 }
 
-.agent-settings-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
-  font-size: 11.5px;
-  color: var(--color-text-subtle);
-}
-
-.agent-settings-field :deep(.ui-select) {
+.settings-field :deep(.ui-select) {
   max-width: none;
-}
-
-.agent-settings-input {
-  padding: 7px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface);
-  color: var(--color-text);
-  font-size: 13px;
-}
-
-.agent-settings-input--area {
-  resize: vertical;
-  min-height: 52px;
 }
 
 .agent-settings-check {
@@ -856,13 +667,6 @@ const agentTypeOptions = [
   font-size: 11px;
   color: var(--color-text-subtle);
   line-height: 1.35;
-}
-
-.agent-settings-hint {
-  margin: 0 0 8px;
-  font-size: 11.5px;
-  line-height: 1.45;
-  color: var(--color-text-subtle);
 }
 
 .agent-settings-hint--later {
@@ -926,11 +730,8 @@ const agentTypeOptions = [
   margin-top: 14px;
 }
 
-/* The capability areas are intentionally full-width: their tile and skill
-   collections need room to scan, while the scalar role fields below keep the
-   shared label/control alignment. */
+/* Capability tiles and skill collections keep their own full-width layout. */
 .agent-settings-form--full .agent-settings-advanced__block {
-  grid-column: 1 / -1;
   width: 100%;
 }
 
@@ -955,19 +756,4 @@ const agentTypeOptions = [
   }
 }
 
-@media (max-width: 680px) {
-  .agent-settings-form--full .agent-settings-section__body {
-    grid-template-columns: 1fr;
-  }
-
-  .agent-settings-form--full .agent-settings-section__body > .agent-settings-field,
-  .agent-settings-form--full .agent-settings-section__body > .agent-settings-hint {
-    grid-column: auto;
-    grid-row: auto;
-  }
-
-  .agent-settings-form--full .agent-settings-advanced__block {
-    grid-column: auto;
-  }
-}
 </style>

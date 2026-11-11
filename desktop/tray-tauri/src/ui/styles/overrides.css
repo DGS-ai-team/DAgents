@@ -2,7 +2,6 @@
 .panel-overlay {
   position: absolute;
   inset: 0;
-  background: var(--color-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -14,8 +13,6 @@
   width: min(900px, 100%);
   max-height: 85vh;
   overflow: auto;
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg);
 }
 
 .panel-overlay__card pre {

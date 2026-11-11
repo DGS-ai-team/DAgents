@@ -33,7 +33,57 @@ func ParseSnapshot(raw json.RawMessage) (Snapshot, error) {
 	if err := json.Unmarshal(raw, &snap); err != nil {
 		return Snapshot{}, fmt.Errorf("parse agent config snapshot: %w", err)
 	}
+	SanitizeDefaults(snap.Defaults)
 	return snap, nil
+}
+
+// SanitizeSnapshotJSON removes retired quota keys while preserving other
+// unknown snapshot fields that an API may round-trip.
+func SanitizeSnapshotJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	var snapshot map[string]json.RawMessage
+	if json.Unmarshal(raw, &snapshot) != nil || snapshot == nil {
+		return raw
+	}
+	var defaults map[string]json.RawMessage
+	if json.Unmarshal(snapshot["defaults"], &defaults) == nil && defaults != nil {
+		var llmDefaults map[string]json.RawMessage
+		if json.Unmarshal(defaults["llm"], &llmDefaults) == nil && llmDefaults != nil {
+			delete(llmDefaults, "max_steps")
+			delete(llmDefaults, "max_tool_rounds")
+			if encoded, err := json.Marshal(llmDefaults); err == nil {
+				defaults["llm"] = encoded
+			}
+			if encoded, err := json.Marshal(defaults); err == nil {
+				snapshot["defaults"] = encoded
+			}
+		}
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		return raw
+	}
+	return encoded
+}
+
+// SanitizeDefaults removes retired per-turn limit keys from Agent defaults.
+func SanitizeDefaults(defaults map[string]any) {
+	if defaults == nil {
+		return
+	}
+	llmDefaults, ok := defaults["llm"].(map[string]any)
+	if !ok {
+		return
+	}
+	clone := make(map[string]any, len(llmDefaults))
+	for key, value := range llmDefaults {
+		clone[key] = value
+	}
+	delete(clone, "max_steps")
+	delete(clone, "max_tool_rounds")
+	defaults["llm"] = clone
 }
 
 // EnabledToolGroups 从 defaults.tools.enabled_groups 读取。
@@ -143,28 +193,6 @@ func LLMActiveFromDefaults(snap Snapshot) string {
 	}
 	active, _ := llmMap["active"].(string)
 	return strings.TrimSpace(active)
-}
-
-// MaxStepsFromDefaults 读取 defaults.llm.max_steps；无则返回 0。
-func MaxStepsFromDefaults(snap Snapshot) int {
-	llmRaw, ok := snap.Defaults["llm"]
-	if !ok || llmRaw == nil {
-		return 0
-	}
-	llmMap, ok := llmRaw.(map[string]any)
-	if !ok {
-		return 0
-	}
-	switch v := llmMap["max_steps"].(type) {
-	case float64:
-		return int(v)
-	case int:
-		return v
-	case int64:
-		return int(v)
-	default:
-		return 0
-	}
 }
 
 // MaxToolCallsFromDefaults 读取 defaults.llm.max_tool_calls；无则返回 0。
@@ -295,24 +323,17 @@ func stringSliceFromAny(v any) []string {
 }
 
 // ApplyDefaultsToTurnOptions 将快照 defaults 中的 llm / hooks / prompt_context 写入 TurnOptions。
-// max_steps 仅来自 Agent snapshot（新建时写入）；缺省时用 DefaultMaxSteps。
 func ApplyDefaultsToTurnOptions(turn *session.TurnOptions, snap Snapshot) {
 	if turn == nil {
 		return
 	}
-	n := MaxStepsFromDefaults(snap)
-	if n <= 0 {
-		n = DefaultMaxSteps
-	}
-	turn.Budget.MaxSteps = n
 	maxToolCalls := MaxToolCallsFromDefaults(snap)
 	if maxToolCalls <= 0 {
 		maxToolCalls = DefaultMaxToolCalls
 	}
 	turn.Budget.MaxToolCalls = maxToolCalls
-	// Agent Turns reserve one additional, tool-free summary Step so reaching
-	// max_steps ends with a user-facing result instead of a silent stop. Other
-	// budget dimensions (tokens, cost, wall time) still gate that request.
+	// Tool-call exhaustion reserves one tool-free summary request so reaching
+	// the cap still produces a user-facing result.
 	turn.Budget.ReserveFinalSummary = true
 	if pc := PromptContextFromDefaults(snap); pc != nil {
 		turn.PromptContext = *pc

@@ -8,7 +8,6 @@ defaults:
     role: assistant
     description: 通用 AI 助手
   llm:
-    max_steps: 32
   tools:
     enabled_groups: [fs, skills, memory]
   skills:

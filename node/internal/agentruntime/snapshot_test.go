@@ -1,6 +1,7 @@
 package agentruntime
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -8,6 +9,32 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
+
+func TestSanitizeSnapshotJSONRemovesRetiredLimitsAndPreservesUnknownFields(t *testing.T) {
+	raw := json.RawMessage(`{"template_id":"general","future_top_level":{"keep":true},"defaults":{"future_default":"keep","llm":{"max_steps":32,"max_tool_rounds":4,"max_tool_calls":64,"future_llm":"keep"}}}`)
+	sanitized := SanitizeSnapshotJSON(raw)
+	var decoded map[string]any
+	if err := json.Unmarshal(sanitized, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["future_top_level"] == nil {
+		t.Fatalf("unknown top-level field lost: %s", sanitized)
+	}
+	defaults := decoded["defaults"].(map[string]any)
+	if defaults["future_default"] != "keep" {
+		t.Fatalf("unknown defaults field lost: %s", sanitized)
+	}
+	llmDefaults := defaults["llm"].(map[string]any)
+	if _, ok := llmDefaults["max_steps"]; ok {
+		t.Fatalf("max_steps survived sanitization: %s", sanitized)
+	}
+	if _, ok := llmDefaults["max_tool_rounds"]; ok {
+		t.Fatalf("max_tool_rounds survived sanitization: %s", sanitized)
+	}
+	if llmDefaults["max_tool_calls"] != float64(64) || llmDefaults["future_llm"] != "keep" {
+		t.Fatalf("active or unknown LLM default lost: %s", sanitized)
+	}
+}
 
 func TestEnabledToolGroups(t *testing.T) {
 	snap := Snapshot{Defaults: map[string]any{
@@ -119,19 +146,19 @@ func TestEffectiveMultimodalEnabled_usesSnapshotCheckboxRegardlessOfModel(t *tes
 	}
 }
 
-func TestApplyDefaultsToTurnOptions_maxStepsFromSnapshot(t *testing.T) {
+func TestApplyDefaultsToTurnOptionsIgnoresDeprecatedStepLimit(t *testing.T) {
 	var turn session.TurnOptions
 	ApplyDefaultsToTurnOptions(&turn, Snapshot{Defaults: map[string]any{
-		"llm": map[string]any{"max_steps": float64(8)},
+		"llm": map[string]any{"max_steps": float64(1), "max_tool_calls": float64(64)},
 	}})
-	if turn.Budget.MaxSteps != 8 || !turn.Budget.ReserveFinalSummary {
-		t.Fatalf("budget=%+v want max_steps=8 with reserved final summary", turn.Budget)
+	if turn.Budget.MaxToolCalls != 64 || !turn.Budget.ReserveFinalSummary {
+		t.Fatalf("budget=%+v want max_tool_calls=64 with reserved final summary", turn.Budget)
 	}
 	var empty session.TurnOptions
-	empty.Budget.MaxSteps = 99 // BaseTurn 值不得覆盖 Agent 缺省
+	empty.Budget.MaxToolCalls = 99 // BaseTurn value must not override Agent default.
 	ApplyDefaultsToTurnOptions(&empty, Snapshot{})
-	if empty.Budget.MaxSteps != DefaultMaxSteps || !empty.Budget.ReserveFinalSummary {
-		t.Fatalf("budget=%+v want creation default max_steps=%d with reserved final summary", empty.Budget, DefaultMaxSteps)
+	if empty.Budget.MaxToolCalls != DefaultMaxToolCalls || !empty.Budget.ReserveFinalSummary {
+		t.Fatalf("budget=%+v want creation default max_tool_calls=%d with reserved final summary", empty.Budget, DefaultMaxToolCalls)
 	}
 }
 

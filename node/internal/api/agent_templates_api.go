@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/agenttemplate"
 )
 
@@ -30,6 +31,7 @@ func (s *Server) templateViews() ([]agentTemplateView, error) {
 	}
 	out := make([]agentTemplateView, 0, len(list))
 	for _, t := range list {
+		agentruntime.SanitizeDefaults(t.Defaults)
 		src := "builtin"
 		if agenttemplate.IsUserTemplate(userDir, t.ID) {
 			src = "user"
@@ -55,6 +57,7 @@ func (s *Server) handleGetAgentTemplate(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusNotFound, "template_not_found", err.Error(), nil)
 		return
 	}
+	agentruntime.SanitizeDefaults(t.Defaults)
 	src := "builtin"
 	if s.cfg != nil && agenttemplate.IsUserTemplate(s.cfg.AgentTemplatesDir(), id) {
 		src = "user"
@@ -73,6 +76,7 @@ func (s *Server) handleCreateAgentTemplate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	body.Normalize()
+	agentruntime.SanitizeDefaults(body.Defaults)
 	if err := agenttemplate.ValidateID(body.ID); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_template_id", err.Error(), nil)
 		return

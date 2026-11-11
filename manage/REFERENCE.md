@@ -28,7 +28,7 @@
 | 模块 | 符号 |
 |------|------|
 | `models.py` | `AgentRegisterRequest`（无 discovery_group）, `AgentGroupsUpdateRequest`, … |
-| `status.py` | `derive_status`, `offline_grace_seconds`, `is_deliverable` |
+| `status.py` | `derive_status`, `is_deliverable` (grace duration is injected from `ManageSettings`) |
 | `store.py` | `AgentRegistryStore.register`（保留已有分组）, `update_groups`, `import_rc_json` |
 | `routes.py` | `build_registry_router` |
 

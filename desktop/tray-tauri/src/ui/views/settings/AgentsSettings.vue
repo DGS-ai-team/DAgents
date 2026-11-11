@@ -153,7 +153,7 @@ onUnmounted(() => window.removeEventListener("desktop-agent-created", onAgentCre
       </p>
 
       <div v-else class="agents-settings__filters">
-        <input v-model="agentSearch" type="search" placeholder="搜索名称、ID或工作目录…" aria-label="搜索智能体" />
+        <input v-model="agentSearch" class="settings-field__input" type="search" placeholder="搜索名称、ID或工作目录…" aria-label="搜索智能体" />
         <UiSelect
           v-model="agentFilter"
           :options="[
@@ -271,7 +271,7 @@ onUnmounted(() => window.removeEventListener("desktop-agent-created", onAgentCre
   font-weight: 600;
 }
 .agents-settings__filters { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 8px; margin: 0 0 12px; }
-.agents-settings__filters input { min-width: 0; border: 1px solid var(--border-subtle); border-radius: 6px; padding: 8px 10px; background: var(--color-surface); color: var(--color-text); }
+.agents-settings__filters input { min-width: 0; }
 .agents-settings__group { margin-top: 14px; }
 .agents-settings__group h3 { display: flex; gap: 7px; align-items: baseline; margin: 0 0 7px; color: var(--text-secondary); font-size: 12px; }
 .agents-settings__group h3 span { font-size: 11px; }

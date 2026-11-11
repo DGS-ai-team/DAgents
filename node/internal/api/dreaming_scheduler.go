@@ -313,7 +313,7 @@ func (d *DreamingScheduler) tickAgent(ctx context.Context, agentID string, now t
 		return d.failed(agentID, now, contextErr)
 	}
 	prompt := buildDreamingPrompt(dreamingPrompt, promptContext)
-	_, err = d.sessions.RunDreaming(leaseCtx, agentID, prompt, profile.MaxToolRounds, session.DreamingMetadata{
+	_, err = d.sessions.RunDreaming(leaseCtx, agentID, prompt, session.DreamingMetadata{
 		LocalDate: date, ExperienceRevision: experience.Revision,
 	})
 	if err != nil {

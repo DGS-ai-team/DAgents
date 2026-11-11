@@ -9,7 +9,7 @@ import (
 )
 
 func profile(id string) Profile {
-	return Profile{AgentID: id, Responsibility: "review", WakeIntervalSeconds: 60, MaxToolRounds: 3, DreamingEnabled: true, DreamingTime: "02:30", Timezone: "UTC"}
+	return Profile{AgentID: id, Responsibility: "review", WakeIntervalSeconds: 60, DreamingEnabled: true, DreamingTime: "02:30", Timezone: "UTC"}
 }
 
 func TestStorePersistsProfilesExperiencesAndTodosWithIsolation(t *testing.T) {
@@ -64,9 +64,9 @@ func TestStoreValidationAndAtomicFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := profile("bad")
-	bad.MaxToolRounds = 0
+	bad.WakeIntervalSeconds = -1
 	if err := s.PutProfile(bad, 0); err == nil {
-		t.Fatal("invalid rounds accepted")
+		t.Fatal("invalid wake interval accepted")
 	}
 	bad = profile("bad")
 	bad.DreamingTime = "25:00"
@@ -94,6 +94,22 @@ func TestStoreValidationAndAtomicFailure(t *testing.T) {
 	stored, _ := s.GetProfile("agent-a")
 	if stored.Responsibility != "review" {
 		t.Fatalf("memory polluted=%+v", stored)
+	}
+}
+
+func TestStoreAcceptsIANATimezone(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "autonomy.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := profile("agent-shanghai")
+	p.Timezone = "Asia/Shanghai"
+	if err := s.PutProfile(p, 0); err != nil {
+		t.Fatalf("IANA timezone should be available in standalone builds: %v", err)
+	}
+	stored, ok := s.GetProfile(p.AgentID)
+	if !ok || stored.Timezone != "Asia/Shanghai" {
+		t.Fatalf("stored profile = %+v, want Asia/Shanghai", stored)
 	}
 }
 

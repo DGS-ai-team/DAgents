@@ -165,14 +165,13 @@ func TestApplyPatch_llmProfiles(t *testing.T) {
 
 func TestApplyPatch_llmAndFeatures(t *testing.T) {
 	cfg := testBaseConfig(t)
+	originalSkills, originalTriggers, originalChildren := cfg.Skills.Enabled, cfg.Triggers.Enabled, cfg.ChildAgents.Enabled
 	updated, err := ApplyPatch(cfg, SettingsPatch{
 		LLM: &LLMSettings{
 			Profiles: []LLMProfileSettings{{ID: "default", Provider: "mock", Model: "mock", APIKeyEnv: "TEST_KEY", Mock: true}},
 		},
-		Features: &FeatureSettings{
-			SkillsEnabled:     false,
-			BrowserEnabled:    true,
-			MultimodalEnabled: true,
+		Features: &FeatureSettingsPatch{
+			BrowserEnabled: boolPtr(true),
 		},
 	})
 	if err != nil {
@@ -181,8 +180,132 @@ func TestApplyPatch_llmAndFeatures(t *testing.T) {
 	if !updated.LLM.Mock || updated.LLM.Provider != "mock" {
 		t.Fatalf("llm = %+v", updated.LLM)
 	}
-	if updated.Skills.Enabled != false || !updated.BrowserEnabled() || !updated.MultimodalEnabled() {
+	if updated.Skills.Enabled != originalSkills || updated.Triggers.Enabled != originalTriggers || updated.ChildAgents.Enabled != originalChildren || !updated.BrowserEnabled() {
 		t.Fatalf("features not applied")
+	}
+}
+
+func TestApplyPatch_featureGatesAreSparseAndExplicitFalseIsApplied(t *testing.T) {
+	cfg := testBaseConfig(t)
+	cfg.Skills.Enabled = true
+	cfg.Triggers.Enabled = true
+	cfg.ChildAgents.Enabled = true
+	multimodal := true
+	cfg.Multimodal.Enabled = &multimodal
+	cfg.SyncActiveProfileMultimodalFromFlat()
+
+	unchanged, err := ApplyPatch(cfg, SettingsPatch{Features: &FeatureSettingsPatch{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !unchanged.Skills.Enabled || !unchanged.Triggers.Enabled || !unchanged.ChildAgents.Enabled || !unchanged.MultimodalEnabled() {
+		t.Fatalf("omitted feature gates changed: skills=%v triggers=%v children=%v multimodal=%v", unchanged.Skills.Enabled, unchanged.Triggers.Enabled, unchanged.ChildAgents.Enabled, unchanged.MultimodalEnabled())
+	}
+	activeProfile, ok := unchanged.LLM.GetProfile(unchanged.LLM.ActiveProfileID())
+	if !ok || !config.ProfileMultimodalEnabled(activeProfile) {
+		t.Fatalf("omitted multimodal gate changed active profile: %+v", activeProfile)
+	}
+
+	no := false
+	disabled, err := ApplyPatch(unchanged, SettingsPatch{Features: &FeatureSettingsPatch{
+		SkillsEnabled: &no, TriggersEnabled: &no, ChildAgentsEnabled: &no, MultimodalEnabled: &no,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disabled.Skills.Enabled || disabled.Triggers.Enabled || disabled.ChildAgents.Enabled || disabled.MultimodalEnabled() {
+		t.Fatalf("explicit false feature gates were ignored: skills=%v triggers=%v children=%v multimodal=%v", disabled.Skills.Enabled, disabled.Triggers.Enabled, disabled.ChildAgents.Enabled, disabled.MultimodalEnabled())
+	}
+	activeProfile, ok = disabled.LLM.GetProfile(disabled.LLM.ActiveProfileID())
+	if !ok || config.ProfileMultimodalEnabled(activeProfile) {
+		t.Fatalf("explicit false multimodal gate did not update active profile: %+v", activeProfile)
+	}
+}
+
+func TestApplyPatch_multimodalProfileMutationIsIsolatedOnErrorAndSuccess(t *testing.T) {
+	cfg := testBaseConfig(t)
+	enabled := true
+	cfg.Multimodal.Enabled = &enabled
+	cfg.SyncActiveProfileMultimodalFromFlat()
+	profileID := cfg.LLM.ActiveProfileID()
+	profile, ok := cfg.LLM.GetProfile(profileID)
+	if !ok || !config.ProfileMultimodalEnabled(profile) {
+		t.Fatalf("test profile must start with multimodal enabled: %+v", profile)
+	}
+
+	disabled := false
+	invalid := 0
+	if _, err := ApplyPatch(cfg, SettingsPatch{Features: &FeatureSettingsPatch{
+		MultimodalEnabled: &disabled,
+		SkillsMaxInPrompt: &invalid,
+	}}); err == nil {
+		t.Fatal("expected invalid feature patch to fail")
+	}
+	profile, ok = cfg.LLM.GetProfile(profileID)
+	if !ok || !config.ProfileMultimodalEnabled(profile) {
+		t.Fatalf("failed patch mutated original profile: %+v", profile)
+	}
+
+	updated, err := ApplyPatch(cfg, SettingsPatch{Features: &FeatureSettingsPatch{
+		MultimodalEnabled: &disabled,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, ok = cfg.LLM.GetProfile(profileID)
+	if !ok || !config.ProfileMultimodalEnabled(profile) {
+		t.Fatalf("successful patch mutated source profile: %+v", profile)
+	}
+	updatedProfile, ok := updated.LLM.GetProfile(profileID)
+	if !ok || config.ProfileMultimodalEnabled(updatedProfile) {
+		t.Fatalf("successful patch did not update isolated result profile: %+v", updatedProfile)
+	}
+}
+
+func TestApplyPatch_toolsLimitsRequirePositiveAndCanReset(t *testing.T) {
+	cfg := testBaseConfig(t)
+	cfg.Tools.BashCompress.MaxOutputChars = 777
+	cfg.Tools.BashCompress.MaxOutputCharsStderr = 888
+	zero := 0
+	if _, err := ApplyPatch(cfg, SettingsPatch{Tools: &ToolsSettingsPatch{BashCompressMaxOutputChars: &zero}}); err == nil {
+		t.Fatal("expected explicit zero output limit to be rejected")
+	}
+	if cfg.Tools.BashCompress.MaxOutputChars != 777 {
+		t.Fatal("failed patch mutated source config")
+	}
+	limit := 4096
+	updated, err := ApplyPatch(cfg, SettingsPatch{Tools: &ToolsSettingsPatch{BashCompressMaxOutputChars: &limit}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Tools.BashCompress.MaxOutputChars != 4096 || updated.Tools.BashCompress.MaxOutputCharsStderr != 888 {
+		t.Fatalf("omitted limit should be preserved: %+v", updated.Tools.BashCompress)
+	}
+	reset, err := ApplyPatch(updated, SettingsPatch{Tools: &ToolsSettingsPatch{ResetBashCompressLimits: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reset.Tools.BashCompress.MaxOutputChars != config.DefaultBashCompressMaxOutputChars || reset.Tools.BashCompress.MaxOutputCharsStderr != config.DefaultBashCompressMaxOutputCharsStderr {
+		t.Fatalf("reset did not restore defaults: %+v", reset.Tools.BashCompress)
+	}
+}
+
+func TestRawMessageHistoryViewReportsEnvironmentSource(t *testing.T) {
+	cfg := testBaseConfig(t)
+	configured := true
+	cfg.RawMessageHistory.Enabled = &configured
+	t.Setenv(config.EnvRawMessageHistoryEnabled, "false")
+	view := ViewFromConfig(cfg)
+	if view.Features.RawMessageHistoryEnabled || view.Features.RawMessageHistorySource != "environment" {
+		t.Fatalf("raw history view = %+v", view.Features)
+	}
+	patch := SettingsPatch{Features: &FeatureSettingsPatch{}}
+	updated, err := ApplyPatch(cfg, patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.RawMessageHistory.Enabled == nil || !*updated.RawMessageHistory.Enabled {
+		t.Fatal("omitted raw history value should preserve stored setting")
 	}
 }
 
@@ -300,7 +423,7 @@ func TestApplyPatch_injectTodayDateHook(t *testing.T) {
 func TestApplyPatch_wecomWebhook(t *testing.T) {
 	cfg := testBaseConfig(t)
 	updated, err := ApplyPatch(cfg, SettingsPatch{
-		Features: &FeatureSettings{WeComEnabled: true},
+		Features: &FeatureSettingsPatch{WeComEnabled: boolPtr(true)},
 		WeCom: &WeComSettings{
 			WebhookURL: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=secret-1",
 		},
@@ -323,7 +446,7 @@ func TestApplyPatch_wecomWebhook(t *testing.T) {
 	}
 
 	cleared, err := ApplyPatch(updated, SettingsPatch{
-		Features: &FeatureSettings{WeComEnabled: false},
+		Features: &FeatureSettingsPatch{WeComEnabled: boolPtr(false)},
 		WeCom:    &WeComSettings{ClearWebhookKey: true},
 	})
 	if err != nil {

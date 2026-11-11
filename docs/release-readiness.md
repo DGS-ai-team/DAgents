@@ -1,40 +1,42 @@
-# v1.0.5 发布验收清单
+# v1.0.6 发布验收清单
 
-评估日期：2026-11-03。当前为发布候选，尚未创建正式 tag 或 GitHub Release。功能与修复 PR [#383](https://github.com/DGS-ai-team/DAgents/pull/383) 已合入 dev（1de1d1f5），本发布分支用于将其合入 main。
-
-历史 v1.0.4 清单归档至 `docs/archive/releases/release-readiness-v1.0.4.md`；本次具体修改与验证边界见 [功能减负与实现收敛验收](audit/2026-11-03-simplification-and-acceptance.md)。
+评估日期：2026-11-11。CHANGELOG 中的 2026-11-11 是计划发布日期，不代表已发布。发布候选提交为 `0819b64f`（PR [#388](https://github.com/DGS-ai-team/DAgents/pull/388) 已于 2026-11-11 亚洲/上海时间合并至 `dev`）；尚未创建 `dev -> main` 发布 PR、正式 tag 或 GitHub Release。上一版验收清单已归档到 [v1.0.5 发布验收清单](archive/releases/release-readiness-v1.0.5.md)。
 
 ## 发布范围
 
-统一设置框架、选择器、上下文菜单和保存反馈；保留工具执行中的实时记录、文字扫光与垂直切换，由输入栏统一停止。移除临时岗位授权、命令帮助、Desktop/Node 扩展包上传及未使用的状态链和 CLI 包装。模型参数按供应商能力配置，模型档案统一持久化，修复旧配置迁移失败后的数据保护。恢复子智能体进度，优化长对话流式更新和冷会话状态读取。Manage 仓库保留，普通用户仅显示浏览入口。另含 v1.0.4 以来的浏览器进程清理、终端选择器、浏览器导航、代码块和资源菜单打磨。
+候选包含 PR [#386](https://github.com/DGS-ai-team/DAgents/pull/386) 的 OpenAI 兼容 HTTP 连接池复用，以及 PR [#387](https://github.com/DGS-ai-team/DAgents/pull/387) 的工具审批、`max_tool_calls` 限额、工作区引用与 Linux SSH 凭据改进。另包括候选工作区中的桌面公共控件样式收敛、设置页统一分组与行布局、折叠区文案和说明层级调整。
 
-正式资产范围：Windows x64 Inno 安装包、Linux amd64 本地助手包、Manage 离线包，以及 SHA256SUMS 和 release-manifest.json。Windows 安装包未签名。
+正式资产仍按 [发布流程](release-process.md) 生成：Windows x64 Inno 安装包、Linux amd64 Node 本地助手包、Manage 离线包，以及 SHA256SUMS 和 `release-manifest.json`。Windows 安装包未签名；本清单不表示资产已构建或发布。
 
-## 已完成证据
+## 已验证
 
-- [x] 版本元数据更新为 1.0.5，`python scripts/release/validate_release.py --version 1.0.5` 通过。
-- [x] Desktop 84 个文件、570 项 Vitest，7 项图标契约与 106 项 UI 状态检查通过；后续重试短文案的定向测试 29 项及 lint 通过。lint/build 和 Windows 原生构建通过。
-- [x] Manage lint/build、Ruff、Pyright 和 212 项 Python unittest 通过；隔离数据库分别验证管理员发布与普通身份浏览。
-- [x] Go 1.26.10 五模块 test/vet/staticcheck、Node/client 构建；Rust fmt 和 77 项测试；品牌、API fixture 和 OpenAPI 契约通过。
-- [x] 原生工具运行验收使用隔离的本地 OpenAI SSE fixture 和真实 PowerShell 命令。输入栏停止后取得 cancelled_by_user、工具 cancelled、运行工具数 0；临时 Agent、档案与 fixture 已清理。
-- [x] 旧凭据迁移失败时普通设置保存和模型切换均被拒绝，原配置保留；补齐环境变量重启后两档模型及密钥恢复。旧 Qwen effort 归一化后，合法 thinking、预算及密钥保留，新提交的非法参数继续拒绝。
-- [x] CodeQL/Codex 两轮发现均修复并补充回归；提交 922cfaf3 的 Node 全包测试与 staticcheck 通过。新增工作区引用组件交互、旧 OpenAI effort、清空边界和持久化错误回归。
-- [x] 发布候选补充模型故障恢复：Node 全包测试与 staticcheck 通过；本地故障接口验证暂时/持续 503、401、退避中取消、超长 Retry-After、部分输出后断流，均收敛终态；后续消息成功，清空对话有效，部分正文进入下一轮上下文。
-- [x] 原生窗口验证失败提示、重试进度、输入和模型选择解锁、资源页悬浮错误提示。外部付费模型未调用，测试使用隔离目录和本地故障接口。
+- [x] PR #386：Go LLM/turn 定向测试、Staticcheck 和 Linux race CI 通过；CI run `41676792061` 全通过。验证覆盖连接池复用、并发边界和请求间凭据/模型隔离；未调用真实付费模型。Windows 本地 race 因 CGo 编译失败未启动。
+- [x] PR #387：`scripts/verify.ps1` 在 2026-11-09 完整通过；PR 描述记录 Node、Manage、Go、Rust、Desktop 的质量门与 CI 通过，以及工具审批、限额、资源引用、Linux SSH 私钥和 known_hosts 的专项验证。
+- [x] PR #388：必需 CI run [42834612065](https://github.com/DGS-ai-team/DAgents/actions/runs/42834612065) 全通过；检查涵盖 Go、Python、API/fixture contracts、Desktop UI、Rust/Linux、打包契约与资产组装。自动审查机器人对候选提交 `d11e169f` 未报告发现。
+- [x] 最终候选全量前端验证通过：Vitest 622/622、公共图标检查 7/7、UI 测试 120/120 和 Desktop lint；深色原生下拉箭头修复的控件专项测试与定向 lint 通过。
+- [x] Windows x64 v1.0.6 debug native 构建通过，日志见 `.runtime-test-settings-disclosure/pr-native-1.0.6.log`。最终原生复验覆盖设置页宽窄窗口、折叠标题与开关行、侧边栏右键菜单和键盘操作，并复验上下文页。构建含 Vite chunk 与 `STATIC_VCRUNTIME` 既有警告。
+- [x] 原生主题验收边界：当前 Desktop 在 `desktop/tray-tauri/src/main.js` 固定 `data-theme="light"`，产品没有用户主题选择入口。因此深色主题原生下拉箭头不列为发布门禁；相关 CSS 定向测试不代表产品提供或原生窗口支持用户可选深色主题。
+- [x] 隔离数据恢复演练：以正式 v1.0.5 tag `v1.0.5`（源码提交 `01113551`）构建旧 Node，再用本地构建的 1.0.6 候选 Node 恢复隔离 `.runtime`。trial-5 检查了对话历史、Agent/全局记忆、workspace 路径及已有 workspace/工具结果文件哈希；Mock 开启，外部 LLM 调用为 0。证据：`.runtime-test-v106-upgrade/trial-5/upgrade-evidence.json`。旧二进制来自 tag 源码的本地构建，不是官方发布资产；该演练验证数据恢复，不是安装器升级验收。
+- [x] `scripts/release/prepare_release.py` 已生成 1.0.6 的版本元数据、CHANGELOG、README、手册及路线图版本标记。
+- [x] 本地 `scripts/release/validate_release.py --version 1.0.6` 通过。
 
-## 发布门禁
+## 尚待验收与发布步骤
 
-- [x] PR #383 提交 922cfaf3 的完整 CI（run 41619773131）、Linux race、CodeQL 均通过；2026-11-03 10:35 UTC 的机器人复审完成且无发现，历史讨论均已解决。
-- [x] PR #383 于 2026-11-03 合入 dev，合并提交 1de1d1f56eeed0d9754a3f9156c6180f462d8878。
-- [x] v1.0.4 到 v1.0.5 的隔离安装、升级、卸载演练通过，验证历史、工作区、Agent/全局记忆、工具文件和用户数据保留。
-- [ ] 从最新 dev 建立独立发布分支，更新本清单并通过 main 发布 PR 的 CI、Release metadata 与审查。
-- [ ] 仅在合入后的最新 origin/main 提交创建 v1.0.5 tag，不覆盖任何已有 tag。
-- [ ] 正式工作流成功；五项资产齐全，版本、提交、大小与 SHA256 在上传 digest、SHA256SUMS、manifest 间一致。
-- [ ] Release 说明补齐下载入口、数据备份、旧环境变量、未签名/SmartScreen 与校验提示，确认 latest。
-- [ ] 通过临时源分支提交 main 到 dev 的发布后同步 PR，避免自动删除 main。
+- [ ] Windows 安装器验收正在进行；待结果确认后记录其安装、升级、卸载和数据保留范围。不要把上面的本地 Node 数据恢复演练描述为官方安装器验收。
+- [ ] 按隔离安装器验收结果确认新安装不创建 `data/`；不得对日常运行目录或真实用户数据执行安装演练。
+- [ ] 创建 `dev -> main` 发布 PR；等待必需 CI、Release metadata 预检和审查通过后合入。
+- [ ] 只在合入后的最新 `main` 提交创建 `v1.0.6` tag，不覆盖已有 tag。
+- [ ] 正式 Release workflow 成功，检查 Windows 安装包、Linux 包、Manage 离线包、SHA256SUMS 和 manifest 的版本、提交、文件大小与校验值。
+- [ ] 补齐正式下载说明并由维护者确认 GitHub Release 为 latest；之后创建 `main -> dev` 同步 PR。
+
+## 升级提示
+
+Node 与 Desktop 应配套升级。工具执行上限由 `max_tool_calls` 统一控制（默认 64）；旧 `max_steps`、`max_tool_rounds` 和子智能体 `max_turns` 设置不再生效。升级前备份完整 `.runtime`，包括 `.llm_secret_key`。首次连接未知 SSH 主机时应核对服务器指纹再保存为信任项。
 
 ## 验收边界
 
-本次原生联调使用本地 SSE fixture，不代表验证了外部真实付费模型、真实 SSH 和跨机器工作组。Windows race 受本机工具链限制，合并以 CI Linux race 结果为准。冷状态缓存仍需查询持久日志版本，不改变完整恢复时的日志重放。
+候选 PR 的 CI 与已记录专项验证不等于正式发布 PR 的门禁结果。隔离安装器验收、正式发布 PR、发布工作流和 GitHub Release 尚待完成；完成前不宣称安装包已发布或生产安装升级已验证。用户向发行说明草稿位于被忽略的 `.runtime-test-v106-upgrade/release-notes-v1.0.6.md`，尚未发布。
 
-升级前备份完整 `.runtime`（包括 `.llm_secret_key`），保留旧凭据所在的进程环境变量。本版安装演练使用原 v1.0.4 CI 二进制与提交 922cfaf3 的候选构建，QA 安装包版本 1.0.5.1，独立 AppId。原安装器前后数据库 hash 保留，启动迁移后另建卸载前后基线；已验证已知业务字段和 active-only 结构，没有迁移前完整 settings_json 快照，因此不声称逐字段完全等价。
+## 合并前升级演练建议
+
+请按[Windows 安装与升级验收](../packaging/windows/install-upgrade-acceptance.md)完成一次性隔离演练，并使用真实 v1.0.5 与 v1.0.6 候选安装器验证跨版本升级、卸载及应用数据保留。QA 脚本的同 bundle 模拟升级和 trial-5 Node 数据恢复均不能替代安装器验收；该项待隔离安装演练完成。
