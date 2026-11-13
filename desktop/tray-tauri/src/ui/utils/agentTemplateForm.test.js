@@ -15,6 +15,11 @@ import {
 } from "./agentTemplateForm.js";
 
 describe("agentTemplateForm", () => {
+  it("only exposes web tool groups that the Node reports as available", () => {
+    expect(toolGroupsFromSetup({ available_tool_groups: ["web_search"] }).map((g) => g.name)).toContain("web_search");
+    expect(toolGroupsFromSetup({ available_tool_groups: ["web_search"] }).map((g) => g.name)).not.toContain("web_fetch");
+    expect(toolGroupsFromSetup({ available_tool_groups: [] }).map((g) => g.name)).not.toContain("web_search");
+  });
   it("preserves unrelated hooks without submitting retired risk observation", () => {
     const draft = draftFromAgentView({
       display_name: "Auto",

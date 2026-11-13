@@ -176,7 +176,7 @@ func TestDefaultToolResultTools_includesDefaultGroups(t *testing.T) {
 	cfg := DefaultConfig("")
 	want := map[string]bool{
 		"bash_run": true, "terminal_command": true, "read_file": true, "grep_file": true, "grep_files": true,
-		"search_replace": true, "glob_files": true,
+		"search_replace": true, "glob_files": true, "web_search": true, "web_fetch": true,
 	}
 	for _, name := range cfg.Tools {
 		if !want[name] {
@@ -186,5 +186,19 @@ func TestDefaultToolResultTools_includesDefaultGroups(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing defaults: %v", want)
+	}
+}
+
+func TestPackage_defaultWebToolsSpill(t *testing.T) {
+	cfg := DefaultConfig(t.TempDir())
+	cfg.SpillThresholdTokens = 1
+	for _, name := range []string{"web_search", "web_fetch"} {
+		res, err := Package(cfg, "session", "call-"+name, name, strings.Repeat("网页正文 ", 100))
+		if err != nil {
+			t.Fatalf("Package(%s): %v", name, err)
+		}
+		if !res.Spilled {
+			t.Errorf("%s should spill under the configured result budget", name)
+		}
 	}
 }

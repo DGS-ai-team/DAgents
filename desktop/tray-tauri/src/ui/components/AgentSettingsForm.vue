@@ -40,7 +40,7 @@ const props = defineProps({
     type: Object,
     default: () => ({ name: "", llm: "", workspace: "" }),
   },
-  /** Node 当前可勾选工具组（已按 browser/wecom 进程开关过滤）；缺省用全量 TOOL_GROUPS */
+  /** Node 当前可勾选工具组（按进程级能力开关过滤）；缺省用全量 TOOL_GROUPS */
   availableToolGroups: {
     type: Array,
     default: null,
@@ -55,11 +55,8 @@ const isCreateCapabilities = computed(() => resolvedMode.value === "create-capab
 const isFull = computed(() => resolvedMode.value === "full");
 const useConversationalLabels = computed(() => isCreateBasics.value || isCreateCapabilities.value);
 const visibleToolGroups = computed(() => {
-  const list = Array.isArray(props.availableToolGroups) ? props.availableToolGroups : null;
-  if (list && list.length) {
-    return list.filter((g) => g && g.name);
-  }
-  return TOOL_GROUPS;
+  const list = props.availableToolGroups;
+  return Array.isArray(list) ? list.filter((g) => g && g.name) : TOOL_GROUPS;
 });
 
 const nameLabel = computed(() => {

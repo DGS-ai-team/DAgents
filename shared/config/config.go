@@ -46,7 +46,20 @@ type Config struct {
 	Multimodal        MultimodalConfig        `yaml:"multimodal"`
 	Browser           BrowserConfig           `yaml:"browser"`
 	WeCom             WeComConfig             `yaml:"wecom"`
+	Web               WebConfig               `yaml:"web"`
 }
+
+// WebConfig stores the independent DeepSeek Search/Fetch endpoint. APIKey is
+// runtime-only; APIKeyCiphertext is persisted in node_settings using SecretBox.
+type WebConfig struct {
+	SearchEnabled    bool   `yaml:"search_enabled" json:"search_enabled"`
+	FetchEnabled     bool   `yaml:"fetch_enabled" json:"fetch_enabled"`
+	BaseURL          string `yaml:"base_url" json:"base_url"`
+	APIKey           string `yaml:"-" json:"-"`
+	APIKeyCiphertext string `yaml:"-" json:"web_api_key_ciphertext,omitempty"`
+}
+
+const DefaultWebBaseURL = "https://api.deepseek.com"
 
 // UserConfig 描述本机使用者身份（与 Node 展示名 agent.name 分开）。
 type UserConfig struct {
@@ -91,6 +104,14 @@ func (c *Config) AvailableAgentToolGroups() []string {
 			}
 		case "wecom":
 			if !c.WeComEnabled() {
+				continue
+			}
+		case "web_search":
+			if !c.Web.SearchEnabled {
+				continue
+			}
+		case "web_fetch":
+			if !c.Web.FetchEnabled {
 				continue
 			}
 		case "computer":
@@ -241,7 +262,7 @@ type ToolResultHookConfig struct {
 	// SpillThresholdTokens 单条 tool 结果超过该估算 token 数时落盘并对 history 头尾摘要；省略时 12000。
 	// 作用于下方 tools 列表中的每个工具，非 bash_run 专用，也非整段 session history 上限。
 	SpillThresholdTokens int `yaml:"spill_threshold_tokens"`
-	// Tools 启用落盘摘要的工具名；省略时默认 bash + terminal + fs（见 defaultToolResultHookTools）。
+	// Tools 启用落盘摘要的工具名；省略时默认 bash + terminal + fs + web_search/web_fetch。
 	Tools []string `yaml:"tools"`
 }
 
@@ -327,7 +348,7 @@ func (c *Config) ToolResultSpillThresholdTokens() int {
 func DefaultToolResultHookTools() []string {
 	return []string{
 		"bash_run", "terminal_command", "read_file", "grep_file", "grep_files",
-		"search_replace", "glob_files",
+		"search_replace", "glob_files", "web_search", "web_fetch",
 	}
 }
 
@@ -515,6 +536,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	c.applyBrowserDefaults()
 	c.applyWeComDefaults()
+	if strings.TrimSpace(c.Web.BaseURL) == "" {
+		c.Web.BaseURL = DefaultWebBaseURL
+	}
 }
 
 // IdleNewConversationSeconds controls when a human message starts a fresh model context.
@@ -568,7 +592,19 @@ func (c *Config) Validate() error {
 	if err := validateBrowserConfig(c); err != nil {
 		return err
 	}
-	return validateWeComConfig(c)
+	if err := validateWeComConfig(c); err != nil {
+		return err
+	}
+	if c.Web.SearchEnabled || c.Web.FetchEnabled {
+		u, err := url.Parse(strings.TrimSpace(c.Web.BaseURL))
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("web.base_url must be an http(s) URL with a host and no credentials, query, or fragment when web tools are enabled")
+		}
+		if strings.TrimSpace(c.Web.APIKey) == "" && strings.TrimSpace(c.Web.APIKeyCiphertext) == "" {
+			return fmt.Errorf("web.api_key is required when web tools are enabled")
+		}
+	}
+	return nil
 }
 
 // DiscoveryGroups 返回 YAML groups 字段（**不**用于 Manage 注册；分组由 Manage 分配）。

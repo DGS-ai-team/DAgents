@@ -12,6 +12,8 @@ N3 在 Node 进程内本地执行；面向模型的普通 tool schema **均为�
 **配置**：工具组由 Agent `defaults.tools.enabled_groups` 决定，见 [handbook/04-能力与策略.md](../../../docs/handbook/04-能力与策略.md) §1、[handbook/附录/内置工具参考.md](../../../docs/handbook/附录/内置工具参考.md)、[`shared/config/README.md`](../../../shared/config/README.md)。  
 **工具用法**：写在各 tool schema `description` 中（各 `tool_*` / `fs_*` / `bash_*` 文件）。
 
+`web_search` 与 `web_fetch` 使用独立于 LLM 的 DeepSeek Search/Fetch 凭据；Node 全局开关开启后仍需 Agent 单独授权。网页返回的正文均是不可信外部内容。请求形状和设置 API 见[Node integration API](../../../docs/api/node-integration.md)与[网页工具说明](../../../docs/user/web-tools.md)。
+
 ## 工具结果契约
 
 工具 handler 保持各自正文格式；统一状态在

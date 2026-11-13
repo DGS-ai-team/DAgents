@@ -25,6 +25,7 @@ type workgroupAgentBridge struct {
 	mu         sync.Mutex
 	bindings   map[string]workgroupAgentBinding // session_id -> binding
 	registries map[string]*tools.Registry       // session_id -> scoped tool registry
+	webRefresh map[string]bool                  // session_id -> refresh web runtime before its next idle turn
 	turns      map[string]workgroupAgentTurn    // assign_id -> turn
 	completed  map[string]map[string]any        // assign_id -> terminal result, for replay
 	emit       func(map[string]any) error
@@ -60,9 +61,26 @@ func newWorkgroupAgentBridge(server *Server) *workgroupAgentBridge {
 		server:     server,
 		bindings:   make(map[string]workgroupAgentBinding),
 		registries: make(map[string]*tools.Registry),
+		webRefresh: make(map[string]bool),
 		turns:      make(map[string]workgroupAgentTurn),
 		completed:  make(map[string]map[string]any),
 	}
+}
+
+// markWebRefreshPending defers web runtime changes until each workgroup
+// session reaches an idle turn boundary. Registry handlers may be in use by
+// an active turn, so settings updates only mark existing bindings here.
+func (b *workgroupAgentBridge) markWebRefreshPending() {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	for sessionID := range b.bindings {
+		if b.registries[sessionID] != nil {
+			b.webRefresh[sessionID] = true
+		}
+	}
+	b.mu.Unlock()
 }
 
 // SetAgentEventEmitter is called by Workgroup Worker when a Dialer connection
@@ -127,6 +145,7 @@ func (b *workgroupAgentBridge) OpenAgentSession(ctx context.Context, req workgro
 		if b.bindings[req.SessionID] == existing && b.registries[req.SessionID] == registry {
 			delete(b.bindings, req.SessionID)
 			delete(b.registries, req.SessionID)
+			delete(b.webRefresh, req.SessionID)
 		}
 		b.mu.Unlock()
 	} else if registry != nil {
@@ -210,6 +229,10 @@ func (b *workgroupAgentBridge) StartAgentTurn(_ context.Context, req workgroup.A
 	if b == nil || b.server == nil || b.server.sessions == nil || b.server.stream == nil {
 		return fmt.Errorf("node turn runtime unavailable")
 	}
+	// Settings PATCH takes llmRefMu before marking bridge sessions. Keep the
+	// same lock order (llmRefMu -> b.mu) while reading cfg and rebinding tools.
+	b.server.llmRefMu.RLock()
+	defer b.server.llmRefMu.RUnlock()
 	b.mu.Lock()
 	binding, ok := b.bindings[req.SessionID]
 	if !ok || binding.agentID != req.AgentID || binding.memberID != req.MemberID || binding.workgroupID != req.WorkgroupID {
@@ -239,11 +262,30 @@ func (b *workgroupAgentBridge) StartAgentTurn(_ context.Context, req workgroup.A
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	_, active, _, err := b.server.sessions.RuntimeInfo(req.SessionID)
+	queuePending, active, _, err := b.server.sessions.RuntimeInfo(req.SessionID)
 	if err != nil {
 		cancel()
 		b.mu.Unlock()
 		return fmt.Errorf("inspect agent turn state: %w", err)
+	}
+	// The manager may not yet show a just-accepted start in its queue. A bridge
+	// turn for this session also makes the runtime busy for refresh purposes.
+	bridgeTurnActive := false
+	for _, running := range b.turns {
+		if running.binding.sessionID == req.SessionID {
+			bridgeTurnActive = true
+			break
+		}
+	}
+	if b.webRefresh[req.SessionID] && !active && !bridgeTurnActive && queuePending == 0 {
+		registry := b.registries[req.SessionID]
+		if registry == nil {
+			cancel()
+			b.mu.Unlock()
+			return fmt.Errorf("agent session has no tool registry for web refresh")
+		}
+		attachWebRuntime(registry, b.server.cfg, b.server.logger)
+		delete(b.webRefresh, req.SessionID)
 	}
 	b.turns[req.AssignID] = workgroupAgentTurn{
 		binding:     binding,
@@ -466,6 +508,7 @@ func (b *workgroupAgentBridge) CloseAgentSession(_ context.Context, req workgrou
 	}
 	delete(b.bindings, req.SessionID)
 	delete(b.registries, req.SessionID)
+	delete(b.webRefresh, req.SessionID)
 	b.mu.Unlock()
 	// Release persists session history and drops the isolated runtime, allowing
 	// a later open to restore that history with a fresh registry.

@@ -30,4 +30,12 @@ describe("useSetupConfig Node token handling", () => {
     await state.save({ manage: { node_token: "" } });
     expect(patchSetupConfig).toHaveBeenCalledWith({ manage: { node_token: "" } });
   });
+
+  it("loads the web key status without exposing a stored secret", async () => {
+    getSetupConfig.mockResolvedValue({ web: { base_url: "https://api.deepseek.com", has_api_key: true } });
+    const state = useSetupConfig();
+    await state.load();
+    expect(state.form.web).toMatchObject({ base_url: "https://api.deepseek.com", has_api_key: true, api_key: "", clear_api_key: false });
+    expect(JSON.stringify(state.form.web)).not.toContain("fixture");
+  });
 });

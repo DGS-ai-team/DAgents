@@ -1291,7 +1291,7 @@ paths:
             schema: {$ref: '#/components/schemas/NodeSettingsPatch'}
       responses:
         "200":
-          description: Updated SettingsView with write-only Manage token redaction
+          description: Updated SettingsView with write-only secret redaction
           content:
             application/json:
               schema: {$ref: '#/components/schemas/NodeSettingsView'}
@@ -1541,7 +1541,7 @@ components:
         idle_new_conversation_seconds: {type: integer, minimum: 0, default: 0, description: Zero disables idle boundaries. After a completed interaction becomes idle, the next human message starts a new model context segment while retaining the transcript. Auto Agents use Dreaming instead.}
     NodeSettingsView:
       type: object
-      required: [config_writable, restart_required, node, llm, manage, features, compression, memory, runtime, agent, user, onboarding, child_agents, browser, wecom, tools, hooks, available_tool_groups]
+      required: [config_writable, restart_required, node, llm, manage, features, compression, memory, runtime, agent, user, onboarding, child_agents, browser, wecom, web, tools, hooks, available_tool_groups]
       properties:
         config_path: {type: string}
         config_writable: {type: boolean}
@@ -1578,6 +1578,7 @@ components:
         child_agents: {$ref: '#/components/schemas/NodeChildAgentLimits'}
         browser: {type: object, additionalProperties: true}
         wecom: {type: object, additionalProperties: true}
+        web: {$ref: '#/components/schemas/NodeWebSettingsView'}
         tools: {$ref: '#/components/schemas/NodeToolsSettingsView'}
         hooks: {type: object, additionalProperties: true}
         available_tool_groups: {type: array, items: {type: string}}
@@ -1591,6 +1592,7 @@ components:
             node_id: {type: string}
             log_level: {type: string, enum: [debug, info, warn, error]}
         features: {$ref: '#/components/schemas/NodeFeatureSettingsPatch'}
+        web: {$ref: '#/components/schemas/NodeWebSettingsPatch'}
         tools: {$ref: '#/components/schemas/NodeToolsSettingsPatch'}
         compression: {$ref: '#/components/schemas/NodeCompressionSettings'}
         agent:
@@ -1626,7 +1628,7 @@ components:
       additionalProperties: true
     NodeFeatureSettingsView:
       type: object
-      required: [skills_enabled, triggers_enabled, child_agents_enabled, browser_enabled, wecom_enabled, multimodal_enabled, skills_max_in_prompt, triggers_poll_seconds, raw_message_history_enabled, raw_message_history_source]
+      required: [skills_enabled, triggers_enabled, child_agents_enabled, browser_enabled, wecom_enabled, multimodal_enabled, web_search_enabled, web_fetch_enabled, skills_max_in_prompt, triggers_poll_seconds, raw_message_history_enabled, raw_message_history_source]
       properties:
         skills_enabled: {type: boolean}
         triggers_enabled: {type: boolean}
@@ -1634,6 +1636,8 @@ components:
         browser_enabled: {type: boolean}
         wecom_enabled: {type: boolean}
         multimodal_enabled: {type: boolean}
+        web_search_enabled: {type: boolean}
+        web_fetch_enabled: {type: boolean}
         skills_max_in_prompt: {type: integer}
         triggers_poll_seconds: {type: integer}
         raw_message_history_enabled: {type: boolean, description: Effective value after environment override}
@@ -1648,9 +1652,24 @@ components:
         browser_enabled: {type: boolean}
         wecom_enabled: {type: boolean}
         multimodal_enabled: {type: boolean}
+        web_search_enabled: {type: boolean, description: Enable the Search tool process-wide; an Agent must also select the web_search tool group}
+        web_fetch_enabled: {type: boolean, description: Enable the Fetch tool process-wide; an Agent must also select the web_fetch tool group}
         skills_max_in_prompt: {type: integer, minimum: 1}
         triggers_poll_seconds: {type: integer, minimum: 1}
         raw_message_history_enabled: {type: boolean, description: Omit when AGENT_RAW_MESSAGE_HISTORY_ENABLED is present. Explicit updates return 400 and reject the entire patch without saving other fields. Invalid environment text still counts as environment-controlled and uses the documented default effective value.}
+    NodeWebSettingsView:
+      type: object
+      required: [base_url, has_api_key]
+      properties:
+        base_url: {type: string, description: Shared Search/Fetch endpoint; defaults to https://api.deepseek.com}
+        has_api_key: {type: boolean, description: Presence flag only; the key is never returned}
+    NodeWebSettingsPatch:
+      type: object
+      description: Shared Search/Fetch API settings, independent of all LLM profiles. Enabled web tools require an HTTP(S) base URL and saved API key.
+      properties:
+        base_url: {type: string, description: Optional endpoint root or endpoint ending in /v1}
+        api_key: {type: string, writeOnly: true, description: Non-empty replaces the key; empty or omitted preserves the saved key}
+        clear_api_key: {type: boolean, description: Explicitly delete the saved key; cannot clear while either web tool remains enabled}
     NodeToolsSettingsView:
       type: object
       properties:

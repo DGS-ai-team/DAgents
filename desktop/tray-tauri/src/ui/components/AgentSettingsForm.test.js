@@ -52,6 +52,7 @@ describe("AgentSettingsForm tool group tiles", () => {
     });
     const standard = mountForm({ mode: "full", draft, groups: [] });
     expect(standard.text()).toContain("基础信息");
+    expect(standard.findAll(".agent-settings-tile")).toHaveLength(0);
     standard.unmount();
 
     const embedded = mount(AgentSettingsForm, {

@@ -51,6 +51,8 @@ var knownBuiltinTools = map[string]struct{}{
 	"todo_update":            {},
 	"todo_delete":            {},
 	"auto_idle":              {},
+	"web_search":             {},
+	"web_fetch":              {},
 }
 
 // legacyBuiltinToolAliases map hidden aliases to their canonical tools. They
@@ -118,6 +120,8 @@ var builtinToolGroups = map[string][]string{
 		"browser_call",
 		"browser_evaluate",
 	},
+	"web_search": {"web_search"},
+	"web_fetch":  {"web_fetch"},
 	"wecom": {
 		"wecom_send_markdown",
 		"wecom_send_file",

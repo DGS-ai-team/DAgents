@@ -37,6 +37,8 @@ export const TOOL_GROUPS = [
   { name: "terminal", label: "终端与 Linux 通道", hint: "本机终端、SSH 命令与文件传输" },
   { name: "triggers", label: "定时任务" },
   { name: "wecom", label: "企业微信" },
+  { name: "web_search", label: "网页搜索", hint: "使用已配置的网页搜索服务" },
+  { name: "web_fetch", label: "网页抓取", hint: "提取指定网页的正文内容" },
 ];
 
 /**

@@ -5,7 +5,7 @@ func PatchHasBlock(p SettingsPatch) bool {
 	return p.LLM != nil || p.Manage != nil || p.Features != nil || p.Compression != nil || p.Memory != nil ||
 		p.Runtime != nil || p.Agent != nil || p.User != nil || p.Onboarding != nil ||
 		p.ChildAgents != nil || p.Browser != nil ||
-		p.WeCom != nil || p.Tools != nil || p.Hooks != nil
+		p.WeCom != nil || p.Web != nil || p.Tools != nil || p.Hooks != nil
 }
 
 // PatchHasNonLLMBlock 判断是否包含除 LLM 以外的配置块（需写入 config.yaml）。
@@ -13,5 +13,5 @@ func PatchHasNonLLMBlock(p SettingsPatch) bool {
 	return p.Manage != nil || p.Features != nil || p.Compression != nil || p.Memory != nil ||
 		p.Runtime != nil || p.Agent != nil || p.User != nil || p.Onboarding != nil ||
 		p.ChildAgents != nil || p.Browser != nil ||
-		p.WeCom != nil || p.Tools != nil || p.Hooks != nil
+		p.WeCom != nil || p.Web != nil || p.Tools != nil || p.Hooks != nil
 }

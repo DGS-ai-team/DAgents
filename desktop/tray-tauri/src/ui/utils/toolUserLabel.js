@@ -16,6 +16,8 @@ const TOOL_USER_LABELS = {
   computer_use: "操作桌面",
   browser_call: "浏览器操作",
   browser_evaluate: "执行浏览器脚本",
+  web_search: "搜索网页",
+  web_fetch: "抓取网页",
   wecom_send_markdown: "企微推送",
   wecom_send_file: "企微发文件",
   load_skills: "加载技能",

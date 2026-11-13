@@ -16,6 +16,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/handbookfs"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
+	"github.com/DGS-ai-team/DAgents/node/internal/webapi"
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
 	"github.com/DGS-ai-team/DAgents/node/internal/workspacecoord"
 )
@@ -48,6 +49,10 @@ type Registry struct {
 	multimodalEnabled      bool
 	browser                *browser.Manager
 	wecom                  *wecom.Client
+	webMu                  sync.RWMutex
+	webAPI                 *webapi.Client
+	webSearchEnabled       bool
+	webFetchEnabled        bool
 	handlers               map[string]handler
 	pathEncMu              sync.Mutex
 	pathEncCache           map[string]pathEncodingEntry
@@ -412,6 +417,7 @@ func (r *Registry) Definitions() []ToolDef {
 	if defs := r.wecomToolDefs(); len(defs) > 0 {
 		base = append(base, defs...)
 	}
+	base = append(base, r.webToolDefs()...)
 	base = append(base, childAgentToolDefs()...)
 	if r.linuxProvider != nil {
 		base = append(base, terminalFileTransferToolDefs()...)
@@ -530,6 +536,8 @@ func (r *Registry) registerBuiltins() {
 	r.handlers["trigger_create"] = r.execTriggerCreate
 	r.handlers["trigger_update"] = r.execTriggerUpdate
 	r.handlers["trigger_delete"] = r.execTriggerDelete
+	r.handlers["web_search"] = r.execWebSearch
+	r.handlers["web_fetch"] = r.execWebFetch
 	r.handlers["todo_list"] = r.execTodoList
 	r.handlers["todo_create"] = r.execTodoCreate
 	r.handlers["todo_update"] = r.execTodoUpdate

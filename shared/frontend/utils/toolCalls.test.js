@@ -28,6 +28,10 @@ describe("parseToolArguments", () => {
 });
 
 describe("toolDisplayName", () => {
+  it("shows concise Chinese labels and query or URL for web tools", () => {
+    expect(toolDisplayName("web_search", { query: "DeepSeek" })).toBe("网页搜索(DeepSeek)");
+    expect(toolDisplayName("web_fetch", { url: "https://example.com" })).toBe("抓取网页(https://example.com)");
+  });
   it("maps ask_user_information to Agent 询问", () => {
     expect(toolDisplayName(USER_INFORMATION_TOOL, {})).toBe("Agent 询问");
   });

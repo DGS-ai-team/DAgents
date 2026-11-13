@@ -6,9 +6,11 @@ import (
 
 	"github.com/DGS-ai-team/DAgents/node/internal/agentruntime"
 	"github.com/DGS-ai-team/DAgents/node/internal/browser"
+	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/node/internal/triggers"
+	"github.com/DGS-ai-team/DAgents/node/internal/webapi"
 	"github.com/DGS-ai-team/DAgents/node/internal/wecom"
 	"github.com/DGS-ai-team/DAgents/shared/config"
 )
@@ -43,12 +45,46 @@ func (s *Server) attachNodeRuntimeDeps(reg *tools.Registry, targetAgentID string
 	}
 	attachTriggerRuntime(reg, s.triggerStore, s.triggerSched, targetAgentID)
 	attachWeComRuntime(reg, s.cfg)
+	attachWebRuntime(reg, s.cfg, s.logger)
 	attachProcessEventSink(reg, s.stream)
 	reg.SetTerminalSessionBroker(s.terminals)
 	if s.mediaRegister != nil {
 		reg.SetMediaRegister(s.mediaRegister)
 	}
 	reg.SetBrowserManager(s.browserManager())
+}
+
+func attachWebRuntime(reg *tools.Registry, cfg *config.Config, logger interface{ Warn(string, ...any) }) {
+	if reg == nil || cfg == nil {
+		return
+	}
+	key := strings.TrimSpace(cfg.Web.APIKey)
+	if key == "" && strings.TrimSpace(cfg.Web.APIKeyCiphertext) != "" {
+		box, err := store.OpenSecretBox(cfg.RuntimeDir())
+		if err == nil {
+			key, err = box.Decrypt(cfg.Web.APIKeyCiphertext)
+		}
+		if err != nil {
+			if logger != nil {
+				logger.Warn("web API key could not be loaded")
+			}
+			reg.SetWebAPIClient(nil, false, false)
+			return
+		}
+	}
+	if !cfg.Web.SearchEnabled && !cfg.Web.FetchEnabled {
+		reg.SetWebAPIClient(nil, false, false)
+		return
+	}
+	client, err := webapi.New(cfg.Web.BaseURL, key)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("web API runtime unavailable", "reason", err.Error())
+		}
+		reg.SetWebAPIClient(nil, false, false)
+		return
+	}
+	reg.SetWebAPIClient(client, cfg.Web.SearchEnabled, cfg.Web.FetchEnabled)
 }
 
 // browserManager returns the current process-level browser manager. Browser
