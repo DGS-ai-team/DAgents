@@ -293,7 +293,7 @@ func TestAutonomyV2SavedResponsibilityReachesMainSession(t *testing.T) {
 		}
 	}
 	enqueue := func(content string) string {
-		w := autonomyV2Request(s, http.MethodPost, "/v1/messages", fmt.Sprintf(`{"agent_id":"auto-v2-main","content":%q}`, content))
+		w := autonomyV2Request(s, http.MethodPost, "/v1/messages", string(testIdempotentMessageBody(t, "auto-v2-main", content)))
 		if w.Code != http.StatusOK {
 			t.Fatalf("enqueue: %d %s", w.Code, w.Body)
 		}
@@ -371,7 +371,7 @@ func TestAutonomyV2TodoToolRunsThroughMainSession(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("put=%d %s", w.Code, w.Body)
 	}
-	w = autonomyV2Request(s, http.MethodPost, "/v1/messages", `{"agent_id":"auto-v2-tools","content":"create a todo"}`)
+	w = autonomyV2Request(s, http.MethodPost, "/v1/messages", string(testIdempotentMessageBody(t, "auto-v2-tools", "create a todo")))
 	if w.Code != http.StatusOK {
 		t.Fatalf("enqueue=%d %s", w.Code, w.Body)
 	}

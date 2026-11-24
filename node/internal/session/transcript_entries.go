@@ -27,6 +27,15 @@ func MessagesToTranscriptEntriesWithMedia(messages []llm.Message, reg *media.Reg
 	return messagesToTranscriptEntries(messages, reg)
 }
 
+// MessagesToTranscriptEntriesWithItemVersions projects durable conversation
+// records to the same safe UI transcript shape as hydrate, then applies the
+// store revisions to every display child derived from each source message.
+func MessagesToTranscriptEntriesWithItemVersions(messages []llm.Message, versions map[string]uint64) []TranscriptEntry {
+	entries := messagesToTranscriptEntries(messages, nil)
+	applyTranscriptItemVersions(entries, versions)
+	return entries
+}
+
 func messagesToTranscriptEntries(messages []llm.Message, reg *media.Registry) []TranscriptEntry {
 	if len(messages) == 0 {
 		return []TranscriptEntry{}
@@ -59,7 +68,11 @@ func messageToTranscriptEntries(msg llm.Message, callIndex map[string]llm.ToolCa
 	switch strings.TrimSpace(msg.Role) {
 	case "user":
 		if isConversationBoundaryNotice(msg) {
-			return []TranscriptEntry{{"kind": "context_boundary", "boundary_id": conversationBoundaryID(msg)}}
+			entry := TranscriptEntry{"kind": "context_boundary", "boundary_id": conversationBoundaryID(msg)}
+			if id := userTranscriptItemID(msg); id != "" {
+				entry["item_id"], entry["id"], entry["item_version"] = id, id, 1
+			}
+			return []TranscriptEntry{entry}
 		}
 		if shouldSkipHydrateUser(msg) {
 			return nil
@@ -103,6 +116,14 @@ func userEntry(msg llm.Message, reg *media.Registry) TranscriptEntry {
 		"kind": "user",
 		"text": llm.MessageTextSummary(msg),
 	}
+	if id := userTranscriptItemID(msg); id != "" {
+		entry["item_id"] = id
+		entry["id"] = id
+		entry["item_version"] = 1
+	}
+	if requestID := strings.TrimSpace(msg.ClientRequestID); requestID != "" {
+		entry["client_request_id"] = requestID
+	}
 	if len(msg.FileReferences) > 0 {
 		entry["file_refs"] = llm.CloneFileReferences(msg.FileReferences)
 	}
@@ -142,15 +163,29 @@ func userImageURLs(msg llm.Message) []string {
 func assistantEntries(msg llm.Message) []TranscriptEntry {
 	var out []TranscriptEntry
 	if rc := strings.TrimSpace(msg.ReasoningContent); rc != "" {
-		out = append(out, TranscriptEntry{
+		entry := TranscriptEntry{
 			"kind": "reasoning",
 			"text": rc,
-		})
+		}
+		if id := assistantTranscriptItemID(msg, "reasoning"); id != "" {
+			entry["item_id"] = id
+			entry["id"] = id
+			entry["item_version"] = 1
+		}
+		if llm.IsPartialAssistantMessage(msg) {
+			entry["partial"] = true
+		}
+		out = append(out, entry)
 	}
 	if c := strings.TrimSpace(msg.Content); c != "" {
 		entry := TranscriptEntry{
 			"kind": "assistant",
 			"text": c,
+		}
+		if id := assistantTranscriptItemID(msg, "content"); id != "" {
+			entry["item_id"] = id
+			entry["id"] = id
+			entry["item_version"] = 1
 		}
 		if llm.IsPartialAssistantMessage(msg) {
 			entry["partial"] = true
@@ -161,9 +196,48 @@ func assistantEntries(msg llm.Message) []TranscriptEntry {
 		if tools.IsAskUserInformation(tc.Function.Name) {
 			continue
 		}
-		out = append(out, toolCallEntryFromCall(tc, nil))
+		entry := toolCallEntryFromCall(tc, nil)
+		if strings.TrimSpace(tc.ID) != "" {
+			entry["item_id"] = "tool-call/" + tc.ID
+			entry["id"] = "tool-call/" + tc.ID
+			entry["item_version"] = 1
+		}
+		out = append(out, entry)
 	}
 	return out
+}
+
+func userTranscriptItemID(msg llm.Message) string {
+	if id := strings.TrimSpace(msg.RecordID); id != "" {
+		return id
+	}
+	if requestID := strings.TrimSpace(msg.ClientRequestID); requestID != "" {
+		return "input-request/" + requestID
+	}
+	return ""
+}
+
+func assistantTranscriptItemID(msg llm.Message, part string) string {
+	if identity := msg.DisplayIdentity; identity != nil {
+		if part == "reasoning" && strings.TrimSpace(identity.ReasoningItemID) != "" {
+			return strings.TrimSpace(identity.ReasoningItemID)
+		}
+		if part == "content" && strings.TrimSpace(identity.ContentItemID) != "" {
+			return strings.TrimSpace(identity.ContentItemID)
+		}
+	}
+	if part == "content" && strings.TrimSpace(msg.Content) == "" {
+		return ""
+	}
+	if part == "reasoning" && strings.TrimSpace(msg.ReasoningContent) == "" {
+		return ""
+	}
+	recordID := strings.TrimSpace(msg.RecordID)
+	if recordID == "" {
+		return ""
+	}
+	recordID = strings.TrimSuffix(recordID, "/assistant")
+	return recordID + "/assistant/" + part
 }
 
 func toolCallEntryFromCall(tc llm.ToolCall, duplicateMeta *hooks.DuplicateMeta) TranscriptEntry {
@@ -273,13 +347,29 @@ func toolResultEntry(msg llm.Message, callIndex map[string]llm.ToolCall) Transcr
 	}
 	summary := toolResultSummary(data)
 	data["summary"] = summary
-	return TranscriptEntry{
+	entry := TranscriptEntry{
 		"kind":    "tool_result",
 		"blockId": callID,
 		"partial": false,
 		"data":    data,
 		"summary": summary,
 	}
+	if id := toolResultTranscriptItemID(msg); id != "" {
+		entry["item_id"] = id
+		entry["id"] = id
+		entry["item_version"] = 1
+	}
+	return entry
+}
+
+func toolResultTranscriptItemID(msg llm.Message) string {
+	if id := strings.TrimSpace(msg.RecordID); id != "" {
+		return id
+	}
+	if callID := strings.TrimSpace(msg.ToolCallID); callID != "" {
+		return "tool-result/" + callID
+	}
+	return ""
 }
 
 func toolResultSummary(data map[string]any) string {

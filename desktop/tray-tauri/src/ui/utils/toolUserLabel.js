@@ -1,6 +1,5 @@
 import { truncateGraphemes } from "@shared-frontend/utils/textTruncate.js";
 import { resolveToolArgumentsFromData, toolCallPurpose } from "@shared-frontend/utils/toolCalls.js";
-import { toolCallIdFromEntry, toolJobsStore } from "../stores/toolJobs.js";
 
 /** 面向普通用户的工具类别名（非技术 tool id）。 */
 const TOOL_USER_LABELS = {
@@ -190,11 +189,14 @@ export function toolStepUserSummary({ callEntry, resultEntry } = {}) {
  * 工具步骤相位（同批免审批 tool_call 后端并行执行）：
  * generating | running | background | pending | completed | failed | cancelled | rejected | interrupted | idle
  *
- * @param {{ callEntry?: object, resultEntry?: object, executionHint?: 'active' | 'pending' | null }} args
+ * @param {{ callEntry?: object, resultEntry?: object, executionHint?: string | null, lifecycleStatus?: string, phase?: string }} args
  */
-export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = null, lifecycleStatus = "" } = {}) {
+export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = null, lifecycleStatus = "", phase = "" } = {}) {
   const entry = resultEntry || callEntry || {};
   if (entry.sideEffectApplied) return "completed";
+  if (["generating", "running", "background", "pending", "completed", "failed", "cancelled", "rejected", "interrupted", "idle"].includes(phase)) {
+    return phase;
+  }
   // Coordinator lifecycle is authoritative when it conflicts with a
   // transcript result projection (for example, a cancelled write carrying a
   // generic adapter success status).
@@ -240,8 +242,7 @@ export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = n
   // stale running-call cache make it active again.
   if (resultEntry) return "completed";
 
-  // Without a result, use the lifecycle execution hint before the eventually
-  // consistent /tool-jobs cache.
+  // Without a result, use the authoritative turn lifecycle projection.
   if (executionHint === "settled") return "completed";
   if (executionHint === "failed") return "failed";
   if (executionHint === "cancelled") return "cancelled";
@@ -249,9 +250,7 @@ export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = n
   if (executionHint === "interrupted") return "interrupted";
 
   if (executionHint === "pending") return "pending";
-
-  const id = toolCallIdFromEntry(callEntry) || toolCallIdFromEntry(resultEntry);
-  if (id && toolJobsStore.runningCallIds.includes(id)) return "running";
+  if (executionHint === "active") return "running";
 
   // A partial tool_call means the model is still assembling arguments only
   // until the executor registers the call. Once a real job is visible above,
@@ -269,12 +268,12 @@ export function resolveToolStepPhase({ callEntry, resultEntry, executionHint = n
   return "idle";
 }
 
-export function toolStepStatusText({ callEntry, resultEntry, executionHint = null, lifecycleStatus = "" } = {}) {
+export function toolStepStatusText({ callEntry, resultEntry, executionHint = null, lifecycleStatus = "", phase = "" } = {}) {
   const entry = resultEntry || callEntry || {};
   if (entry.sideEffectStale) return "已失效";
   if (entry.sideEffectApplied) return "已入库";
 
-  switch (resolveToolStepPhase({ callEntry, resultEntry, executionHint, lifecycleStatus })) {
+  switch (resolveToolStepPhase({ callEntry, resultEntry, executionHint, lifecycleStatus, phase })) {
     case "generating":
       return "生成中";
     case "running":
@@ -296,22 +295,4 @@ export function toolStepStatusText({ callEntry, resultEntry, executionHint = nul
     default:
       return "";
   }
-}
-
-/** 真正在跑（生成参数 / 执行 / 后台）— 用于转圈与高亮；待审批不算。 */
-export function toolStepIsInProgress({ callEntry, resultEntry, executionHint = null, lifecycleStatus = "" } = {}) {
-  const phase = resolveToolStepPhase({ callEntry, resultEntry, executionHint, lifecycleStatus });
-  return phase === "generating" || phase === "running" || phase === "background";
-}
-
-/** A result phase outranks cached execution hints from an earlier SSE snapshot. */
-export function toolStepIsActiveInGroup(step = {}) {
-  if (!step.callEntry) return false;
-  const phase = resolveToolStepPhase(step);
-  return !["completed", "failed", "cancelled", "rejected", "interrupted"].includes(phase);
-}
-
-/** 已收到 tool_call、尚未开跑（如 HITL 待审批）。 */
-export function toolStepIsPending({ callEntry, resultEntry, executionHint = null, lifecycleStatus = "" } = {}) {
-  return resolveToolStepPhase({ callEntry, resultEntry, executionHint, lifecycleStatus }) === "pending";
 }

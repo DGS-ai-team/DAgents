@@ -6,6 +6,7 @@ import ToolGroupIcon from "./ToolGroupIcon.vue";
 const props = defineProps({
   data: { type: Object, required: true },
   busy: { type: Boolean, default: false },
+  streamItemKey: { type: String, default: "" },
 });
 
 const emit = defineEmits(["decide", "cancel"]);
@@ -18,7 +19,7 @@ const showMergePreview = computed(
 </script>
 
 <template>
-  <div class="msg msg--approval">
+  <div class="msg msg--approval" :data-stream-item-key="streamItemKey || undefined">
     <div class="msg__body msg__body--wide">
       <div class="approval-bubble approval-bubble--memory">
         <div class="tool-exec-bubble__source">

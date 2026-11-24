@@ -203,7 +203,7 @@ func (c *Coordinator) MaybeHandle(
 
 // ForceBlocking 手动执行一次阻塞压缩：忽略 token 阈值，同步 LLM 摘要并立即应用。
 //
-// 返回 status：applied / failed / noop / stale / invalid / disabled / in_progress。
+// 返回 status：applied / persistence_failed / failed / noop / stale / invalid / disabled / in_progress。
 func (c *Coordinator) ForceBlocking(
 	ctx context.Context,
 	sessionID, agentID string,

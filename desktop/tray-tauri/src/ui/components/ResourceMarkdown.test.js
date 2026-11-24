@@ -6,7 +6,8 @@ import ResourceMarkdown from "./ResourceMarkdown.vue";
 import { ResourceRenderContextKey } from "../utils/resourceContext.js";
 import { lightboxStore } from "../stores/lightbox.js";
 import { copyText } from "../utils/clipboard.js";
-import resourceMarkdownSource from "./ResourceMarkdown.vue?raw";
+import { clearPerformanceDiagnostics, disablePerformanceDiagnostics, enablePerformanceDiagnostics, getPerformanceDiagnosticsSnapshot } from "../stores/performanceDiagnostics.js";
+import resourceMarkdownSource from "./ResourceMarkdownContent.vue?raw";
 
 vi.mock("../utils/clipboard.js", () => ({ copyText: vi.fn() }));
 
@@ -19,6 +20,238 @@ const readBlobText = (blob) => new Promise((resolve, reject) => {
 });
 
 describe("ResourceMarkdown", () => {
+  it("measures Markdown parse, DOM commit, and layout phases when diagnostics are enabled", async () => {
+    disablePerformanceDiagnostics();
+    clearPerformanceDiagnostics();
+    enablePerformanceDiagnostics();
+    const context = { agentId: ref("agent-a"), readImage: vi.fn(), openResource: vi.fn() };
+    const wrapper = mount(ResourceMarkdown, {
+      props: { entry: { kind: "assistant", text: "First paragraph" }, agentId: "agent-a" },
+      attachTo: document.body,
+      global: { provide: { [ResourceRenderContextKey]: context } },
+    });
+    await nextTick();
+    await wrapper.setProps({ entry: { kind: "assistant", text: "Updated paragraph" } });
+    await nextTick();
+
+    const snapshot = getPerformanceDiagnosticsSnapshot();
+    expect(snapshot.durations["markdown.parse"]?.count).toBeGreaterThanOrEqual(2);
+    expect(snapshot.durations["markdown.dom_commit"]?.count).toBe(1);
+    expect(snapshot.durations["markdown.layout"]?.count).toBeGreaterThanOrEqual(2);
+    wrapper.unmount();
+    disablePerformanceDiagnostics();
+  });
+  it("renders a long completed Markdown message through the measured DOM path", async () => {
+    vi.useFakeTimers();
+    disablePerformanceDiagnostics();
+    clearPerformanceDiagnostics();
+    enablePerformanceDiagnostics();
+    const sectionCount = 240;
+    const paragraph = "长正文渲染验收用于覆盖真实 Markdown 和 DOM 提交。 ".repeat(10).trim();
+    const text = Array.from({ length: sectionCount }, (_, index) => `## 长文段落 ${index + 1}\n\n${paragraph}`)
+      .join("\n\n");
+    const context = { agentId: ref("agent-a"), readImage: vi.fn(), openResource: vi.fn() };
+    const wrapper = mount(ResourceMarkdown, {
+      props: { entry: { id: "long-completed-markdown", kind: "assistant", text }, agentId: "agent-a" },
+      attachTo: document.body,
+      global: { provide: { [ResourceRenderContextKey]: context } },
+    });
+    try {
+      await nextTick();
+      expect(wrapper.findAll(".resource-markdown").length).toBeGreaterThan(0);
+      expect(wrapper.text()).toContain("长文段落 1");
+      expect(wrapper.text()).not.toContain(`长文段落 ${sectionCount}`);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await flushPromises();
+      await nextTick();
+
+      expect(wrapper.findAll(".resource-markdown").length).toBeGreaterThan(1);
+      expect(wrapper.text()).toContain(`长文段落 ${sectionCount}`);
+
+      await wrapper.setProps({ entry: { id: "long-completed-markdown", kind: "assistant", text: `${text}\n\n最终段落已经完整显示。` } });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await nextTick();
+      await flushPromises();
+
+      expect(text.length).toBeGreaterThan(80_000);
+      expect(wrapper.findAll("h2")).toHaveLength(sectionCount);
+      expect(wrapper.text()).toContain("长文段落 1");
+      expect(wrapper.text()).toContain(`长文段落 ${sectionCount}`);
+      expect(wrapper.text()).toContain("最终段落已经完整显示。");
+      const snapshot = getPerformanceDiagnosticsSnapshot();
+      expect(snapshot.durations["markdown.parse"]?.count).toBeGreaterThan(0);
+      expect(snapshot.durations["markdown.dom_commit"]?.count).toBeGreaterThan(1);
+      expect(snapshot.durations["markdown.layout"]?.count).toBeGreaterThan(0);
+      expect(snapshot.durations["markdown.dom_commit"].maxMs).toBeGreaterThanOrEqual(0);
+      const parseSpans = snapshot.recentSpans.filter((span) => span.name === "markdown.parse");
+      expect(parseSpans.length).toBeGreaterThan(1);
+      expect(parseSpans.every((span) => span.characters <= 17_000)).toBe(true);
+    } finally {
+      wrapper.unmount();
+      disablePerformanceDiagnostics();
+      vi.useRealTimers();
+    }
+  });
+  it("coalesces streamed Markdown renders and flushes the final text immediately", async () => {
+    vi.useFakeTimers();
+    const context = { agentId: ref("agent-a"), readImage: vi.fn(), openResource: vi.fn() };
+    const wrapper = mount(ResourceMarkdown, {
+      props: { entry: { id: "stream-1", kind: "assistant", text: "First" }, agentId: "agent-a", streaming: true },
+      attachTo: document.body,
+      global: { provide: { [ResourceRenderContextKey]: context } },
+    });
+    try {
+      await nextTick();
+      disablePerformanceDiagnostics();
+      clearPerformanceDiagnostics();
+      enablePerformanceDiagnostics();
+      await wrapper.setProps({ entry: { id: "stream-1", kind: "assistant", text: "First **second**" } });
+      await wrapper.setProps({ entry: { id: "stream-1", kind: "assistant", text: "First **second** paragraph" } });
+      expect(wrapper.html()).toContain("First</p>");
+      expect(getPerformanceDiagnosticsSnapshot().durations["markdown.parse"]?.count || 0).toBe(0);
+      await vi.advanceTimersByTimeAsync(47);
+      expect(wrapper.html()).toContain("First</p>");
+      await vi.advanceTimersByTimeAsync(1);
+      await nextTick();
+      expect(wrapper.html()).toContain("<strong>second</strong> paragraph");
+      expect(getPerformanceDiagnosticsSnapshot().durations["markdown.parse"]?.count).toBe(1);
+
+      await wrapper.setProps({ entry: { id: "stream-1", kind: "assistant", text: "Final **answer**" } });
+      await wrapper.setProps({ streaming: false });
+      expect(wrapper.html()).toContain("Final <strong>answer</strong>");
+      expect(getPerformanceDiagnosticsSnapshot().durations["markdown.parse"]?.count).toBe(2);
+    } finally {
+      wrapper.unmount();
+      disablePerformanceDiagnostics();
+      vi.useRealTimers();
+    }
+  });
+  it("keeps completed Markdown blocks mounted while only the active tail changes", async () => {
+    vi.useFakeTimers();
+    const context = { agentId: ref("agent-a"), readImage: vi.fn(), openResource: vi.fn() };
+    const firstLink = "[report](dagents://resource/file?path=reports%2Fsummary.md)";
+    const completedParagraphs = [firstLink, ...Array.from({ length: 15 }, (_, index) => `Paragraph ${index + 1}.`)];
+    const source = `${completedParagraphs.join("\n\n")}\n\nTail`;
+    const wrapper = mount(ResourceMarkdown, {
+      props: { entry: { id: "stable-stream", kind: "assistant", text: source }, agentId: "agent-a", streaming: true },
+      attachTo: document.body,
+      global: { provide: { [ResourceRenderContextKey]: context } },
+    });
+    try {
+      await nextTick();
+      await flushPromises();
+      const roots = wrapper.findAll(".resource-markdown");
+      expect(roots).toHaveLength(2);
+      const stableRoot = roots[0].element;
+      expect(roots[0].text()).toContain("Paragraph 15.");
+      expect(roots[1].text()).toBe("Tail");
+
+      await wrapper.setProps({ entry: { id: "stable-stream", kind: "assistant", text: `${source} with more text` } });
+      await vi.advanceTimersByTimeAsync(48);
+      await nextTick();
+      await flushPromises();
+
+      const updatedRoots = wrapper.findAll(".resource-markdown");
+      expect(updatedRoots).toHaveLength(2);
+      expect(updatedRoots[0].element).toBe(stableRoot);
+      expect(updatedRoots[0].text()).toContain("Paragraph 15.");
+      expect(updatedRoots[1].text()).toBe("Tail with more text");
+      await updatedRoots[0].get("button").trigger("click");
+      expect(context.openResource).toHaveBeenCalledWith(
+        { type: "file", path: "reports/summary.md" },
+        { agentId: "agent-a", source: "main" },
+      );
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+  it("drops committed Markdown blocks when the same message retries with a new attempt", async () => {
+    vi.useFakeTimers();
+    const context = { agentId: ref("agent-a"), readImage: vi.fn(), openResource: vi.fn() };
+    const previousText = [...Array.from({ length: 20 }, (_, index) => `Previous attempt block ${index + 1}.`), "Previous attempt tail"].join("\n\n");
+    const wrapper = mount(ResourceMarkdown, {
+      props: {
+        entry: { id: "retry-stream", attempt_id: "attempt-1", kind: "assistant", text: previousText },
+        agentId: "agent-a",
+        streaming: true,
+      },
+      attachTo: document.body,
+      global: { provide: { [ResourceRenderContextKey]: context } },
+    });
+    try {
+      await nextTick();
+      expect(wrapper.text()).toContain("Previous attempt block 20.");
+
+      await wrapper.setProps({
+        entry: { id: "retry-stream", attempt_id: "attempt-2", kind: "assistant", text: "Retry answer\n\nRetry tail" },
+      });
+
+      expect(wrapper.text()).toContain("Retry answer");
+      expect(wrapper.text()).toContain("Retry tail");
+      expect(wrapper.text()).not.toContain("Previous attempt");
+      await vi.advanceTimersByTimeAsync(48);
+      await nextTick();
+      expect(wrapper.text()).not.toContain("Previous attempt");
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+  it("resets committed Markdown blocks when an active snapshot is corrected without an attempt change", async () => {
+    vi.useFakeTimers();
+    const context = { agentId: ref("agent-a"), readImage: vi.fn(), openResource: vi.fn() };
+    const previousText = [...Array.from({ length: 20 }, (_, index) => `Uncorrected block ${index + 1}.`), "Uncorrected tail"].join("\n\n");
+    const wrapper = mount(ResourceMarkdown, {
+      props: {
+        entry: { id: "corrected-stream", attempt_id: "attempt-1", kind: "assistant", text: previousText },
+        agentId: "agent-a",
+        streaming: true,
+      },
+      attachTo: document.body,
+      global: { provide: { [ResourceRenderContextKey]: context } },
+    });
+    try {
+      await nextTick();
+      expect(wrapper.text()).toContain("Uncorrected block 20.");
+
+      await wrapper.setProps({
+        entry: { id: "corrected-stream", attempt_id: "attempt-1", kind: "assistant", text: "Corrected answer\n\nCorrected tail" },
+      });
+      await vi.advanceTimersByTimeAsync(48);
+      await nextTick();
+
+      expect(wrapper.text()).toContain("Corrected answer");
+      expect(wrapper.text()).toContain("Corrected tail");
+      expect(wrapper.text()).not.toContain("Uncorrected");
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+  it("flushes a new message immediately and cancels the previous message's pending render", async () => {
+    vi.useFakeTimers();
+    const context = { agentId: ref("agent-a"), readImage: vi.fn(), openResource: vi.fn() };
+    const wrapper = mount(ResourceMarkdown, {
+      props: { entry: { id: "stream-old", kind: "assistant", text: "Old" }, agentId: "agent-a", streaming: true },
+      attachTo: document.body,
+      global: { provide: { [ResourceRenderContextKey]: context } },
+    });
+    try {
+      await nextTick();
+      await wrapper.setProps({ entry: { id: "stream-old", kind: "assistant", text: "Old pending tail" } });
+      await wrapper.setProps({ entry: { id: "stream-new", kind: "assistant", text: "New message" } });
+      expect(wrapper.html()).toContain("New message");
+      expect(wrapper.html()).not.toContain("Old pending tail");
+      await vi.advanceTimersByTimeAsync(48);
+      await nextTick();
+      expect(wrapper.html()).toContain("New message");
+      expect(wrapper.html()).not.toContain("Old pending tail");
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
   it("deduplicates streamed image reads and revokes blob URLs on unmount", async () => {
     const create = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:resource-test");
     const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});

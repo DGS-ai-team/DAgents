@@ -28,6 +28,24 @@ type Message struct {
 	// layer renders it into the tool content so the model can observe the
 	// authoritative status without changing the UI/transcript body.
 	ToolResultMetadata *ToolResultMetadata `json:"tool_result_metadata,omitempty"`
+	// DisplayIdentity is internal transcript identity. It is persisted with
+	// assistant messages so a recovered hydrate snapshot keeps the same text
+	// and reasoning item IDs; provider adapters must never serialize it.
+	DisplayIdentity *MessageDisplayIdentity `json:"display_identity,omitempty"`
+	// RecordID is the stable identity of this stored message record. It is
+	// internal metadata and provider adapters must never serialize it.
+	RecordID string `json:"record_id,omitempty"`
+	// ClientRequestID ties a committed human message to its idempotent input
+	// receipt so Desktop can reconcile optimistic rows without matching text.
+	ClientRequestID string `json:"client_request_id,omitempty"`
+}
+
+// MessageDisplayIdentity contains stable UI item IDs derived from the owning
+// Step, not from message content or transcript position.
+type MessageDisplayIdentity struct {
+	ContentItemID   string `json:"content_item_id,omitempty"`
+	ReasoningItemID string `json:"reasoning_item_id,omitempty"`
+	ItemVersion     int    `json:"item_version,omitempty"`
 }
 
 // ToolResultMetadata is the compact model-facing projection of the runtime

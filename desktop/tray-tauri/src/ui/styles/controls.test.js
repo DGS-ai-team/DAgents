@@ -62,6 +62,19 @@ describe("Desktop shared control styles ownership", () => {
     expect(new Set(imports).size).toBe(imports.length);
   });
 
+  it("removes the idle composer stop button from the toolbar flex layout", () => {
+    const globalCss = postcss.parse(read("../desktop-ui.css"));
+    const selector = ".desktop-shell .composer-toolbar-right > .composer-stop-action.is-hidden";
+    let hiddenStopRule = false;
+    globalCss.walkRules((rule) => {
+      if (!rule.selectors?.includes(selector)) return;
+      hiddenStopRule = rule.nodes?.some((node) => node.type === "decl" && node.prop === "display" && node.value === "none") || false;
+    });
+
+    expect(hiddenStopRule).toBe(true);
+    expect(read("controls.css")).toContain(".desktop-shell button:has(> .icon-mask:only-child)");
+  });
+
   it("keeps shared visual base selectors in controls.css, not shell or select consumers", () => {
     const selectors = [
       ".btn",

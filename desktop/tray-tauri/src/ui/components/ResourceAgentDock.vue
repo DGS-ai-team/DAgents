@@ -24,7 +24,9 @@ const props = defineProps({
   modelProfile: { type: String, default: '' },
   agentName: { type: String, default: '当前智能体' },
   canSend: { type: Boolean, default: false },
+  queueing: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
+  sendPending: { type: Boolean, default: false },
   canStop: { type: Boolean, default: false },
   cancelling: { type: Boolean, default: false },
   failedDraft: { type: Boolean, default: false },
@@ -60,9 +62,9 @@ const iconStyle = icon => ({ maskImage: `url("${icon}")`, WebkitMaskImage: `url(
 const showStop = computed(() => props.status === 'generating' || props.canStop)
 const hasReferences = computed(() => props.references.length > 0)
 const actionLabel = computed(() => showStop.value ? (props.cancelling ? '正在停止本轮' : '停止本轮') : '发送消息')
-const actionDisabled = computed(() => showStop.value
-  ? !props.canStop || props.cancelling
-  : props.disabled || !props.canSend || (!draft.value.trim() && !hasReferences.value))
+const sendLabel = computed(() => props.queueing ? '加入等待队列' : '发送消息')
+const sendDisabled = computed(() => props.disabled || props.sendPending || !props.canSend || (!draft.value.trim() && !hasReferences.value))
+const stopDisabled = computed(() => !props.canStop || props.cancelling)
 let dockResizeObserver = null
 function publishOccupiedHeight() {
   if (props.collapsedInToolbar && props.collapsed && !props.turnError) {
@@ -107,7 +109,7 @@ function focusVisibleBarControl() {
 }
 
 function submit() {
-  if (showStop.value || actionDisabled.value) return
+  if (sendDisabled.value) return
   emit('send')
 }
 
@@ -216,7 +218,8 @@ onBeforeUnmount(() => {
         <button v-if="failedDraft" type="button" class="dock-restore" :disabled="restoreDisabled" aria-label="恢复失败消息" title="恢复失败消息" @click="emit('restore')">恢复</button>
         <button ref="toggleButton" type="button" class="dock-expand-toggle" :aria-label="expanded ? '收起智能体消息区' : '展开智能体消息区'" :title="expanded ? '收起消息区' : status === 'pending' ? pendingExpandTitle : '展开消息区'" aria-controls="resource-agent-dock-details" :aria-expanded="expanded" @click="setExpanded(!expanded)"><span class="icon-mask" :style="iconStyle(expanded ? chevronDownIcon : chevronUpIcon)" aria-hidden="true"></span></button>
         <button type="button" class="dock-collapse-toggle" aria-label="收起快速消息栏" title="收起消息栏" aria-expanded="true" @click="setCollapsed(true)"><span class="icon-mask" :style="iconStyle(chevronDownIcon)" aria-hidden="true"></span></button>
-        <button :type="showStop ? 'button' : 'submit'" class="dock-action composer-action" :class="{ 'is-stop': showStop }" :disabled="actionDisabled" :aria-label="actionLabel" :title="actionLabel" :aria-busy="cancelling" @click="showStop && stop()"><span class="icon-mask composer-action__send" :style="iconStyle(sendIcon)" aria-hidden="true"></span><span class="icon-mask composer-action__stop" :style="iconStyle(stopIcon)" aria-hidden="true"></span></button>
+        <button type="submit" class="dock-action dock-send-action" :disabled="sendDisabled" :aria-label="sendLabel" :title="sendLabel"><span class="icon-mask" :style="iconStyle(sendIcon)" aria-hidden="true"></span></button>
+        <button type="button" class="dock-action dock-stop-action" :class="{ 'is-hidden': !showStop }" :disabled="stopDisabled" :aria-hidden="!showStop" :tabindex="showStop ? 0 : -1" :aria-label="actionLabel" :title="actionLabel" :aria-busy="cancelling" @click="stop"><span class="icon-mask" :style="iconStyle(stopIcon)" aria-hidden="true"></span></button>
       </form>
       <button v-else-if="!collapsedInToolbar" key="collapsed" ref="collapsedToggle" type="button" class="dock-collapsed-toggle" :aria-label="`${statusLabel}；展开快速消息栏`" title="展开快速消息栏" :aria-expanded="false" @click="setCollapsed(false)">
         <span class="icon-mask dock-status-icon" :class="`is-${status}`" aria-hidden="true" :style="iconStyle(statusIcon)"></span>

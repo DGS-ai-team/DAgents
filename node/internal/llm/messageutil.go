@@ -167,6 +167,9 @@ func MessageToJournalPayload(message Message) map[string]any {
 	if message.Provenance != nil {
 		payload["provenance"] = message.Provenance
 	}
+	if requestID := strings.TrimSpace(message.ClientRequestID); requestID != "" {
+		payload["client_request_id"] = requestID
+	}
 	if len(message.FileReferences) > 0 {
 		payload["file_refs"] = message.FileReferences
 	}

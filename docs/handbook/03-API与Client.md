@@ -124,8 +124,7 @@ GET /v1/streams?agent_id=agt-...&live=1
 
 | 事件 | 含义 |
 |------|------|
-| `assistant` | 流式正文 |
-| `reasoning` | 推理链（若模型支持） |
+| `conversation_delta` | 流式正文 / 推理（`data.part` 区分，ephemeral，由 hydrate 草稿快照恢复） |
 | `tool_call` / `tool_result` | 工具调用与结果 |
 | `turn_state` | Turn Coordinator 权威生命周期快照 |
 | `hitl_required` | 本地 turn 统一 HITL（`items[]` 含 ask / 审批） |

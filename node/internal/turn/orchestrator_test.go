@@ -364,22 +364,26 @@ func TestRunMessageTurn(t *testing.T) {
 
 	deadline := time.After(2 * time.Second)
 	var text string
-	var gotUsage, gotDone bool
-	for !(gotUsage && gotDone) {
+	var gotUsage bool
+	for !gotUsage {
 		select {
 		case ev := <-ch:
 			switch ev.Type {
+			case "conversation_delta":
+				if ev.Data["part"] == "content" {
+					if c, ok := ev.Data["content"].(string); ok {
+						text += c
+					}
+				}
 			case "assistant":
 				if c, ok := ev.Data["content"].(string); ok {
 					text += c
 				}
 			case "usage":
 				gotUsage = true
-			case "turn_finished":
-				gotDone = true
 			}
 		case <-deadline:
-			t.Fatalf("timeout text=%q usage=%v done=%v", text, gotUsage, gotDone)
+			t.Fatalf("timeout text=%q usage=%v", text, gotUsage)
 		}
 	}
 	if text != "hi" {
@@ -461,8 +465,8 @@ func TestRunMessageTurnToolLoop(t *testing.T) {
 	}
 
 	deadline := time.After(3 * time.Second)
-	var gotToolCall, gotToolResult, gotDone bool
-	for !gotDone {
+	var gotToolCall, gotToolResult bool
+	for !(gotToolCall && gotToolResult) {
 		select {
 		case ev := <-ch:
 			switch ev.Type {
@@ -473,11 +477,9 @@ func TestRunMessageTurnToolLoop(t *testing.T) {
 				if c, ok := ev.Data["content"].(string); !ok || !strings.Contains(c, "file-body") {
 					t.Fatalf("tool result = %+v", ev.Data)
 				}
-			case "turn_finished":
-				gotDone = true
 			}
 		case <-deadline:
-			t.Fatalf("timeout call=%v result=%v done=%v", gotToolCall, gotToolResult, gotDone)
+			t.Fatalf("timeout call=%v result=%v", gotToolCall, gotToolResult)
 		}
 	}
 }
@@ -574,16 +576,10 @@ func TestRunMessageTurnApproval(t *testing.T) {
 	}
 resumeApproval:
 	continueResumeAndDrain(t, orch, context.Background(), "sess-1", &history, map[string]any{"type": "approve"}, pending, 1)
-	for {
-		select {
-		case ev := <-ch:
-			if ev.Type == "turn_finished" {
-				<-done
-				return
-			}
-		case <-deadline:
-			t.Fatal("timeout waiting done")
-		}
+	select {
+	case <-done:
+	case <-deadline:
+		t.Fatal("timeout waiting for resumed orchestrator call")
 	}
 }
 
@@ -911,20 +907,15 @@ func TestRunMessageTurnCancelled(t *testing.T) {
 	cancel()
 	<-done
 
-	deadline := time.After(2 * time.Second)
-	var finish string
-	for finish == "" {
+	for {
 		select {
 		case ev := <-ch:
 			if ev.Type == "turn_finished" {
-				finish, _ = ev.Data["finish_reason"].(string)
+				t.Fatalf("Orchestrator published completion before runtime commit: %+v", ev)
 			}
-		case <-deadline:
-			t.Fatal("timeout waiting for done")
+		default:
+			return
 		}
-	}
-	if finish != "cancelled" {
-		t.Fatalf("finish_reason = %q", finish)
 	}
 }
 
@@ -1059,18 +1050,23 @@ func TestRunMessageTurnLLMError(t *testing.T) {
 	}
 
 	deadline := time.After(2 * time.Second)
-	var gotError, gotDone bool
-	for !(gotError && gotDone) {
+	var gotError bool
+	for !gotError {
 		select {
 		case ev := <-ch:
 			switch ev.Type {
 			case "error":
 				gotError = true
-			case "turn_finished":
-				gotDone = true
 			}
 		case <-deadline:
-			t.Fatalf("timeout error=%v done=%v", gotError, gotDone)
+			t.Fatalf("timeout error=%v", gotError)
 		}
+	}
+	select {
+	case ev := <-ch:
+		if ev.Type == "turn_finished" {
+			t.Fatalf("Orchestrator published completion before runtime commit: %+v", ev)
+		}
+	default:
 	}
 }

@@ -250,7 +250,7 @@ Orchestrator 通过 `SkillAccess{Get, Set}` 回调读写 `loadedSkills`。
 ### 6.2 单步主路径（`runOneStep`）
 
 1. `buildSystemPrompt(sessionID)` + request-only `ContextInjection` → [`BuildSystemPrompt`](../../node/internal/turn/prompt.go)
-2. `llm.StreamChat` → 推送 `assistant` / `reasoning` / `usage`
+2. `llm.StreamChat` → 推送 ephemeral `conversation_delta` 正文 / reasoning 与 replayable `usage`
 3. 若有 `tool_calls` → `processToolCalls`（policy、临时 Agent 工具、skills 工具、auto 批执行）
 4. 无待处理 HITL 且需续跑 → `ScheduleToolResult=true`，由 runtime 在同一 Turn 链内 inline 续跑
 5. 回合结束 → `turn_finished` SSE（语义见 [agent-node-api.md](./agent-node-api.md) §2.4.1）

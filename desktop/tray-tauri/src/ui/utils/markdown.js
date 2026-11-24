@@ -135,21 +135,25 @@ function tokenizeRenderWrapper(source) {
 }
 
 /** Assistant-only renderer. Resource placeholders originate only from Marked link/image tokens. */
-export function renderResourceMarkdown(text) {
+export function renderResourceMarkdown(text, options = {}) {
   const resources = [];
   const previews = [];
-  let renderBlockIndex = 0;
+  let renderBlockIndex = Number.isInteger(options.renderBlockOffset) ? options.renderBlockOffset : 0;
+  const resourceOffset = Number.isInteger(options.resourceOffset) ? options.resourceOffset : 0;
+  const previewOffset = Number.isInteger(options.previewOffset) ? options.previewOffset : 0;
+  const previewLimit = Number.isInteger(options.previewLimit) ? Math.max(0, options.previewLimit) : MAX_PREVIEWS_PER_MESSAGE;
+  const renderKeyPrefix = String(options.renderKeyPrefix || "");
   const source = String(text || "").replace(/\r\n?/g, "\n");
   const resourceRenderer = new marked.Renderer();
   Object.assign(resourceRenderer, renderer);
   resourceRenderer.link = function ({ href, title, tokens }) {
     const target = parseResourceUrl(href || "");
-    const content = this.parser.parseInline(tokens || []);
     if (!target) {
-      if (String(href || "").toLowerCase().startsWith("dagents:")) return content;
+      if (String(href || "").toLowerCase().startsWith("dagents:")) return this.parser.parseInline(tokens || []);
       return renderer.link.call(this, { href, title, tokens });
     }
-    const index = resources.push(target) - 1;
+    const content = this.parser.parseInline(tokens || []);
+    const index = resourceOffset + resources.push(target) - 1;
     return `<span class="resource-placeholder" data-resource-index="${index}" data-resource-kind="${target.type}">${content}</span>`;
   };
   resourceRenderer.image = function ({ href, title, text }) {
@@ -158,22 +162,22 @@ export function renderResourceMarkdown(text) {
       if (String(href || "").toLowerCase().startsWith("dagents:")) return escapeHtml(text || "图片");
       return renderer.image.call(this, { href, title, text });
     }
-    const index = resources.push(target) - 1;
+    const index = resourceOffset + resources.push(target) - 1;
     return `<span class="resource-placeholder" data-resource-index="${index}" data-resource-kind="image">${escapeHtml(text || "图片")}</span>`;
   };
   const renderExtension = {
     name: "dagentsRender",
     level: "block",
-    start(sourceText) {
-      return /^(?= {0,3}<dagents-render\b[^>]*>[ \t]*$)/m.exec(sourceText)?.index;
-    },
+    // Avoid a `start()` scanner here: Marked checks it against the remaining
+    // source for each block, turning ordinary Markdown with no wrapper into
+    // repeated full-tail searches.
     tokenizer: tokenizeRenderWrapper,
     renderer(token) {
       if (token.literal) return escapeHtml(token.raw);
       const maxSize = token.renderType === "svg" ? MAX_SVG_PREVIEW_CHARS_LIMIT : MAX_HTML_PREVIEW_CHARS_LIMIT;
-      if (previews.length >= MAX_PREVIEWS_PER_MESSAGE || token.source.length > maxSize) return escapeHtml(token.raw);
-      const index = previews.push({ type: token.renderType, source: token.source }) - 1;
-      const key = `render-${renderBlockIndex++}`;
+      if (previews.length >= previewLimit || token.source.length > maxSize) return escapeHtml(token.raw);
+      const index = previewOffset + previews.push({ type: token.renderType, source: token.source }) - 1;
+      const key = `${renderKeyPrefix}render-${renderBlockIndex++}`;
       const label = escapeHtml(token.renderType.toUpperCase());
       const sourceHtml = `<div class="markdown-code-block"><div class="markdown-code-block__toolbar"><span class="markdown-code-block__language">${label}</span></div>${renderCodeSource({ text: token.source, lang: token.renderType })}</div>`;
       return [

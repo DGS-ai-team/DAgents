@@ -135,9 +135,7 @@ func (c *Client) endpoint(suffix string) (string, error) {
 		return "", fmt.Errorf("invalid web API base URL")
 	}
 	path := strings.TrimRight(u.Path, "/")
-	if strings.HasSuffix(path, "/v1") {
-		path = strings.TrimSuffix(path, "/v1")
-	}
+	path = strings.TrimSuffix(path, "/v1")
 	u.Path = strings.TrimRight(path, "/") + "/v1/" + strings.TrimLeft(suffix, "/")
 	u.RawPath = ""
 	return u.String(), nil

@@ -23,6 +23,11 @@ import (
 
 func TestHydrateProjectsActiveToolCallUntilTerminal(t *testing.T) {
 	now := time.Now().UTC()
+	st, err := store.Open(filepath.Join(t.TempDir(), "active-tool-hydrate.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
 	r := newLifecycleTestRuntime()
 	r.queue = queue.NewMessageQueue()
 	c := r.turnCoordinator
@@ -41,7 +46,8 @@ func TestHydrateProjectsActiveToolCallUntilTerminal(t *testing.T) {
 	if state.StepStatus != turn.StepStatusExecutingTools || len(state.ActiveToolCalls) != 1 {
 		t.Fatalf("proposed call projection = %+v", state)
 	}
-	manager := NewManager("agent-1", nil, nil, nil, nil, nil, TurnOptions{}, logx.Discard())
+	manager := NewManager("agent-1", nil, nil, nil, nil, st, TurnOptions{}, logx.Discard())
+	defer manager.Stop()
 	manager.sessions[r.session.ID] = r
 	view, err := manager.GetHydrateView(r.session.ID)
 	if err != nil {
@@ -67,11 +73,14 @@ func TestHydrateProjectsActiveToolCallUntilTerminal(t *testing.T) {
 	}
 	assertSingleProjectedCall(t, view, "call-hydrate", "succeeded")
 
-	// Once the runtime commits the assistant/tool messages, hydrate should use
-	// that durable ordering and not append a second projected call.
-	r.messages = []llm.Message{
-		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "call-hydrate", Type: "function", Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"sleep 30"}`}}}},
-		llm.ToolResultMessage("call-hydrate", "bash_run", "done"),
+	// Once the assistant/tool messages are persisted, hydrate uses their durable
+	// identity and suppresses the active projection without changing the ID.
+	assistant := llm.Message{Role: "assistant", RecordID: "step-hydrate/assistant", ToolCalls: []llm.ToolCall{{ID: "call-hydrate", Type: "function", Function: llm.ToolCallFunction{Name: "bash_run", Arguments: `{"command":"sleep 30"}`}}}}
+	result := llm.ToolResultMessage("call-hydrate", "bash_run", "done")
+	result.RecordID = llm.ToolResultRecordID("call-hydrate")
+	r.messages = []llm.Message{assistant, result}
+	if err := st.SaveConversationSnapshot(context.Background(), store.Record{AgentID: r.session.ID, NodeID: r.session.AgentID, Messages: r.messages, RuntimeState: store.RuntimeState{HistoryRevision: 1}}); err != nil {
+		t.Fatal(err)
 	}
 	view, err = manager.GetHydrateView(r.session.ID)
 	if err != nil {
@@ -79,6 +88,12 @@ func TestHydrateProjectsActiveToolCallUntilTerminal(t *testing.T) {
 	}
 	if len(view.Transcript) != 2 || view.Transcript[0]["kind"] != "tool_call" || view.Transcript[1]["kind"] != "tool_result" {
 		t.Fatalf("committed call/result ordering or deduplication = %#v", view.Transcript)
+	}
+	if view.Transcript[0]["item_id"] != "tool-call/call-hydrate" || view.Transcript[0]["id"] != "tool-call/call-hydrate" {
+		t.Fatalf("persisted tool call lost active projection identity continuity: %#v", view.Transcript[0])
+	}
+	if view.Transcript[0]["item_version"] != 1 {
+		t.Fatalf("persisted tool call version = %#v, want row revision 1", view.Transcript[0]["item_version"])
 	}
 }
 
@@ -89,11 +104,84 @@ func assertSingleProjectedCall(t *testing.T, view *HydrateView, id, status strin
 	}
 	entry := view.Transcript[0]
 	data, _ := entry["data"].(map[string]any)
-	if entry["kind"] != "tool_call" || entry["blockId"] != id || data["tool_call_id"] != id {
+	wantItemID := "tool-call/" + id
+	if entry["kind"] != "tool_call" || entry["blockId"] != id || data["tool_call_id"] != id || entry["item_id"] != wantItemID || entry["id"] != wantItemID {
 		t.Fatalf("projected tool call = %#v", entry)
+	}
+	if _, hasVersion := entry["item_version"]; hasVersion {
+		t.Fatalf("live active tool projection claimed an uncommitted item version: %#v", entry)
 	}
 	if len(view.TurnState.ToolExecutions) != 1 || string(view.TurnState.ToolExecutions[0].Status) != status {
 		t.Fatalf("execution status = %#v, want %s", view.TurnState.ToolExecutions, status)
+	}
+}
+
+func TestMergeActiveToolCallsUsesStableIDAndDeduplicates(t *testing.T) {
+	calls := []turn.ToolCallProjection{{ID: "call-duplicate", ToolName: "read_file", Arguments: []byte(`{"path":"x"}`), StepID: "step-1", AssistantMessageID: "step-1/assistant", BatchIndex: 0}}
+	entries := mergeActiveToolCallsAtAnchor(nil, calls)
+	entries = mergeActiveToolCallsAtAnchor(entries, calls)
+	entries = mergeActiveToolCallsAtAnchor(entries, append(calls, calls[0]))
+	if len(entries) != 1 {
+		t.Fatalf("duplicate active projection entries=%#v, want one", entries)
+	}
+	entry := entries[0]
+	if entry["item_id"] != "tool-call/call-duplicate" || entry["id"] != "tool-call/call-duplicate" {
+		t.Fatalf("active projection identity = %#v", entry)
+	}
+	if _, hasVersion := entry["item_version"]; hasVersion {
+		t.Fatalf("active projection fabricated item version: %#v", entry)
+	}
+}
+
+func TestMergeActiveToolCallUsesAssistantOrderAndDoesNotDisappearWhenResultLeads(t *testing.T) {
+	calls := []turn.ToolCallProjection{{
+		ID: "call-anchored", ToolName: "read_file", Arguments: []byte(`{"path":"x"}`),
+		StepID: "step-anchored", AssistantMessageID: "step-anchored/assistant", BatchIndex: 0,
+	}}
+	transcript := []TranscriptEntry{
+		{"kind": "user", "item_id": "input-1", "conversation_ordinal": int64(4)},
+		{
+			"kind": "assistant", "item_id": "step-anchored/assistant/content", "detail_item_id": "step-anchored/assistant",
+			"conversation_ordinal": int64(5), "conversation_entry_index": 0,
+			"round_id": "round-1", "round_ordinal": int64(2), "round_revision_id": "revision-1",
+		},
+		{"kind": "tool_result", "blockId": "call-anchored", "data": map[string]any{"tool_call_id": "call-anchored"}, "conversation_ordinal": int64(6)},
+	}
+	merged := mergeActiveToolCallsAtAnchor(transcript, calls)
+	if len(merged) != 4 || merged[0]["kind"] != "user" || merged[1]["kind"] != "assistant" || merged[2]["kind"] != "tool_call" || merged[3]["kind"] != "tool_result" {
+		t.Fatalf("active tool call was not placed after its assistant parent: %#v", merged)
+	}
+	call := merged[2]
+	if call["item_id"] != "tool-call/call-anchored" || call["parent_item_id"] != "step-anchored/assistant" || call["step_id"] != "step-anchored" || call["tool_batch_index"] != 0 {
+		t.Fatalf("active call identity/anchor = %#v", call)
+	}
+	if call["conversation_ordinal"] != int64(5) || call["conversation_entry_index"] != 1 || call["round_id"] != "round-1" || call["round_revision_id"] != "revision-1" {
+		t.Fatalf("active call order metadata = %#v", call)
+	}
+
+	resultOnly := []TranscriptEntry{
+		{"kind": "user", "item_id": "input-2"},
+		{"kind": "tool_result", "blockId": "call-anchored", "data": map[string]any{"tool_call_id": "call-anchored"}},
+	}
+	merged = mergeActiveToolCallsAtAnchor(resultOnly, calls)
+	if len(merged) != 3 || merged[1]["kind"] != "tool_call" || merged[2]["kind"] != "tool_result" {
+		t.Fatalf("active call was lost or placed after its result: %#v", merged)
+	}
+
+	// Even if another persisted call appears after an early result, the missing
+	// earlier call must not be inserted after that result just to match the
+	// later call's batch index.
+	calls = []turn.ToolCallProjection{
+		{ID: "call-first", ToolName: "read_file", Arguments: []byte(`{"path":"first"}`), BatchIndex: 0},
+		{ID: "call-last", ToolName: "read_file", Arguments: []byte(`{"path":"last"}`), BatchIndex: 2},
+	}
+	transcript = []TranscriptEntry{
+		{"kind": "tool_result", "blockId": "call-first", "data": map[string]any{"tool_call_id": "call-first"}},
+		{"kind": "tool_call", "blockId": "call-last", "data": map[string]any{"tool_call_id": "call-last"}},
+	}
+	merged = mergeActiveToolCallsAtAnchor(transcript, calls)
+	if len(merged) != 3 || merged[0]["kind"] != "tool_call" || merged[0]["blockId"] != "call-first" {
+		t.Fatalf("call was inserted after a leading tool result: %#v", merged)
 	}
 }
 
@@ -289,8 +377,8 @@ func TestHydrateClearBoundaryHidesCancelledCallButRetainsRecoveryFact(t *testing
 		t.Fatal(err)
 	}
 	newView := waitHydrateExecutionStatus(t, restarted, sess.ID, nextCall.ID, turn.ToolExecutionStatusRunning, 8*time.Second)
-	if len(newView.Transcript) != 1 || newView.Transcript[0]["blockId"] != nextCall.ID {
-		t.Fatalf("new turn after clear did not project its tool call: %#v", newView.Transcript)
+	if len(newView.Transcript) != 2 || newView.Transcript[0]["kind"] != "user" || newView.Transcript[0]["text"] != "run a new tool" || newView.Transcript[1]["kind"] != "tool_call" || newView.Transcript[1]["blockId"] != nextCall.ID {
+		t.Fatalf("new turn after clear did not preserve the user message before its active tool call: %#v", newView.Transcript)
 	}
 }
 
@@ -304,6 +392,13 @@ func TestClearMessagesPersistFailureDoesNotPublishPartialSnapshot(t *testing.T) 
 	r.store = st
 	r.logger = logx.Discard()
 	r.messages = []llm.Message{{Role: "user", Content: "before clear"}}
+	r.messages[0].RecordID, err = llm.NewOpaqueRecordID()
+	if err != nil {
+		r.mu.Unlock()
+		t.Fatal(err)
+	}
+	r.noteRecordUpsertLocked(r.messages[0])
+	r.noteCheckpointDirtyLocked()
 	r.historyRevision = 7
 	if err := r.persist(context.Background()); err != nil {
 		t.Fatal(err)
@@ -341,6 +436,45 @@ BEGIN SELECT RAISE(ABORT, 'injected snapshot failure'); END`)
 	}
 	if rec.RuntimeState.HistoryRevision != 7 || rec.RuntimeState.ToolCallProjectionHiddenThroughGeneration != 0 {
 		t.Fatalf("failed clear published partial runtime state: %#v", rec.RuntimeState)
+	}
+}
+
+func TestSuccessfulClearResetsOldHistoryIdentityFailure(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "clear-identity-failure.db")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	r := newLifecycleTestRuntime()
+	r.store = st
+	r.logger = logx.Discard()
+	if err := st.Save(ctx, store.Record{AgentID: r.session.ID, NodeID: r.session.AgentID}); err != nil {
+		t.Fatal(err)
+	}
+	r.deltaMu.Lock()
+	r.historyMutationErr = fmt.Errorf("old transcript identity allocation failed")
+	r.deltaMu.Unlock()
+	manager := NewManager("agent-1", nil, nil, nil, nil, st, TurnOptions{}, r.logger)
+	manager.sessions[r.session.ID] = r
+	if _, err := manager.ClearContext(r.session.ID); err != nil {
+		t.Fatalf("clear failed: %v", err)
+	}
+
+	message := llm.Message{Role: "assistant", Content: "saved after clear", RecordID: "step-after-clear/assistant/content"}
+	r.mu.Lock()
+	r.messages = []llm.Message{message}
+	r.historyRevision++
+	r.noteRecordUpsertLocked(message)
+	r.noteCheckpointDirtyLocked()
+	r.mu.Unlock()
+	if err := r.persist(ctx); err != nil {
+		t.Fatalf("persist after clear: %v", err)
+	}
+	records, err := st.LoadConversationRecords(ctx, r.session.ID)
+	if err != nil || len(records) != 1 || records[0].Content != message.Content {
+		t.Fatalf("records after recovery clear = %+v err=%v", records, err)
 	}
 }
 

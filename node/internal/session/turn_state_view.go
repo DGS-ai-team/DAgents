@@ -12,23 +12,25 @@ import (
 // projection deliberately omits model content and tool arguments so it is
 // safe to publish on the normal per-agent SSE stream.
 type TurnStateView struct {
-	Authority        string                   `json:"authority"`
-	Phase            string                   `json:"phase"`
-	TurnStatus       string                   `json:"turn_status,omitempty"`
-	StepStatus       string                   `json:"step_status,omitempty"`
-	TurnID           string                   `json:"turn_id,omitempty"`
-	StepID           string                   `json:"step_id,omitempty"`
-	StepIndex        int                      `json:"step_index,omitempty"`
-	Generation       uint64                   `json:"generation,omitempty"`
-	LifecycleSeq     uint64                   `json:"lifecycle_seq"`
-	HistoryRevision  uint64                   `json:"history_revision,omitempty"`
-	Terminal         bool                     `json:"terminal"`
-	EndReason        string                   `json:"end_reason,omitempty"`
-	InteractionKind  string                   `json:"interaction_kind,omitempty"`
-	RecoveryRequired bool                     `json:"recovery_required,omitempty"`
-	ModelAttempt     *ModelAttemptView        `json:"model_attempt,omitempty"`
-	Error            *TurnErrorView           `json:"error,omitempty"`
-	ToolExecutions   []turn.ToolExecutionView `json:"tool_executions,omitempty"`
+	Authority          string                   `json:"authority"`
+	Phase              string                   `json:"phase"`
+	TurnStatus         string                   `json:"turn_status,omitempty"`
+	StepStatus         string                   `json:"step_status,omitempty"`
+	TurnID             string                   `json:"turn_id,omitempty"`
+	StepID             string                   `json:"step_id,omitempty"`
+	StepIndex          int                      `json:"step_index,omitempty"`
+	Generation         uint64                   `json:"generation,omitempty"`
+	LifecycleSeq       uint64                   `json:"lifecycle_seq"`
+	HistoryRevision    uint64                   `json:"history_revision,omitempty"`
+	ResultCommitStatus string                   `json:"result_commit_status,omitempty"`
+	ExecutionStopped   bool                     `json:"execution_stopped,omitempty"`
+	Terminal           bool                     `json:"terminal"`
+	EndReason          string                   `json:"end_reason,omitempty"`
+	InteractionKind    string                   `json:"interaction_kind,omitempty"`
+	RecoveryRequired   bool                     `json:"recovery_required,omitempty"`
+	ModelAttempt       *ModelAttemptView        `json:"model_attempt,omitempty"`
+	Error              *TurnErrorView           `json:"error,omitempty"`
+	ToolExecutions     []turn.ToolExecutionView `json:"tool_executions,omitempty"`
 }
 
 type ModelAttemptView struct {
@@ -135,8 +137,18 @@ func (r *runtime) publishTurnState(snapshot turn.CoordinatorSnapshot, command tu
 	// Orchestrator's other events.
 	r.mu.Lock()
 	historyRevision := r.historyRevision
+	resultCommitStatus := r.resultCommitStatus
 	r.mu.Unlock()
-	publisher.Publish(r.session.ID, "turn_state", turnStateEventData(snapshot, r.lifecycleEventSequence(), historyRevision, command))
+	data := turnStateEventData(snapshot, r.lifecycleEventSequence(), historyRevision, command)
+	if resultCommitStatus != "" {
+		data["result_commit_status"] = resultCommitStatus
+	}
+	if r.executionIsStopped() {
+		data["phase"] = "recovery_required"
+		data["execution_stopped"] = true
+		data["recovery_required"] = true
+	}
+	publisher.Publish(r.session.ID, "turn_state", data)
 }
 
 func turnStatePhase(snapshot turn.CoordinatorSnapshot) string {

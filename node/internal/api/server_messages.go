@@ -1,29 +1,68 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/queue"
+	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
 type postMessageRequest struct {
-	AgentID         string              `json:"agent_id"`
+	AgentID           string              `json:"agent_id"`
+	RequestType       string              `json:"request_type"`
+	Content           string              `json:"content"`
+	ContentParts      []llm.ContentPart   `json:"content_parts,omitempty"`
+	FileReferences    []llm.FileReference `json:"file_refs,omitempty"`
+	UserMessageName   string              `json:"user_message_name,omitempty"`
+	ClientRequestID   string              `json:"client_request_id,omitempty"`
+	ConversationEpoch uint64              `json:"conversation_epoch,omitempty"`
+	ResumeValue       map[string]any      `json:"resume_value"`
+}
+
+type postMessageResponse struct {
+	Accepted          bool   `json:"accepted"`
+	AgentID           string `json:"agent_id"`
+	Priority          string `json:"priority"`
+	InputSeq          uint64 `json:"input_seq,omitempty"`
+	InputID           string `json:"input_id,omitempty"`
+	InputRevision     uint64 `json:"input_revision,omitempty"`
+	Status            string `json:"status,omitempty"`
+	ConversationEpoch uint64 `json:"conversation_epoch,omitempty"`
+	Duplicate         bool   `json:"duplicate,omitempty"`
+}
+
+type messageDigestPayload struct {
 	RequestType     string              `json:"request_type"`
 	Content         string              `json:"content"`
 	ContentParts    []llm.ContentPart   `json:"content_parts,omitempty"`
 	FileReferences  []llm.FileReference `json:"file_refs,omitempty"`
-	UserMessageName string              `json:"user_message_name,omitempty"`
-	ResumeValue     map[string]any      `json:"resume_value"`
+	UserMessageName string              `json:"user_message_name"`
 }
 
-type postMessageResponse struct {
-	Accepted bool   `json:"accepted"`
-	AgentID  string `json:"agent_id"`
-	Priority string `json:"priority"`
+func digestMessageRequest(req postMessageRequest, requestType string) (string, error) {
+	payload := messageDigestPayload{
+		RequestType:     requestType,
+		Content:         req.Content,
+		ContentParts:    req.ContentParts,
+		FileReferences:  req.FileReferences,
+		UserMessageName: llm.NormalizeUserMessageName(req.UserMessageName),
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("encode message request digest: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func resolveAgentID(agentID string) (string, error) {
@@ -60,7 +99,31 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	priority, err := s.sessions.EnqueueMessageWithFileReferences(r.Context(), sessionID, requestType, req.Content, req.ContentParts, req.FileReferences, req.ResumeValue, req.UserMessageName)
+	var priority string
+	var inputSeq uint64
+	var inputRevision uint64
+	var receiptStatus string
+	var duplicate bool
+	conversationEpoch := req.ConversationEpoch
+	if requestType == queue.RequestTypeMessage {
+		if strings.TrimSpace(req.ClientRequestID) == "" || len(strings.TrimSpace(req.ClientRequestID)) > 128 || conversationEpoch == 0 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_input_receipt", "message 请求必须包含有效的 client_request_id 与 conversation_epoch", nil)
+			return
+		}
+		digest, digestErr := digestMessageRequest(req, requestType)
+		if digestErr != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_input_receipt", digestErr.Error(), nil)
+			return
+		}
+		receipt, wasDuplicate, enqueueErr := s.sessions.EnqueueMessageWithIdempotency(r.Context(), sessionID, req.Content, req.ContentParts, req.FileReferences, req.UserMessageName, req.ClientRequestID, digest, conversationEpoch)
+		priority, inputSeq, inputRevision, receiptStatus, duplicate, err = string(queue.PriorityHuman), receipt.InputSeq, receipt.InputRevision, receipt.Status, wasDuplicate, enqueueErr
+	} else {
+		priority, inputSeq, err = s.sessions.EnqueueMessageWithReceipt(r.Context(), sessionID, requestType, req.Content, req.ContentParts, req.FileReferences, req.ResumeValue, req.UserMessageName)
+		if inputSeq > 0 {
+			inputRevision = 1
+			receiptStatus = "queued"
+		}
+	}
 	if err != nil {
 		switch err.Error() {
 		case "agent_not_found":
@@ -73,25 +136,230 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request_type", "不支持的 request_type", nil)
 		case "no_pending_hitl":
 			writeAPIError(w, http.StatusConflict, "no_pending_hitl", "当前无等待中的 HITL", nil)
+		case "result_commit_recovery_required":
+			writeAPIError(w, http.StatusConflict, "result_commit_recovery_required", "本轮结果需要恢复，暂不能接收新消息", nil)
+		case "invalid_input_receipt":
+			writeAPIError(w, http.StatusBadRequest, "invalid_input_receipt", "client_request_id、payload 和 conversation_epoch 无效", nil)
+		case "input request id conflict":
+			writeAPIError(w, http.StatusConflict, "input_request_conflict", "相同 client_request_id 已用于不同的消息内容", nil)
+		case "conversation changed":
+			writeAPIError(w, http.StatusConflict, "conversation_changed", "对话已清空或切换，请刷新后重试", nil)
+		case "input box is full":
+			writeAPIError(w, http.StatusTooManyRequests, "input_queue_full", "待处理消息已达到上限，请等待当前任务完成后重试", nil)
+		case "input record is too large":
+			writeAPIError(w, http.StatusRequestEntityTooLarge, "input_too_large", "消息内容过大", nil)
 		default:
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 		}
 		return
 	}
+	inputID := ""
+	if inputSeq > 0 {
+		inputID = llm.InputRecordID(sessionID, inputSeq)
+	}
 	writeJSON(w, http.StatusOK, postMessageResponse{
-		Accepted: true,
-		AgentID:  sessionID,
-		Priority: priority,
+		Accepted:          true,
+		AgentID:           sessionID,
+		Priority:          priority,
+		InputSeq:          inputSeq,
+		InputID:           inputID,
+		InputRevision:     inputRevision,
+		Status:            receiptStatus,
+		ConversationEpoch: conversationEpoch,
+		Duplicate:         duplicate,
 	})
 }
 
+type inputReceiptResponse struct {
+	Found             bool   `json:"found"`
+	InputID           string `json:"input_id,omitempty"`
+	InputSeq          uint64 `json:"input_seq,omitempty"`
+	InputRevision     uint64 `json:"input_revision,omitempty"`
+	Status            string `json:"status,omitempty"`
+	ConversationEpoch uint64 `json:"conversation_epoch"`
+}
+
+func (s *Server) handleGetInputReceipt(w http.ResponseWriter, r *http.Request) {
+	agentID := strings.TrimSpace(r.PathValue("agent_id"))
+	requestID := strings.TrimSpace(r.URL.Query().Get("client_request_id"))
+	epoch, parseErr := strconv.ParseUint(strings.TrimSpace(r.URL.Query().Get("conversation_epoch")), 10, 64)
+	if agentID == "" || requestID == "" || len(requestID) > 128 || parseErr != nil || epoch == 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_input_receipt", "agent_id、client_request_id 和 conversation_epoch 为必填项", nil)
+		return
+	}
+	receipt, found, err := s.sessions.LookupInputReceipt(r.Context(), agentID, requestID, epoch)
+	if err != nil {
+		switch err.Error() {
+		case "agent_not_found":
+			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": agentID})
+		case "conversation changed":
+			writeAPIError(w, http.StatusConflict, "conversation_changed", "对话已清空或切换，请刷新后重试", nil)
+		default:
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
+		}
+		return
+	}
+	response := inputReceiptResponse{Found: found, ConversationEpoch: epoch}
+	if found {
+		response.InputID = llm.InputRecordID(agentID, receipt.InputSeq)
+		response.InputSeq = receipt.InputSeq
+		response.InputRevision = receipt.InputRevision
+		response.Status = receipt.Status
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+type mutateQueuedInputRequest struct {
+	ExpectedRevision uint64              `json:"expected_revision"`
+	Content          string              `json:"content"`
+	ContentParts     []llm.ContentPart   `json:"content_parts,omitempty"`
+	FileReferences   []llm.FileReference `json:"file_refs,omitempty"`
+	UserMessageName  string              `json:"user_message_name,omitempty"`
+}
+
+type queuedInputResponse struct {
+	InputID  string `json:"input_id"`
+	InputSeq uint64 `json:"input_seq"`
+	Revision uint64 `json:"revision"`
+	Status   string `json:"status"`
+}
+
+func queuedInputPath(r *http.Request) (string, uint64, error) {
+	agentID := strings.TrimSpace(r.PathValue("agent_id"))
+	seq, err := strconv.ParseUint(strings.TrimSpace(r.PathValue("input_seq")), 10, 64)
+	if agentID == "" || err != nil || seq == 0 {
+		return "", 0, fmt.Errorf("invalid input identity")
+	}
+	return agentID, seq, nil
+}
+
+func writeQueuedInputError(w http.ResponseWriter, err error) {
+	switch {
+	case err.Error() == "agent_not_found":
+		writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", nil)
+	case err.Error() == "invalid_message":
+		writeAPIError(w, http.StatusBadRequest, "invalid_message", "content 不能为空", nil)
+	case err.Error() == "multimodal_disabled":
+		writeAPIError(w, http.StatusBadRequest, "multimodal_disabled", "多模态未启用", nil)
+	case err.Error() == "result_commit_recovery_required":
+		writeAPIError(w, http.StatusConflict, "result_commit_recovery_required", "本轮结果需要恢复，暂不能修改待处理消息", nil)
+	case errors.Is(err, session.ErrInputNotFound):
+		writeAPIError(w, http.StatusNotFound, "input_not_found", "待处理消息不存在", nil)
+	case errors.Is(err, session.ErrInputNotQueued):
+		writeAPIError(w, http.StatusConflict, "input_already_claimed", "消息已开始处理，无法修改或撤回", nil)
+	case errors.Is(err, session.ErrInputRevisionConflict):
+		writeAPIError(w, http.StatusConflict, "input_revision_conflict", "待处理消息已更新，请刷新后重试", nil)
+	case errors.Is(err, session.ErrInputMutationInProgress):
+		writeAPIError(w, http.StatusConflict, "input_mutation_in_progress", "另一项队列变更正在保存，请稍后重试", nil)
+	default:
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error(), nil)
+	}
+}
+
+func (s *Server) handlePatchQueuedInput(w http.ResponseWriter, r *http.Request) {
+	agentID, seq, err := queuedInputPath(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	var req mutateQueuedInputRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	if req.ExpectedRevision == 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_revision", "expected_revision must be greater than zero", nil)
+		return
+	}
+	record, err := s.sessions.EditQueuedMessage(agentID, seq, req.ExpectedRevision, req.Content, req.ContentParts, req.FileReferences, req.UserMessageName)
+	if err != nil {
+		writeQueuedInputError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, queuedInputResponse{
+		InputID:  agentID + "/input/" + strconv.FormatUint(record.Seq, 10),
+		InputSeq: record.Seq,
+		Revision: record.Revision,
+		Status:   "queued",
+	})
+}
+
+func (s *Server) handleDeleteQueuedInput(w http.ResponseWriter, r *http.Request) {
+	agentID, seq, err := queuedInputPath(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	var req struct {
+		ExpectedRevision uint64 `json:"expected_revision"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	if req.ExpectedRevision == 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_revision", "expected_revision must be greater than zero", nil)
+		return
+	}
+	if err := s.sessions.DeleteQueuedMessage(agentID, seq, req.ExpectedRevision); err != nil {
+		writeQueuedInputError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type inputQueueControlRequest struct {
+	Paused           bool   `json:"paused"`
+	ExpectedRevision uint64 `json:"expected_revision"`
+}
+
+func (s *Server) handleInputQueueControl(w http.ResponseWriter, r *http.Request) {
+	agentID := strings.TrimSpace(r.PathValue("agent_id"))
+	if agentID == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
+		return
+	}
+	var req inputQueueControlRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	if req.ExpectedRevision == 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_revision", "expected_revision must be greater than zero", nil)
+		return
+	}
+	if s.agents != nil {
+		if rec, err := s.agents.Get(r.Context(), agentID); err == nil && rec != nil && !rec.Archived {
+			if err := s.ensureAgentRuntime(r.Context(), agentID); err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "agent_ensure_failed", err.Error(), map[string]any{"agent_id": agentID})
+				return
+			}
+		}
+	}
+	result, err := s.sessions.SetInputQueuePaused(agentID, req.Paused, req.ExpectedRevision)
+	if err != nil {
+		switch {
+		case err.Error() == "agent_not_found":
+			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": agentID})
+		case errors.Is(err, session.ErrQueueControlRevisionConflict):
+			writeAPIError(w, http.StatusConflict, "queue_control_revision_conflict", "待处理队列状态已变化，请刷新后重试", nil)
+		default:
+			writeAPIError(w, http.StatusInternalServerError, "queue_control_failed", err.Error(), nil)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 type cancelTurnResponse struct {
-	AgentID    string `json:"agent_id"`
-	Scope      string `json:"scope"`
-	Cancelled  bool   `json:"cancelled"`
-	TurnID     string `json:"turn_id,omitempty"`
-	Generation uint64 `json:"generation,omitempty"`
-	Terminal   bool   `json:"terminal"`
+	AgentID              string `json:"agent_id"`
+	Scope                string `json:"scope"`
+	Cancelled            bool   `json:"cancelled"`
+	TurnID               string `json:"turn_id,omitempty"`
+	Generation           uint64 `json:"generation,omitempty"`
+	Terminal             bool   `json:"terminal"`
+	QueuePaused          bool   `json:"queue_paused"`
+	QueueControlRevision uint64 `json:"queue_control_revision"`
 }
 
 func (s *Server) handleAgentCancelImpl(w http.ResponseWriter, r *http.Request) {
@@ -104,14 +372,24 @@ func (s *Server) handleAgentCancelImpl(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
 		return
 	}
-	result := s.sessions.CancelTurnWithResult(sessionID)
+	result, queueState, err := s.sessions.StopTurnAndPauseQueue(sessionID)
+	if err != nil {
+		if err.Error() == "agent_not_found" {
+			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
+		} else {
+			writeAPIError(w, http.StatusInternalServerError, "queue_pause_failed", err.Error(), nil)
+		}
+		return
+	}
 	writeJSON(w, http.StatusOK, cancelTurnResponse{
-		AgentID:    sessionID,
-		Scope:      "turn",
-		Cancelled:  result.Cancelled,
-		TurnID:     result.TurnID,
-		Generation: result.Generation,
-		Terminal:   result.Terminal,
+		AgentID:              sessionID,
+		Scope:                "turn",
+		Cancelled:            result.Cancelled,
+		TurnID:               result.TurnID,
+		Generation:           result.Generation,
+		Terminal:             result.Terminal,
+		QueuePaused:          queueState.Paused,
+		QueueControlRevision: queueState.Revision,
 	})
 }
 

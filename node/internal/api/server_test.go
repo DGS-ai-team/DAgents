@@ -145,8 +145,75 @@ func TestHandleAgentCancelExposesTurnScope(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.AgentID != sessionID || got.Scope != "turn" || got.Cancelled || got.Terminal {
+	if got.AgentID != sessionID || got.Scope != "turn" || got.Cancelled || got.Terminal || !got.QueuePaused || got.QueueControlRevision != 2 {
 		t.Fatalf("idle cancel response = %+v", got)
+	}
+}
+
+func TestInputQueueControlPauseResumeUsesCASAndHydrate(t *testing.T) {
+	srv, ts := newTestServer(t)
+	defer ts.Close()
+	sessionID := createTestRuntime(t, srv)
+	postControl := func(body string) *http.Response {
+		t.Helper()
+		resp, err := http.Post(ts.URL+"/v1/agents/"+sessionID+"/inputs/control", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	paused := postControl(`{"paused":true,"expected_revision":1}`)
+	if paused.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(paused.Body)
+		paused.Body.Close()
+		t.Fatalf("pause status=%d body=%s", paused.StatusCode, body)
+	}
+	var control struct {
+		Paused   bool   `json:"queue_paused"`
+		Revision uint64 `json:"queue_control_revision"`
+	}
+	if err := json.NewDecoder(paused.Body).Decode(&control); err != nil {
+		t.Fatal(err)
+	}
+	paused.Body.Close()
+	if !control.Paused || control.Revision != 2 {
+		t.Fatalf("pause control=%+v", control)
+	}
+
+	hydrate, err := http.Get(ts.URL + "/v1/agents/" + sessionID + "/hydrate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hydrated struct {
+		QueuePaused          bool   `json:"queue_paused"`
+		QueueControlRevision uint64 `json:"queue_control_revision"`
+	}
+	if err := json.NewDecoder(hydrate.Body).Decode(&hydrated); err != nil {
+		t.Fatal(err)
+	}
+	hydrate.Body.Close()
+	if !hydrated.QueuePaused || hydrated.QueueControlRevision != 2 {
+		t.Fatalf("hydrate queue control=%+v", hydrated)
+	}
+
+	stale := postControl(`{"paused":false,"expected_revision":1}`)
+	staleBody, _ := io.ReadAll(stale.Body)
+	stale.Body.Close()
+	if stale.StatusCode != http.StatusConflict {
+		t.Fatalf("stale resume status=%d body=%s", stale.StatusCode, staleBody)
+	}
+	resumed := postControl(`{"paused":false,"expected_revision":2}`)
+	if resumed.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resumed.Body)
+		resumed.Body.Close()
+		t.Fatalf("resume status=%d body=%s", resumed.StatusCode, body)
+	}
+	if err := json.NewDecoder(resumed.Body).Decode(&control); err != nil {
+		t.Fatal(err)
+	}
+	resumed.Body.Close()
+	if control.Paused || control.Revision != 3 {
+		t.Fatalf("resume control=%+v", control)
 	}
 }
 
@@ -381,8 +448,8 @@ func TestSessionMessageStreamE2E(t *testing.T) {
 	}
 
 	// 发送消息
-	msgBody := `{"agent_id":"` + sessionID + `","request_type":"message","content":"你好"}`
-	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(msgBody))
+	msgBody := testIdempotentMessageBody(t, sessionID, "你好")
+	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", bytes.NewReader(msgBody))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,6 +490,12 @@ func TestSessionMessageStreamE2E(t *testing.T) {
 			continue
 		}
 		switch envelope.Type {
+		case "conversation_delta":
+			if envelope.Data["part"] == "content" {
+				if c, ok := envelope.Data["content"].(string); ok {
+					assistantText.WriteString(c)
+				}
+			}
 		case "assistant":
 			if c, ok := envelope.Data["content"].(string); ok {
 				assistantText.WriteString(c)
@@ -455,8 +528,8 @@ func TestPostMessageSessionNotFound(t *testing.T) {
 	_, ts := newTestServer(t)
 	defer ts.Close()
 
-	body := `{"agent_id":"sess-missing","request_type":"message","content":"x"}`
-	resp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(body))
+	body := testIdempotentMessageBody(t, "sess-missing", "x")
+	resp, err := http.Post(ts.URL+"/v1/messages", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -472,8 +545,18 @@ func TestPostMessageAcceptsPythonClientFields(t *testing.T) {
 
 	sessionID := createTestRuntime(t, srv)
 
-	body := `{"agent_id":"` + sessionID + `","request_type":"message","content":"hi","client_id":"ignored","source":"ignored"}`
-	resp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(body))
+	body := testIdempotentMessageBody(t, sessionID, "hi")
+	var messageRequest map[string]any
+	if err := json.Unmarshal(body, &messageRequest); err != nil {
+		t.Fatal(err)
+	}
+	messageRequest["client_id"] = "ignored"
+	messageRequest["source"] = "ignored"
+	body, err := json.Marshal(messageRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(ts.URL+"/v1/messages", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,8 +601,8 @@ func TestSessionPersistenceAPI(t *testing.T) {
 
 	sessionID := createTestRuntime(t, srv)
 
-	msgBody := `{"agent_id":"` + sessionID + `","request_type":"message","content":"store-me"}`
-	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(msgBody))
+	msgBody := testIdempotentMessageBody(t, sessionID, "store-me")
+	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", bytes.NewReader(msgBody))
 	if err != nil {
 		t.Fatal(err)
 	}

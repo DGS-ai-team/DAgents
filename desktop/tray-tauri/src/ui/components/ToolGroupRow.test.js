@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import ToolGroupRow from "./ToolGroupRow.vue";
-import { applyToolJobsSnapshot } from "../stores/toolJobs.js";
-import { resetTurnState } from "../stores/turnState.js";
+import * as nodeApi from "../api/node.js";
+import ToolExecBubble from "./ToolExecBubble.vue";
 
 function step(id, name, purpose, status = null) {
   const callEntry = {
@@ -13,17 +13,24 @@ function step(id, name, purpose, status = null) {
   const resultEntry = status
     ? { kind: "tool_result", data: { tool_name: name, tool_call_id: id, status, content: "result" } }
     : null;
-  return { key: id, callEntry, resultEntry, executionHint: status ? "settled" : "active" };
+  const phases = {
+    succeeded: "completed",
+    completed: "completed",
+    denied: "rejected",
+    rejected: "rejected",
+    failed: "failed",
+    error: "failed",
+    cancelled: "cancelled",
+    canceled: "cancelled",
+    timed_out: "cancelled",
+    queued: "background",
+  };
+  return { key: id, callEntry, resultEntry, phase: phases[status] || (status ? "completed" : "running") };
 }
-
-beforeEach(() => {
-  applyToolJobsSnapshot({ running: 0, running_call_ids: [] });
-  resetTurnState();
-});
 
 describe("ToolGroupRow", () => {
   it("keeps an active run in one stable parent row with no collapsed child activity rows", () => {
-    const wrapper = mount(ToolGroupRow, { props: { steps: [step("first", "bash_run", "检查公式")] } });
+    const wrapper = mount(ToolGroupRow, { props: { streamItemKey: "tool-group-first", conversationOrdinal: 4, steps: [step("first", "bash_run", "检查公式")] } });
     const parentKey = wrapper.attributes("class");
     expect(wrapper.get(".tool-group-row__title").text()).toBe("检查公式");
     expect(wrapper.get(".tool-group-row__status").text()).toBe("执行中");
@@ -31,6 +38,8 @@ describe("ToolGroupRow", () => {
     expect(wrapper.find(".tool-group-row__steps").exists()).toBe(false);
     expect(wrapper.findAll(".tool-summary-row")).toHaveLength(0);
     expect(wrapper.get(".tool-group-row__head").attributes("aria-expanded")).toBe("false");
+    expect(wrapper.get(".tool-group-row").attributes("data-stream-item-key")).toBe("tool-group-first");
+    expect(wrapper.get(".tool-group-row").attributes("data-conversation-ordinal")).toBe("4");
     expect(parentKey).toContain("tool-group-row");
     wrapper.unmount();
   });
@@ -56,15 +65,16 @@ describe("ToolGroupRow", () => {
     await child.trigger("click");
     expect(wrapper.get(".tool-summary-row__head").attributes("aria-expanded")).toBe("true");
     const result = { kind: "tool_result", data: { tool_name: "bash_run", tool_call_id: "stable-first", status: "succeeded", content: "done" } };
-    await wrapper.setProps({ steps: [{ ...running, resultEntry: result, executionHint: "settled" }] });
+    await wrapper.setProps({ steps: [{ ...running, resultEntry: result, phase: "completed" }] });
     expect(wrapper.get(".tool-group-row__head").attributes("aria-expanded")).toBe("true");
     expect(wrapper.get(".tool-summary-row__head").attributes("aria-expanded")).toBe("true");
     expect(wrapper.get(".tool-summary-row__status").text()).toBe("已完成");
     await wrapper.get(".tool-group-row__head").trigger("click");
-    expect(wrapper.get(".tool-group-row__steps").isVisible()).toBe(false);
+    expect(wrapper.find(".tool-group-row__steps").exists()).toBe(false);
+    expect(wrapper.findAll(".tool-summary-row")).toHaveLength(0);
     await wrapper.get(".tool-group-row__head").trigger("click");
     expect(wrapper.get(".tool-summary-row__head").attributes("aria-expanded")).toBe("true");
-    expect(wrapper.get(".tool-summary-row__detail").attributes("style") || "").not.toContain("display: none");
+    expect(wrapper.find(".tool-group-row__steps").exists()).toBe(true);
     wrapper.unmount();
   });
 
@@ -86,7 +96,7 @@ describe("ToolGroupRow", () => {
   it("does not report an adapter success as completed when coordinator says cancelled", async () => {
     const cancelled = {
       ...step("cancelled-write", "write_file", "更新审批测试文档", "succeeded"),
-      lifecycleStatus: "cancelled",
+      phase: "cancelled",
     };
     const wrapper = mount(ToolGroupRow, { props: { steps: [cancelled] } });
 
@@ -121,7 +131,7 @@ describe("ToolGroupRow", () => {
     running.unmount();
 
     const pending = step("pending", "bash_run", "待确认的操作");
-    pending.executionHint = "pending";
+    pending.phase = "pending";
     const pendingGroup = mount(ToolGroupRow, { props: { steps: [pending] } });
     expect(pendingGroup.get(".tool-group-row__status").text()).toBe("待确认");
     pendingGroup.unmount();
@@ -143,5 +153,35 @@ describe("ToolGroupRow", () => {
     expect(rows.map((row) => row.find(".tool-summary-row__status").text())).toEqual(["已完成", "执行失败"]);
     expect(rows.map((row) => row.find(".tool-summary-row__text").text())).toEqual(["读取配置", "运行检查"]);
     wrapper.unmount();
+  });
+
+  it("loads full tool details only after the user expands a summarized step", async () => {
+    const request = vi.spyOn(nodeApi, "getConversationRoundToolStep").mockResolvedValue({
+      steps: [{
+        tool_call_id: "lazy-call",
+        call_entry: { kind: "tool_call", id: "tool-call/lazy-call", detail_item_id: "call-record", data: { tool_call_id: "lazy-call", tool_name: "read_file", arguments: { path: "secret.txt" } } },
+        result_entry: { kind: "tool_result", id: "result-lazy-call", data: { tool_call_id: "lazy-call", content: "full result" } },
+      }],
+    });
+    const summarized = step("lazy-call", "read_file", "查看说明");
+    summarized.callEntry.details_available = true;
+    summarized.callEntry.detail_item_id = "call-record";
+    summarized.callEntry.round_id = "round-lazy";
+    summarized.callEntry.round_revision_id = "revision-lazy";
+    const wrapper = mount(ToolGroupRow, { props: { agentId: "agent-lazy", steps: [summarized] } });
+
+    expect(request).not.toHaveBeenCalled();
+    await wrapper.get(".tool-group-row__head").trigger("click");
+    await wrapper.get(".tool-summary-row__head").trigger("click");
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith("agent-lazy", "agent-lazy", "round-lazy", "lazy-call", { revisionId: "revision-lazy", sourceItemId: "call-record" }));
+    expect(wrapper.findComponent(ToolExecBubble).props("resultEntry").data.content).toBe("full result");
+    await wrapper.get(".tool-group-row__head").trigger("click");
+    expect(wrapper.find(".tool-exec-bubble").exists()).toBe(false);
+    await wrapper.get(".tool-group-row__head").trigger("click");
+    expect(wrapper.get(".tool-summary-row__head").attributes("aria-expanded")).toBe("true");
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(wrapper.findComponent(ToolExecBubble).props("resultEntry").data.content).toBe("full result");
+    wrapper.unmount();
+    request.mockRestore();
   });
 });

@@ -4,20 +4,27 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { RouterView, useRoute, useRouter } from 'vue-router'
-import { agentErrorFor, agentSelectionViewTransition, cancelledTurnSummary, canCancelTurnPhase, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, handleAgentNotificationEvent, hasPersistedPartialMessage, isAgentBusy, mergeAgentNotificationSummaries, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, shouldShowTurnStopAction, switchDraft, tabForRoute, turnErrorSummary, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
+import { agentErrorFor, agentSelectionViewTransition, cancelledTurnSummary, canCancelTurnPhase, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopComposerStatus, desktopMenuNames, handleAgentNotificationEvent, hasPersistedPartialMessage, isAgentBusy, mergeAgentNotificationSummaries, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowWorkgroupSidebar, shouldShowTurnStopAction, switchDraft, tabForRoute, turnErrorSummary, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
 import { ResourceRenderContextKey, validateWorkspacePath } from '@desktop-ui/utils/resourceContext.js'
 import { closeTerminalFlow } from './terminal-close.js'
 import { composerPageFadeOutCompletion, composerPageHandoffNeedsFade, composerPageHandoffReady, composerPageSettlementMatches, composerPageVisibility, createComposerPageHandoff } from './composer-surface-motion.js'
 import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, isWindowsPlatform, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
 import { agentMediaId, cancelWorkspaceAttachmentBatch, createWorkspaceAttachmentBatch, isWorkspaceAttachmentBatchCurrent, isWorkspaceRequestCurrent, shouldClearWorkspaceUploadError, workspaceImageBlob } from './workspace-files-state.js'
 import { restoreTranscriptMedia } from './utils/agentMediaRestore.js'
+import { createMediaUrlRegistry } from './utils/mediaUrlRegistry.js'
 import { onConfigurationChanged } from './utils/configurationEvents.js'
 import { createWorkspaceReference, dispatchWorkspaceMessage, hasWorkspaceMessageContent, settleWorkspaceReferences, workspaceReferencesForAgent } from './workspace-references.js'
 import { agentStore } from '@desktop-ui/stores/agent.js'
+import { createConversationStore } from '@desktop-ui/stores/conversationStore.js'
 import { applyRemoteWorkerEvent, currentRemoteWorkerEventVersion, replaceChildrenFromHydrate, setRemoteWorkerParent } from '@desktop-ui/stores/remoteWorkers.js'
-import { expandHitlRequired, approvalRequestKey, buildApprovalSelectionResume, buildMemoryConflictResume, buildUserInfoSubmitResume } from '@desktop-ui/stores/hitl.js'
-import { applyDesktopTurnEvent, applyHydrateTurnState, resetTurnState, turnStateStore } from '@desktop-ui/stores/turnState.js'
+import { approvalRequestKey, buildApprovalSelectionResume, buildMemoryConflictResume, buildUserInfoSubmitResume } from '@desktop-ui/stores/hitl.js'
+import { enqueueHydrateEvent } from '@desktop-ui/utils/hydrateEventBuffer.js'
+import { canManuallyRetryHydrate, hydrateSyncNotice, isHydrateReadError } from '@desktop-ui/utils/hydrateSnapshot.js'
+import { createConversationController } from '@desktop-ui/utils/conversationController.js'
+import { reconcileAgentWatermarks } from '@desktop-ui/utils/conversationWatermarks.js'
 import { createTurnWatchdog } from '@desktop-ui/stores/turnWatchdog.js'
+import { installPerformanceDiagnosticsGlobal, recordSSEEvent, startPerformanceSpan } from '@desktop-ui/stores/performanceDiagnostics.js'
+import { normalComposerIntent } from '@desktop-ui/utils/composerState.js'
 import MainChatPanel from '@desktop-ui/components/MainChatPanel.vue'
 import ResourceMarkdown from '@desktop-ui/components/ResourceMarkdown.vue'
 import UiIcon from '@desktop-ui/components/UiIcon.vue'
@@ -36,10 +43,11 @@ import ApprovalBubble from '@desktop-ui/components/ApprovalBubble.vue'
 import WorkspaceReferenceAttachments from './components/WorkspaceReferenceAttachments.vue'
 import WorkspaceFiles from './components/WorkspaceFiles.vue'
 import BrowserViewer from './components/BrowserViewer.vue'
+import ConversationHistoryPanel from './components/ConversationHistoryPanel.vue'
 import WorkgroupWorkspace from './components/WorkgroupWorkspace.vue'
 import AutoOverviewPanel from './components/AutoOverviewPanel.vue'
 import TopLeftSlotIcon from './components/TopLeftSlotIcon.vue'
-import { cancelAgentTurn, clearContext, closeAgentTerminal, compressContext, deleteAgent, getAgent, getAgentModelView, getSetupConfig, patchAgent, submitMessage, unsubscribeWorkgroup } from '@desktop-ui/api/node.js'
+import { cancelAgentTurn, clearContext, closeAgentTerminal, compressContext, deleteAgent, editQueuedMessage, getAgent, getAgentModelView, getAgentWatermarks, getSetupConfig, newClientRequestId, patchAgent, setInputQueuePaused, submitMessage, unsubscribeWorkgroup, withdrawQueuedMessage } from '@desktop-ui/api/node.js'
 import { confirmDesktopAction } from '@desktop-ui/utils/desktopDialogs.js'
 import { agentActiveProfile } from '@desktop-ui/utils/agentLLM.js'
 import { dispatchDesktopSlashCommand } from './slash-commands.js'
@@ -89,13 +97,20 @@ const workgroupSettingsLoaded = ref(false)
 const agents = ref([])
 const agentNotificationProjections = ref({})
 const activeId = ref('')
-const hydrate = ref(null)
+const conversationStore = createConversationStore()
+const turnStateStore = conversationStore.turnState
+const hydrate = conversationStore.hydrate
+const hydrateSyncStatus = conversationStore.syncStatus
+const activeHydrateContentRevision = conversationStore.contentRevision
+const activeHydrateConversationRevision = conversationStore.conversationRevision
 const llmSettings = ref(null)
 const llmProfileCatalog = ref([])
 const composerToolbar = ref(null)
 const input = ref('')
 const busyByAgent = ref({})
+const messageSubmitPendingByAgent = ref({})
 const cancellingByAgent = ref({})
+const queueControlPending = ref(false)
 const hitlBusyIndexByAgent = ref({})
 const agentErrors = ref({})
 const globalError = ref('')
@@ -114,6 +129,7 @@ function showCommandNotice(message) {
   commandNoticeTimer = window.setTimeout(clearCommandNotice, 4200)
 }
 const busy = computed(() => isAgentBusy(busyByAgent.value, activeId.value))
+const messageSubmitPending = computed(() => Boolean(messageSubmitPendingByAgent.value[activeId.value]))
 const cancellingTurn = computed(() => isAgentBusy(cancellingByAgent.value, activeId.value))
 const hitlBusyIndex = computed(() => Number.isInteger(hitlBusyIndexByAgent.value[activeId.value]) ? hitlBusyIndexByAgent.value[activeId.value] : -1)
 const error = computed({
@@ -124,8 +140,11 @@ const error = computed({
   },
 })
 const workspaceUploadErrors = new Map()
-const streamingText = ref('')
-const partialHydrateRetryTurns = new Set()
+const activeAssistantDraftText = computed(() => conversationStore.assistantDraftText(activeId.value, activeHydrationSequence))
+const hasAssistantOutput = computed(() => conversationStore.hasAssistantDraftOutput(activeId.value, activeHydrationSequence))
+const activeReadingWindow = computed(() => conversationStore.readingWindow.value)
+const chatItemsRevision = conversationStore.itemsRevision
+const chatEntriesChange = conversationStore.entriesChange
 const textarea = ref(null)
 const attachmentActionsOpen = ref(false)
 const attachmentActionAnchor = ref(null)
@@ -150,10 +169,12 @@ const workspaceOpenedByAgent = ref({})
 const workspaceNameByAgent = ref({})
 const browserOpenedByAgent = ref({})
 const browserNameByAgent = ref({})
+const historyOpenedByAgent = ref({})
 const workspaceOpened = computed({ get: () => Boolean(workspaceOpenedByAgent.value[activeId.value]), set: value => { if (activeId.value) workspaceOpenedByAgent.value[activeId.value] = Boolean(value) } })
 const workspaceName = computed({ get: () => workspaceNameByAgent.value[activeId.value] || '工作区', set: value => { if (activeId.value) workspaceNameByAgent.value[activeId.value] = String(value || '工作区') } })
 const browserOpened = computed({ get: () => Boolean(browserOpenedByAgent.value[activeId.value]), set: value => { if (activeId.value) browserOpenedByAgent.value[activeId.value] = Boolean(value) } })
 const browserName = computed({ get: () => browserNameByAgent.value[activeId.value] || '浏览器', set: value => { if (activeId.value) browserNameByAgent.value[activeId.value] = String(value || '浏览器') } })
+const historyOpened = computed({ get: () => Boolean(historyOpenedByAgent.value[activeId.value]), set: value => { if (activeId.value) historyOpenedByAgent.value[activeId.value] = Boolean(value) } })
 const collapsedGroup = ref('')
 const terminalConnectionId = ref('')
 const terminalInstances = ref([])
@@ -174,7 +195,6 @@ const dockDraft = ref('')
 const inputDrafts = ref({})
 const dockDrafts = ref({})
 const failedSendDrafts = ref({})
-const pendingUserByAgent = ref({})
 const dockExpanded = ref(false)
 const dockCollapsed = ref(false)
 const dockOccupiedHeight = ref(0)
@@ -212,6 +232,9 @@ watch(activeId, (id, previousId) => {
     composerWriteProgress.value = null
   }
   if (id !== previousId) clearCommandNotice()
+  if (previousId && id !== previousId) void nextTick(() => {
+    if (activeId.value !== previousId) mediaUrlRegistry.release(previousId)
+  })
   if (id !== previousId) resourceNavigationError.value = ''
   if (previousId && id !== previousId) clearWorkspaceAnnotations(previousId)
   if (previousId && id !== previousId) terminalEndConfirmation.value = null
@@ -258,6 +281,11 @@ const openMenu = ref('')
 const entryContextMenu = ref(null)
 const removingWorkgroupId = ref('')
 const dialog = ref('')
+const queuedInputEdit = ref(null)
+const queuedInputEditText = ref('')
+const queuedInputEditError = ref('')
+const queuedInputMutationId = ref('')
+const queuedInputEditField = ref(null)
 const autoOverviewPanel = ref(null)
 const deletingAgentId = ref('')
 const autoOverviewActionError = ref('')
@@ -282,7 +310,6 @@ const pendingImages = computed({
 })
 const attachmentLimitReached = computed(() => pendingImages.value.length + pendingFiles.value.length + pendingWorkspaceReferences.value.length >= 8)
 const imageAttachmentInput = ref(null)
-let unlisten = null
 let unlistenWorkspaceWrite = null
 let unlistenTerminal = null
 let unlistenWindowResize = null
@@ -290,24 +317,38 @@ let unlistenWindowFocus = null
 let unlistenConfigurationChanged = null
 let selectionEpoch = 0
 let activeHydrationSequence = 0
+let nativeWebviewGeneration = 0
 let manageSettingsRequestSequence = 0
 let resourceNavigationEpoch = 0
 const resourceNavigationError = ref('')
-let sendSequence = 0
 let modelRequestSequence = 0
 let pollTimer = null
 let summaryRefreshTimer = 0
 let agentListRefreshSequence = 0
 let agentNotificationChangeVersion = 0
+let agentWatermarkTimer = 0
+let agentWatermarkFlight = null
+let agentWatermarkEpoch = ''
+let agentWatermarkEpochVersion = 0
+let agentWatermarkPollingEnabled = false
+let desktopWindowFocused = true
 let resourceRefreshTimer = 0
-let activeHydrateTimer = 0
+let activeHydrateNoticeTimer = 0
+const conversationController = createConversationController({
+  isCurrent: (agentId, generation) => activeId.value === agentId && activeHydrationSequence === generation,
+  stageDeferredEvents: stageDeferredActiveAgentEvents,
+  applyEvent: applyOrderedDesktopNodeEvent,
+  run: (agentId, generation) => hydrateAgentSnapshot(agentId, generation).catch(e => {
+    if (activeId.value === agentId && activeHydrationSequence === generation) error.value = String(e)
+  }),
+})
 let workspaceConnectionState = ''
 let composerResizeObserver = null
 let terminalDialogRequestEpoch = 0
 let terminalSessionListEpoch = 0
 let terminalChannelRequestEpoch = 0
 const terminalDecoders = new Map()
-const mediaObjectUrls = new Map()
+const mediaUrlRegistry = createMediaUrlRegistry()
 const currentWindow = isTauri ? getCurrentWindow() : null
 const workspaceScope = computed(() => workspaceNodeIdentity.value)
 
@@ -319,28 +360,45 @@ const failedSendDraft = computed(() => failedSendDrafts.value[activeId.value] ||
 const normalAgents = computed(() => agents.value.filter(a => a.agent_type !== 'auto'))
 const autoAgents = computed(() => agents.value.filter(a => a.agent_type === 'auto'))
 const fullTranscript = computed(() => hydrate.value?.transcript || [])
-const chatEntries = computed(() => desktopChatEntries(activeId.value, fullTranscript.value, pendingUserByAgent.value[activeId.value]))
-const hitlQueue = computed(() => {
-  const expanded = expandHitlRequired(pending.value)
-  return desktopHitlQueue(expanded)
-})
-const canSendMessage = computed(() => !hitlQueue.value.length || hitlQueue.value.some(item => item.kind === 'user_information'))
+const chatEntries = conversationStore.entries
+function localPendingUsersForAgent(agentId) {
+  return conversationStore.pendingInputsForAgent(agentId)
+}
+function setLocalPendingUsersForAgent(agentId, pending) {
+  conversationStore.replacePendingInputs(agentId, pending)
+}
+function rebuildChatItemSnapshot(agentId = activeId.value) {
+  return conversationStore.replaceVisibleItems(agentId, activeHydrationSequence)
+}
+const hitlQueue = conversationStore.hitlQueue
 const lastToolActivity = computed(() => [...fullTranscript.value].reverse().find(m => ['tool_call', 'tool_result'].includes(m.kind)))
 const lastConversationMessage = computed(() => [...fullTranscript.value].reverse().find(m => m.kind === 'user' || m.kind === 'assistant'))
 const dockLatestMessage = computed(() => {
-  const text = streamingText.value || lastConversationMessage.value?.text || ''
-  return text ? { kind: streamingText.value ? 'assistant' : lastConversationMessage.value?.kind || 'assistant', text, agent_id: activeId.value } : null
+  const liveText = activeAssistantDraftText.value
+  const text = liveText || lastConversationMessage.value?.text || ''
+  return text ? { kind: liveText ? 'assistant' : lastConversationMessage.value?.kind || 'assistant', text, agent_id: activeId.value } : null
 })
-const pending = computed(() => hydrate.value?.pending_hitl || null)
-watch([activeId, fullTranscript], ([id, transcript]) => {
-  const pendingUser = pendingUserByAgent.value[id]
-  if (!pendingUser) return
-  const start = Math.max(0, Number(pendingUser.baseTranscriptLength) || 0)
-  if (!transcript.slice(start).some(entry => entry?.kind === 'user' && String(entry.text || '') === String(pendingUser.text || ''))) return
-  const next = { ...pendingUserByAgent.value }
-  delete next[id]
-  pendingUserByAgent.value = next
+const pending = conversationStore.pendingHitl
+watch([activeId, fullTranscript, () => hydrate.value?.pending_inputs], ([id, transcript, pendingInputs]) => {
+  const local = localPendingUsersForAgent(id)
+  if (!local.length) return
+  const durablePendingIds = new Set((Array.isArray(pendingInputs) ? pendingInputs : []).map(item => String(item?.input_id || '')).filter(Boolean))
+  const durableRequestIds = new Set((Array.isArray(pendingInputs) ? pendingInputs : []).map(item => String(item?.client_request_id || '')).filter(Boolean))
+  const transcriptIds = new Set((Array.isArray(transcript) ? transcript : []).map(item => String(item?.item_id || '')).filter(Boolean))
+  const transcriptRequestIds = new Set((Array.isArray(transcript) ? transcript : []).map(item => String(item?.client_request_id || '')).filter(Boolean))
+  const nextLocal = local.filter(item => {
+    const itemId = String(item?.item_id || item?.input_id || '')
+    if (itemId && (durablePendingIds.has(itemId) || transcriptIds.has(itemId))) return false
+    const requestId = String(item?.client_request_id || '')
+    if (requestId && (durableRequestIds.has(requestId) || transcriptRequestIds.has(requestId))) return false
+    return true
+  })
+  if (nextLocal.length === local.length) return
+  setLocalPendingUsersForAgent(id, nextLocal)
 }, { flush: 'post' })
+watch([activeId, () => hydrate.value?.transcript, () => hydrate.value?.pending_inputs, () => conversationStore.pendingInputsRevision.value], () => {
+  rebuildChatItemSnapshot()
+}, { flush: 'post', immediate: true })
 const approvalQueueIndex = computed(() => hitlQueue.value.findIndex(item => item.kind === 'approval'))
 const dockPendingKind = computed(() => {
   if (turnStateStore.phase === 'waiting_user' || hitlQueue.value.some(item => item.kind === 'user_information')) return 'user_input'
@@ -350,24 +408,42 @@ const dockPendingKind = computed(() => {
 const canCancelTurn = computed(() => canCancelTurnPhase(turnStateStore.phase))
 const turnInProgress = computed(() => busy.value || cancellingTurn.value || canCancelTurn.value)
 const agentGenerating = computed(() => shouldShowTurnStopAction(turnStateStore.phase, busy.value, cancellingTurn.value))
+const composerIntent = computed(() => normalComposerIntent({
+  // waiting_user is still an active turn even though its composer action stays
+  // in send mode; do not derive queue behavior from stop-button visibility.
+  turnRunning: turnInProgress.value,
+  interactionPending: hitlQueue.value.length > 0,
+}))
+const canSendMessage = computed(() => composerIntent.value !== 'blocked')
 const canStopFromComposer = computed(() => canCancelTurn.value && turnStateStore.phase !== 'waiting_user')
 const composerRuntimeStatus = computed(() => desktopComposerStatus({
   generating: turnInProgress.value,
   cancelling: cancellingTurn.value,
-  streamingText: streamingText.value,
+  hasAssistantOutput: hasAssistantOutput.value,
   turnState: turnStateStore,
 }))
+const hydrateSyncNoticeState = computed(() => hydrateSyncNotice(hydrateSyncStatus.value))
+const hydrateSyncNoticeText = computed(() => hydrateSyncNoticeState.value === 'syncing'
+  ? '正在同步结果'
+  : hydrateSyncNoticeState.value === 'failed'
+    ? '结果暂未同步'
+    : hydrateSyncNoticeState.value === 'commit_failed'
+      ? '本轮结果保存未成功'
+      : '')
+const canRetryHydrateSync = computed(() => canManuallyRetryHydrate(hydrateSyncStatus.value.phase))
+const queuedInputsPaused = computed(() => Boolean(hydrate.value?.queue_paused) && (Array.isArray(hydrate.value?.pending_inputs) ? hydrate.value.pending_inputs.length : 0) > 0)
+const composerStatusLabel = computed(() => hydrateSyncNoticeText.value || (queuedInputsPaused.value ? '待处理消息已暂停' : composerRuntimeStatus.value))
 const turnError = computed(() => cancelledTurnSummary(turnStateStore)
   || (turnStateStore.error
     ? turnErrorSummary(turnStateStore.error, {
-      partial: Boolean(streamingText.value) || (turnStateStore.error.incomplete && hasPersistedPartialMessage(hydrate.value?.transcript)),
+      partial: hasAssistantOutput.value || (turnStateStore.error.incomplete && hasPersistedPartialMessage(hydrate.value?.transcript)),
       retryCount: Math.max(0, (turnStateStore.modelAttempt?.attempt || 1) - 1),
     })
     : ''))
 const modelRecoveryAvailable = computed(() => Boolean(turnStateStore.error?.code?.startsWith('provider_')))
 const turnWatchdog = createTurnWatchdog({
   isAwaiting: () => Boolean(activeId.value && status.value.online),
-  hasStuckStatus: () => turnInProgress.value || (Boolean(streamingText.value) && !turnStateStore.terminal),
+  hasStuckStatus: () => turnInProgress.value || (hasAssistantOutput.value && !turnStateStore.terminal),
   onStuck: async () => {
     const id = activeId.value
     if (!id) return
@@ -414,7 +490,7 @@ const composerMode = computed(() => composerModeForTab(activeTab.value))
 
 watch(activeTab, (tab, previousTab) => {
   if (previousTab != null && tab !== previousTab) clearWorkspaceAnnotations()
-  if (['chat', 'terminal', 'file', 'browser'].includes(tab)) {
+  if (['chat', 'terminal', 'file', 'browser', 'history'].includes(tab)) {
     const next = new Set(visitedTabs.value)
     next.add(tab)
     visitedTabs.value = next
@@ -630,6 +706,258 @@ async function refreshAgentSummaries() {
     }
   } catch { /* Keep the last known sidebar state until the next Node event or reconnect. */ }
 }
+function processDesktopNodeEvent(event) {
+  let applied = false
+  try {
+    (() => {
+      if (event.event_type === 'resync_required') {
+        if (summaryRefreshTimer) clearTimeout(summaryRefreshTimer)
+        summaryRefreshTimer = window.setTimeout(() => { summaryRefreshTimer = 0; void refreshAgentSummaries() }, 0)
+        if (activeId.value) scheduleActiveAgentHydrate(activeId.value, 0, null, true)
+        return
+      }
+      if (event.event_type === 'notification_changed') {
+        const projection = handleAgentNotificationEvent(
+          agents.value,
+          agentNotificationProjections.value,
+          event,
+          agentNotificationChangeVersion,
+        )
+        agents.value = projection.agents
+        agentNotificationProjections.value = projection.projectionsByAgent
+        agentNotificationChangeVersion = projection.version
+        if (projection.shouldRefreshSummaries) {
+          if (summaryRefreshTimer) clearTimeout(summaryRefreshTimer)
+          summaryRefreshTimer = window.setTimeout(() => { summaryRefreshTimer = 0; void refreshAgentSummaries() }, 0)
+        }
+        return
+      }
+      if (event.agent_id !== activeId.value) {
+        const row = agents.value.find(agent => agent.agent_id === event.agent_id)
+        if (event.event_type === 'hitl_required' && row) row.has_pending_hitl = true
+        if (['hitl_required', 'turn_finished', 'turn_state', 'error'].includes(event.event_type)) {
+          if (summaryRefreshTimer) clearTimeout(summaryRefreshTimer)
+          summaryRefreshTimer = window.setTimeout(() => { summaryRefreshTimer = 0; void refreshAgentSummaries() }, 250)
+        }
+        return
+      }
+      turnWatchdog.noteActivity()
+      const reduction = conversationStore.applyActiveNodeEvent(event, {
+        agentId: activeId.value,
+        generation: activeHydrationSequence,
+      })
+      if (reduction.kind === 'ignored') return
+      if (reduction.kind === 'patch') {
+        if (reduction.accepted) {
+          conversationController.coverWithPatch(
+            activeId.value,
+            activeHydrationSequence,
+            event.data,
+            event.agent_seq,
+          )
+        }
+        return
+      }
+      if (reduction.kind === 'draft') {
+        if (!reduction.accepted && reduction.reason === 'invalid_delta') {
+          scheduleActiveAgentHydrate(activeId.value, 0, event.data, true)
+          return
+        }
+        if (!reduction.accepted && reduction.reason === 'missing_sequence') {
+          const recovery = conversationStore.claimDraftGapRecovery({
+            agentId: activeId.value,
+            generation: activeHydrationSequence,
+            itemId: reduction.itemId,
+            attemptId: reduction.attemptId,
+            part: reduction.part,
+          })
+          if (recovery.shouldRecover) {
+            scheduleActiveAgentHydrate(activeId.value, 0, event.data, true)
+          }
+        }
+        return
+      }
+      if (reduction.stale) return
+      applyRemoteWorkerEvent(event.event_type, event.data)
+      if (reduction.retiredDrafts?.removedItemIds.length) {
+        rebuildChatItemSnapshot(event.agent_id)
+      }
+      if (event.event_type === 'runtime/notice' && event.data?.message_kind === 'context_boundary') {
+        void selectAgent(event.agent_id)
+        return
+      }
+      if (['turn_state', 'turn_finished', 'hitl_required', 'tool_call', 'tool_result', 'error'].includes(event.event_type)) {
+        if (['tool_result', 'turn_finished'].includes(event.event_type)) {
+          if (resourceRefreshTimer) clearTimeout(resourceRefreshTimer)
+          resourceRefreshTimer = window.setTimeout(() => {
+            resourceRefreshTimer = 0
+            if (resourcePageActive('file')) void workspaceFilesPanel.value?.refreshResources?.('tool')
+            if (resourcePageActive('browser')) void browserViewerPanel.value?.refreshResources?.('tool')
+          }, 300)
+        }
+        const eventAgentId = event.agent_id
+        if (activeId.value !== eventAgentId) return
+        if (conversationStore.conversationPatchCoversEvent(event, {
+          agentId: eventAgentId,
+          generation: activeHydrationSequence,
+        })) return
+        const terminalEvent = ['turn_finished', 'hitl_required', 'error'].includes(event.event_type)
+        scheduleActiveAgentHydrate(eventAgentId, terminalEvent ? 0 : 120, event)
+      }
+    })()
+    noteAppliedAgentSeq(event)
+    applied = true
+  } catch (e) {
+    console.error('Failed to apply Node event:', e)
+    if (event?.agent_id && activeId.value === event.agent_id) {
+      scheduleActiveAgentHydrate(event.agent_id, 0, event.data, true)
+    }
+  }
+  return applied
+}
+
+function drainActiveHydrateEventBuffer(buffer, snapshot = null, coverageValid = false) {
+  return conversationController.drainEventBuffer(buffer, {
+    agentId: activeId.value,
+    generation: activeHydrationSequence,
+    streamEpoch: snapshot?.stream_epoch || agentWatermarkEpoch || '',
+    coveredAgentSeq: snapshot?.covered_agent_seq,
+    coveredStreamSeq: snapshot?.covered_stream_seq,
+    coverageValid,
+  })
+}
+
+function drainDeferredActiveAgentEvents(agentId) {
+  while (true) {
+    const next = conversationStore.takeNextAgentEvent({
+      agentId,
+      generation: activeHydrationSequence,
+      appliedSequence: conversationStore.appliedAgentSequence(agentId),
+    })
+    if (!next) break
+    if (!processDesktopNodeEvent(next.event)) return
+  }
+  if (conversationStore.hasDeferredAgentEvents(agentId, activeHydrationSequence) && activeId.value === agentId) {
+    scheduleActiveAgentHydrate(agentId, 0, null, true)
+  }
+}
+
+function applyOrderedDesktopNodeEvent(event) {
+  const agentId = String(event?.agent_id || '')
+  if (!agentId || agentId !== activeId.value) return processDesktopNodeEvent(event)
+  const eventEpoch = String(event?.stream_epoch || '')
+  if (agentWatermarkEpoch && eventEpoch && eventEpoch !== agentWatermarkEpoch) {
+    scheduleActiveAgentHydrate(agentId, 0, event?.data, true)
+    return false
+  }
+
+  const result = conversationStore.offerAgentEvent(event, {
+    agentId,
+    generation: activeHydrationSequence,
+    appliedSequence: conversationStore.appliedAgentSequence(agentId),
+  })
+  if (result.action === 'duplicate') return false
+  if (result.action === 'buffered') {
+    scheduleActiveAgentHydrate(agentId, 0, event?.data, true)
+    return false
+  }
+  if (!processDesktopNodeEvent(event)) return false
+  drainDeferredActiveAgentEvents(agentId)
+  return true
+}
+
+function stageDeferredActiveAgentEvents(buffer) {
+  if (!buffer) return
+  const deferred = conversationStore.takeDeferredAgentEvents({ agentId: buffer.agentId, generation: buffer.generation })
+  for (const event of deferred.events) enqueueHydrateEvent(buffer, event)
+  if (deferred.overflow) buffer.overflow = true
+}
+
+function noteAppliedAgentSeq(event) {
+  const agentId = String(event?.agent_id || '').trim()
+  if (!agentId) return
+  const cursor = conversationStore.noteAppliedAgentSequence(agentId, event?.agent_seq)
+  if (cursor.gap && !cursor.gapWasPresent) {
+    if (activeId.value === agentId) {
+      conversationStore.clearAgentSequenceGap(agentId)
+      scheduleActiveAgentHydrate(agentId, 0, { data: { agent_seq: cursor.sequence } }, true)
+    } else {
+      if (summaryRefreshTimer) clearTimeout(summaryRefreshTimer)
+      summaryRefreshTimer = window.setTimeout(() => {
+        summaryRefreshTimer = 0
+        void refreshAgentSummaries()
+      }, 0)
+    }
+  }
+}
+function adoptAgentWatermarkEpoch(epochValue) {
+  const epoch = String(epochValue || '')
+  if (!epoch) return false
+  const changedFromKnownEpoch = Boolean(agentWatermarkEpoch && agentWatermarkEpoch !== epoch)
+  if (agentWatermarkEpoch !== epoch) agentWatermarkEpochVersion += 1
+  const changed = changedFromKnownEpoch
+  if (changed) {
+    conversationStore.resetAgentSequences()
+    // Agent SSE cursors are process-local. Do not let a high sequence from the
+    // previous Node process pin the active hydrate target after restart.
+    conversationController.resetAgentSequenceTarget(activeId.value, activeHydrationSequence)
+  }
+  agentWatermarkEpoch = epoch
+  return changed
+}
+async function pollAgentWatermarks() {
+  if (!status.value.online || status.value.setup_required) return
+  if (agentWatermarkFlight) return agentWatermarkFlight
+  agentWatermarkFlight = (async () => {
+    const response = await getAgentWatermarks()
+    if (!agentWatermarkPollingEnabled) return
+    const epoch = String(response?.stream_epoch || '')
+    if (!epoch) return
+    const epochChanged = adoptAgentWatermarkEpoch(epoch)
+    reconcileAgentWatermarks(response, {
+      activeAgentId: activeId.value,
+      epochChanged,
+      store: conversationStore,
+      localConversationRevision: id => id === activeId.value
+        ? Math.max(activeHydrateConversationRevision.value, Number(hydrate.value?.conversation_revision) || 0)
+        : 0,
+      hydrateActive: (id, watermark, force) => scheduleActiveAgentHydrate(
+        id,
+        0,
+        watermark ? { data: watermark } : null,
+        force,
+      ),
+      refreshBackground: () => {
+      if (summaryRefreshTimer) clearTimeout(summaryRefreshTimer)
+      summaryRefreshTimer = window.setTimeout(() => {
+        summaryRefreshTimer = 0
+        void refreshAgentSummaries()
+      }, 0)
+      },
+    })
+  })().catch(() => {
+    // A missed watermark request is retried by the next connection-level poll;
+    // the bounded hydrate retry state remains owned by hydrateAgentSnapshot.
+  }).finally(() => {
+    agentWatermarkFlight = null
+  })
+  return agentWatermarkFlight
+}
+function scheduleAgentWatermarkPoll(delay = null) {
+  if (!agentWatermarkPollingEnabled) return
+  if (agentWatermarkTimer) window.clearTimeout(agentWatermarkTimer)
+  const background = document.visibilityState === 'hidden' || !desktopWindowFocused
+  const nextDelay = delay == null ? (background ? 60000 : 15000) : Math.max(0, delay)
+  agentWatermarkTimer = window.setTimeout(async () => {
+    agentWatermarkTimer = 0
+    await pollAgentWatermarks()
+    if (agentWatermarkPollingEnabled) scheduleAgentWatermarkPoll()
+  }, nextDelay)
+}
+function onDocumentVisibilityChange() {
+  if (document.visibilityState !== 'hidden' && desktopWindowFocused) scheduleAgentWatermarkPoll(0)
+  else scheduleAgentWatermarkPoll(60000)
+}
 async function refreshAgentModel(id) {
   const requestSequence = ++modelRequestSequence
   if (!id) { llmSettings.value = null; return }
@@ -643,64 +971,163 @@ async function refreshAgentModel(id) {
   }
 }
 async function restoreAgentMedia(snapshot, agentId) {
+  const lease = mediaUrlRegistry.begin(agentId)
   const loadSource = async source => {
     const raw = String(source || '')
     if (raw.startsWith('data:') || raw.startsWith('blob:')) return raw
     const mediaId = agentMediaId(source, agentId)
     if (!mediaId) return ''
-    const key = `${agentId}/${mediaId}`
-    if (mediaObjectUrls.has(key)) return mediaObjectUrls.get(key)
-    const blob = await readAgentMedia(agentId, mediaId)
-    const objectUrl = URL.createObjectURL(blob)
-    mediaObjectUrls.set(key, objectUrl)
-    if (mediaObjectUrls.size > 64) {
-      const [oldKey, oldUrl] = mediaObjectUrls.entries().next().value
-      mediaObjectUrls.delete(oldKey)
-      URL.revokeObjectURL(oldUrl)
+    return mediaUrlRegistry.acquire(lease, mediaId, () => readAgentMedia(agentId, mediaId))
+  }
+  try {
+    return { snapshot: await restoreTranscriptMedia(snapshot, loadSource), lease }
+  } catch (cause) {
+    mediaUrlRegistry.discard(lease)
+    throw cause
+  }
+}
+function hydrateAgentSnapshot(id, ownerSequence = activeHydrationSequence) {
+  if (!id || activeId.value !== id || ownerSequence !== activeHydrationSequence) return Promise.resolve()
+  return conversationController.runSingleFlight(id, ownerSequence, async () => {
+    conversationController.markDirty(id, ownerSequence)
+    if (activeHydrateNoticeTimer) clearTimeout(activeHydrateNoticeTimer)
+    const eventBuffer = conversationController.beginEventBuffer(id, ownerSequence)
+    if (!eventBuffer) return
+    conversationStore.beginSync(Date.now())
+    activeHydrateNoticeTimer = window.setTimeout(() => {
+      activeHydrateNoticeTimer = 0
+      conversationStore.markSyncing()
+    }, 600)
+    try {
+    while (conversationController.consumeDirty(id, ownerSequence) && activeId.value === id) {
+      conversationController.stageDeferredEvents(eventBuffer)
+      const requestSequence = activeHydrationSequence
+      const requestEpochVersion = agentWatermarkEpochVersion
+      const workerEventVersion = currentRemoteWorkerEventVersion()
+      const requestSpan = startPerformanceSpan('hydrate.ipc')
+      let snapshot
+      try {
+        snapshot = await invoke('desktop_hydrate_agent', { agentId: id })
+      } finally {
+        requestSpan.end()
+      }
+      if (requestSequence !== activeHydrationSequence || activeId.value !== id) return
+      const snapshotEpoch = String(snapshot?.stream_epoch || '')
+      if (agentWatermarkEpochVersion !== requestEpochVersion && snapshotEpoch && snapshotEpoch !== agentWatermarkEpoch) {
+        conversationController.markDirty(id, ownerSequence)
+        drainActiveHydrateEventBuffer(eventBuffer)
+        continue
+      }
+      adoptAgentWatermarkEpoch(snapshotEpoch)
+      const snapshotEpochCurrent = Boolean(snapshotEpoch && (!agentWatermarkEpoch || snapshotEpoch === agentWatermarkEpoch))
+      const coveredAgentSeq = Number(snapshot?.covered_agent_seq)
+      const snapshotCanReconcileDrafts = snapshotEpochCurrent
+        && Number.isSafeInteger(coveredAgentSeq)
+        && coveredAgentSeq >= 0
+        && conversationStore.appliedAgentSequence(id) <= coveredAgentSeq
+      const applySpan = startPerformanceSpan('hydrate.apply_to_dom', {
+        transcriptItems: Array.isArray(snapshot?.transcript) ? snapshot.transcript.length : 0,
+      })
+      turnWatchdog.noteActivity()
+      const mergedSnapshot = conversationStore.applyHydrateSnapshot(snapshot, {
+        agentId: id,
+        generation: requestSequence,
+        lifecycleSeq: turnStateStore.lifecycleSeq,
+        reconcileCoveredDrafts: snapshotCanReconcileDrafts,
+      })
+      const historyRevision = mergedSnapshot.historyRevision
+      const conversationRevision = mergedSnapshot.conversationRevision
+      const shouldApplyMessages = mergedSnapshot.transcriptAccepted
+      if (mergedSnapshot.accepted) {
+        if (snapshotCanReconcileDrafts && Array.isArray(snapshot?.assistant_drafts)) rebuildChatItemSnapshot(id)
+        if (mergedSnapshot.lifecycleAccepted && Array.isArray(snapshot?.child_agents)) replaceChildrenFromHydrate(snapshot.child_agents, id, workerEventVersion)
+      }
+      if (snapshotEpochCurrent && Number.isSafeInteger(snapshot?.covered_agent_seq) && snapshot.covered_agent_seq >= 0) {
+        conversationStore.applyAgentSequenceCoverage(id, snapshot.covered_agent_seq)
+      }
+      if (shouldApplyMessages) {
+        // Restore media from the accepted, reference-merged transcript. Using
+        // the raw IPC snapshot here reclones every history row on each hydrate,
+        // even when only lifecycle state changed.
+        void restoreAgentMedia(mergedSnapshot.snapshot, id).then(restored => {
+          if (requestSequence === activeHydrationSequence && activeId.value === id && activeHydrateContentRevision.value === historyRevision && activeHydrateConversationRevision.value === conversationRevision && hydrate.value) {
+            const conversationEpoch = Number(snapshot?.conversation_epoch) || 0
+            const applied = conversationStore.applyMediaTranscript(id, requestSequence, {
+              conversationEpoch,
+              historyRevision,
+              expectedConversationRevision: conversationRevision,
+              transcript: restored.snapshot.transcript,
+            })
+            if (applied) mediaUrlRegistry.commit(restored.lease)
+            else mediaUrlRegistry.discard(restored.lease)
+          } else mediaUrlRegistry.discard(restored.lease)
+        }).catch(e => {
+          if (requestSequence === activeHydrationSequence && activeId.value === id) error.value = `无法读取会话图片：${String(e.message || e)}`
+        })
+      }
+      const target = conversationController.getTarget(id, ownerSequence)
+      if (target.historyRevision > historyRevision
+        || target.conversationRevision > Number(snapshot?.conversation_revision || 0)
+        || target.lifecycleSeq > (Number(snapshot?.turn_state?.lifecycle_seq) || 0)) {
+        conversationController.markDirty(id, ownerSequence)
+        await nextTick()
+        drainActiveHydrateEventBuffer(eventBuffer, snapshot, snapshotEpochCurrent && Number.isSafeInteger(coveredAgentSeq) && coveredAgentSeq >= 0)
+        applySpan.end({ accepted: false, transcriptItems: hydrate.value?.transcript?.length || 0 })
+        throw new Error('Snapshot has not reached the requested conversation state')
+      }
+      await nextTick()
+      drainActiveHydrateEventBuffer(eventBuffer, snapshot, snapshotEpochCurrent && Number.isSafeInteger(coveredAgentSeq) && coveredAgentSeq >= 0)
+      applySpan.end({ accepted: true, transcriptItems: hydrate.value?.transcript?.length || 0 })
     }
-    return objectUrl
-  }
-  return restoreTranscriptMedia(snapshot, loadSource)
-}
-async function hydrateAgentSnapshot(id) {
-  if (!id || activeId.value !== id) return
-  const requestSequence = ++activeHydrationSequence
-  const workerEventVersion = currentRemoteWorkerEventVersion()
-  const snapshot = await invoke('desktop_hydrate_agent', { agentId: id })
-  if (requestSequence !== activeHydrationSequence || activeId.value !== id) return
-  turnWatchdog.noteActivity()
-  const acceptedTurnState = applyHydrateTurnState(snapshot)
-  if (!acceptedTurnState && turnStateStore.turnId) return
-  hydrate.value = snapshot
-  if (Array.isArray(snapshot?.child_agents)) replaceChildrenFromHydrate(snapshot.child_agents, id, workerEventVersion)
-  const incomplete = Boolean(snapshot?.turn_state?.error?.incomplete)
-  const hasPersistedPartial = incomplete && hasPersistedPartialMessage(snapshot?.transcript)
-  if (hasPersistedPartial) {
-    streamingText.value = ''
-    partialHydrateRetryTurns.delete(snapshot.turn_state?.turn_id)
-  } else if (incomplete && turnStateStore.terminal && !partialHydrateRetryTurns.has(snapshot.turn_state?.turn_id)) {
-    partialHydrateRetryTurns.add(snapshot.turn_state?.turn_id)
-    scheduleActiveAgentHydrate(id, 180)
-  }
-  void restoreAgentMedia(snapshot, id).then(withMedia => {
-    if (requestSequence === activeHydrationSequence && activeId.value === id) hydrate.value = withMedia
-  }).catch(e => {
-    if (requestSequence === activeHydrationSequence && activeId.value === id) error.value = `无法读取会话图片：${String(e.message || e)}`
+    conversationController.markClean(id, ownerSequence)
+    if (activeHydrateNoticeTimer) clearTimeout(activeHydrateNoticeTimer)
+    activeHydrateNoticeTimer = 0
+    conversationStore.completeSync(snapshotResultCommitStatus(hydrate.value))
+    if (activeId.value === id && isHydrateReadError(error.value)) error.value = ''
+    } catch (e) {
+      if (activeId.value !== id || activeHydrationSequence !== ownerSequence) return
+      drainActiveHydrateEventBuffer(eventBuffer)
+      conversationController.markDirty(id, ownerSequence)
+      conversationController.scheduleRetry(id, ownerSequence, () => {
+        if (activeHydrateNoticeTimer) clearTimeout(activeHydrateNoticeTimer)
+        activeHydrateNoticeTimer = 0
+        conversationStore.failSync()
+        error.value = `结果暂未同步：${String(e.message || e)}`
+      })
+    } finally {
+      if (activeHydrationSequence === ownerSequence) {
+        const bufferNeedsRepair = eventBuffer.overflow || eventBuffer.epochMismatch
+        conversationController.releaseEventBuffer(eventBuffer)
+        if (bufferNeedsRepair && activeId.value === id && !conversationController.hasRetry(id, ownerSequence)) {
+          scheduleActiveAgentHydrate(id, 0, null, true)
+        } else if (conversationController.isDirty(id, ownerSequence) && activeId.value === id && !conversationController.hasRetry(id, ownerSequence)) {
+          scheduleActiveAgentHydrate(id, 0)
+        }
+      }
+    }
   })
-  if (snapshot.turn_state?.terminal || ['completed', 'failed', 'cancelled', 'interrupted', 'budget_exhausted'].includes(snapshot.turn_state?.phase)) {
-    const preservePartial = ['failed', 'interrupted'].includes(snapshot.turn_state?.phase) || snapshot.turn_state?.end_reason === 'error'
-    if (!preservePartial) streamingText.value = ''
-  }
 }
-function scheduleActiveAgentHydrate(id, delay = 100) {
+function snapshotResultCommitStatus(snapshot) {
+  return String(snapshot?.turn_state?.result_commit_status || '')
+}
+function retryHydrateSync() {
+  const id = activeId.value
+  if (!id || !canManuallyRetryHydrate(hydrateSyncStatus.value.phase)) return
+  if (isHydrateReadError(error.value)) error.value = ''
+  conversationController.retryNow(id, activeHydrationSequence)
+}
+function scheduleActiveAgentHydrate(id, delay = 100, target = null, force = false) {
   if (!id || id !== activeId.value) return
-  if (activeHydrateTimer) clearTimeout(activeHydrateTimer)
-  activeHydrateTimer = window.setTimeout(() => {
-    activeHydrateTimer = 0
-    void hydrateAgentSnapshot(id).catch(e => {
-      if (activeId.value === id) error.value = String(e)
-    })
-  }, delay)
+  const scheduled = conversationController.request(id, {
+    generation: activeHydrationSequence,
+    delay,
+    requestedTarget: target,
+    force,
+  })
+  const changedTarget = Boolean(scheduled.targetChanged)
+  if (changedTarget || force) {
+    if (hydrateSyncStatus.value.phase === 'failed') conversationStore.clearFailedSync()
+  }
 }
 async function switchLLMProfile(profileId) {
   const id = activeId.value
@@ -742,6 +1169,28 @@ async function openModelPicker() {
 }
 async function selectAgent(id, { clearError = true, openChat = false } = {}) {
   const changed = activeId.value !== id
+  const epoch = ++selectionEpoch
+  if (changed) {
+    activeHydrationSequence += 1
+    if (isTauri) {
+      try {
+        const scopeAccepted = await invoke('desktop_set_active_agent', {
+          agentId: id,
+          selectionGeneration: activeHydrationSequence,
+          webviewGeneration: nativeWebviewGeneration,
+        })
+        if (!scopeAccepted) throw new Error('当前窗口会话已更新，请重试切换智能体。')
+      } catch (cause) {
+        if (epoch === selectionEpoch) {
+          const message = `无法切换当前会话：${String(cause?.message || cause)}`
+          if (activeId.value) setAgentError(activeId.value, message)
+          else globalError.value = message
+        }
+        return
+      }
+      if (epoch !== selectionEpoch) return
+    }
+  }
   if (changed) resourceNavigationEpoch += 1
   const viewTransition = agentSelectionViewTransition(activeTab.value, changed, openChat)
   collapsedGroup.value = ''
@@ -766,23 +1215,23 @@ async function selectAgent(id, { clearError = true, openChat = false } = {}) {
     dockDraft.value = switchDraft(dockDrafts.value, activeId.value, id, dockDraft.value)
   }
   if (changed) {
-    partialHydrateRetryTurns.delete(turnStateStore.turnId)
-    streamingText.value = ''
+    conversationController.reset(id, activeHydrationSequence)
+    conversationStore.setActiveScope(id, activeHydrationSequence)
+    if (activeHydrateNoticeTimer) clearTimeout(activeHydrateNoticeTimer)
+    activeHydrateNoticeTimer = 0
     userInfoSelected.value = []
-    resetTurnState()
+    conversationStore.resetTurnState()
   }
   if (viewTransition.enterChat && route.path !== '/chat') void router.push('/chat')
   activeId.value = id
-  const epoch = ++selectionEpoch
-  if (changed) hydrate.value = null
+  if (changed) conversationStore.replaceHydrateSnapshot(null)
   if (!id) {
-    hydrate.value = null
+    conversationStore.replaceHydrateSnapshot(null)
     llmSettings.value = null
     input.value = ''
     dockDraft.value = ''
-    streamingText.value = ''
     userInfoSelected.value = []
-    resetTurnState()
+    conversationStore.resetTurnState()
     if (clearError) error.value = ''
     return
   }
@@ -798,7 +1247,10 @@ async function send() {
   const files = pendingFiles.value.slice()
   const references = pendingWorkspaceReferences.value.slice()
   if (!hasWorkspaceMessageContent({ text, images, files, references }) || !activeId.value) return
+  if (composerIntent.value === 'blocked') { error.value = '请在请求卡片中完成待处理交互，再发送新消息。'; return }
+  if (messageSubmitPending.value) { error.value = '上一条消息仍在确认发送结果，请稍后再发送。'; return }
   if (text.startsWith('/') && !images.length && !files.length && !references.length) {
+    if (composerIntent.value === 'queue') { error.value = '正在执行任务，应用命令不能加入等待队列。'; return }
     const agentId = activeId.value
     input.value = ''
     inputDrafts.value[agentId] = ''
@@ -806,62 +1258,93 @@ async function send() {
     return
   }
   clearCommandNotice()
-  if (hitlQueue.value.some(item => item.kind === 'user_information')) { void submitUserInfo(undefined, 'chat'); return }
-  if (hitlQueue.value.length) { error.value = '请先处理当前对话中的待处理请求。'; return }
-  if (agentGenerating.value) return
+  const queueDuringTurn = composerIntent.value === 'queue'
   const agentId = activeId.value
   input.value = ''
   inputDrafts.value[agentId] = ''
-  const sent = await sendMessageToActiveAgent(text, images, files, references)
+  const sent = await sendMessageToActiveAgent(text, images, files, references, { allowDuringTurn: queueDuringTurn })
   if (!sent) input.value = recoverFailedSend(failedSendDrafts.value, agentId, activeId.value, input.value, text)
   else {
     pendingImagesByAgent.value[agentId] = (pendingImagesByAgent.value[agentId] || []).filter(image => !images.includes(image))
     pendingFilesByAgent.value[agentId] = (pendingFilesByAgent.value[agentId] || []).filter(file => !files.includes(file))
   }
 }
-async function sendMessageToActiveAgent(text, images = [], files = [], references = []) {
+async function sendMessageToActiveAgent(text, images = [], files = [], references = [], { allowDuringTurn = false } = {}) {
   text = String(text || '').trim()
-  if (!hasWorkspaceMessageContent({ text, images, files, references }) || !activeId.value || agentGenerating.value) return false
+  const turnWasActive = turnInProgress.value
+  if (!hasWorkspaceMessageContent({ text, images, files, references }) || !activeId.value || (turnWasActive && !allowDuringTurn)) return false
   const agentId = activeId.value
-  const previousPartial = activeId.value === agentId ? streamingText.value : ''
+  const conversationEpoch = Math.max(1, Number(hydrate.value?.conversation_epoch) || 1)
+  if (messageSubmitPendingByAgent.value[agentId]) return false
+  messageSubmitPendingByAgent.value = { ...messageSubmitPendingByAgent.value, [agentId]: true }
   let pendingUser
+  let receipt
   setAgentError(agentId, '')
-  if (activeId.value === agentId) streamingText.value = ''
   setAgentBusy(agentId, true)
   try {
-    await dispatchWorkspaceMessage({ agentId, text, images, files, references }, submitMessage, message => {
+    await dispatchWorkspaceMessage({ agentId, text, images, files, references }, async (...args) => {
+      receipt = await submitMessage(...args, {
+        conversationEpoch,
+        clientRequestId: pendingUser?.client_request_id,
+        onClientRequestId: clientRequestId => {
+          if (!pendingUser) return
+          const previousId = pendingUser.id
+          pendingUser = { ...pendingUser, id: `pending:${clientRequestId}`, client_request_id: clientRequestId }
+          setLocalPendingUsersForAgent(agentId, localPendingUsersForAgent(agentId).map(item => item.id === previousId ? pendingUser : item))
+        },
+      })
+      const inputSeq = Number(receipt?.input_seq)
+      if (pendingUser && Number.isSafeInteger(inputSeq) && inputSeq > 0) {
+        const inputId = `${agentId}/input/${inputSeq}`
+        const previousId = pendingUser.id
+        pendingUser = {
+          ...pendingUser,
+          id: receipt?.input_id || inputId,
+          input_id: receipt?.input_id || inputId,
+          item_id: receipt?.input_id || inputId,
+          input_seq: inputSeq,
+          queue_status: receipt?.status === 'queued' ? 'queued' : 'claimed',
+        }
+        const current = localPendingUsersForAgent(agentId).map(item => item.id === previousId ? pendingUser : item)
+        setLocalPendingUsersForAgent(agentId, current)
+      }
+      return receipt
+    }, message => {
+      const clientRequestId = newClientRequestId()
       pendingUser = {
-        id: ++sendSequence,
+        id: `pending:${clientRequestId}`,
+        client_request_id: clientRequestId,
         kind: 'user',
         text: message.text,
         images: message.images.map(image => image.url),
         file_refs: message.files.map(file => ({ ...file })),
-        baseTranscriptLength: fullTranscript.value.length,
+        queue_status: turnWasActive ? 'queued' : 'claimed',
       }
-      pendingUserByAgent.value = { ...pendingUserByAgent.value, [agentId]: pendingUser }
+      setLocalPendingUsersForAgent(agentId, [...localPendingUsersForAgent(agentId), pendingUser])
     })
     if (references.length) consumeWorkspaceReferences(agentId, references)
   } catch (e) {
-    if (activeId.value === agentId) streamingText.value = previousPartial
-    if (pendingUser && pendingUserByAgent.value[agentId]?.id === pendingUser.id) {
-      const next = { ...pendingUserByAgent.value }
-      delete next[agentId]
-      pendingUserByAgent.value = next
+    if (pendingUser) {
+      const remaining = localPendingUsersForAgent(agentId).filter(item => item.id !== pendingUser.id)
+      setLocalPendingUsersForAgent(agentId, remaining)
     }
-    setAgentError(agentId, String(e))
+    setAgentError(agentId, e?.unknownSubmission
+      ? '发送结果暂时无法确认，消息草稿已保留。请恢复连接后重试同一条内容，系统会先核对接收回执，避免重复发送。'
+      : String(e))
     return false
   } finally {
     setAgentBusy(agentId, false)
+    const nextPending = { ...messageSubmitPendingByAgent.value }
+    delete nextPending[agentId]
+    messageSubmitPendingByAgent.value = nextPending
   }
   if (activeId.value === agentId) {
-    try {
-      await selectAgent(agentId)
-      await nextTick()
-      chatPanel.value?.scrollToTail()
-    } catch (e) {
-      // The send already succeeded; keep the message and cleared references while reporting refresh trouble.
-      setAgentError(agentId, String(e))
-    }
+    // Keep one bounded snapshot fallback after the optimistic send. Re-running
+    // selectAgent here also refreshes model metadata and can race the turn SSE,
+    // producing several back-to-back full hydrate reads for one message.
+    scheduleActiveAgentHydrate(agentId, 80)
+    await nextTick()
+    chatPanel.value?.scrollToTail()
   }
   return true
 }
@@ -1128,6 +1611,27 @@ async function stopCurrentTurn() {
   catch (e) { setAgentError(id, String(e.message || e)) }
   finally { setAgentCancelling(id, false) }
 }
+async function resumeQueuedInputs() {
+  const id = activeId.value
+  const expectedRevision = Number(hydrate.value?.queue_control_revision)
+  if (!id || !queuedInputsPaused.value || !Number.isSafeInteger(expectedRevision) || expectedRevision <= 0 || queueControlPending.value) return
+  queueControlPending.value = true
+  try {
+    await setInputQueuePaused(id, false, expectedRevision)
+    if (activeId.value === id) await selectAgent(id)
+  } catch (e) {
+    if (activeId.value === id) {
+      if (Number(e?.status) === 409) {
+        await hydrateAgentSnapshot(id)
+        setAgentError(id, '待处理队列状态已变化，已刷新当前状态。')
+      } else {
+        setAgentError(id, String(e.message || e))
+      }
+    }
+  } finally {
+    queueControlPending.value = false
+  }
+}
 async function clearContextWithConfirmation(id) {
   if (!id || id !== activeId.value) throw new Error('请先选择一个智能体')
   if (!status.value.online || status.value.setup_required) throw new Error('本地服务未就绪，无法清空对话')
@@ -1135,12 +1639,10 @@ async function clearContextWithConfirmation(id) {
   if (pending.value || approvalQueueIndex.value >= 0) throw new Error('请先处理待审批请求后再清空对话')
   if (!await confirmDesktopAction('清空当前 Agent 的对话上下文？此操作会从当前会话移除消息。')) return false
   await clearContext(id)
-  const next = { ...pendingUserByAgent.value }
-  delete next[id]
-  pendingUserByAgent.value = next
+  setLocalPendingUsersForAgent(id, [])
   if (activeId.value === id) {
-    streamingText.value = ''
-    resetTurnState({ preserveLifecycle: true })
+    conversationStore.resetDrafts()
+    conversationStore.resetTurnState({ preserveLifecycle: true })
   }
   return true
 }
@@ -1160,7 +1662,7 @@ async function deleteAgentById(agentId) {
   deletingAgentId.value = id
   try {
     await deleteAgent(id)
-    if (activeId.value === id) { activeId.value = ''; hydrate.value = null; streamingText.value = '' }
+    if (activeId.value === id) await selectAgent('')
     await refreshAgentSummaries()
     await nextTick()
     await autoOverviewPanel.value?.refresh?.()
@@ -1181,6 +1683,131 @@ function openEntryContextMenu(event, { title = '', items = [], anchor = event?.c
   const x = hasPointerPosition ? Number(event.clientX) : (rect?.left || 0) + 12
   const y = hasPointerPosition ? Number(event.clientY) : (rect?.bottom || 0)
   entryContextMenu.value = { title, items, x, y, trigger: focusAnchor }
+}
+function openQueuedInputContextMenu({ event, entry, anchor = event?.currentTarget } = {}) {
+  const inputSeq = Number(entry?.input_seq)
+  const revision = Number(entry?.input_revision)
+  const agentId = activeId.value
+  if (!agentId || entry?.queue_status !== 'queued' || !Number.isSafeInteger(inputSeq) || inputSeq <= 0 || !Number.isSafeInteger(revision) || revision <= 0) return
+  const mutationInProgress = Boolean(queuedInputMutationId.value)
+  void openEntryContextMenu(event, {
+    title: '待处理消息',
+    anchor,
+    items: [
+      { label: '编辑待处理消息', icon: 'edit', disabled: mutationInProgress, run: () => beginQueuedInputEdit(agentId, entry) },
+      { label: '撤回待处理消息', icon: 'trash', danger: true, disabled: mutationInProgress, run: () => withdrawPendingInput(agentId, entry) },
+    ],
+  })
+}
+async function beginQueuedInputEdit(agentId, entry) {
+  queuedInputEdit.value = {
+    agentId,
+    inputId: String(entry?.input_id || entry?.item_id || `${agentId}/input/${Number(entry?.input_seq)}`),
+    inputSeq: Number(entry?.input_seq),
+    revision: Number(entry?.input_revision),
+    status: 'queued',
+    fileCount: Array.isArray(entry?.file_refs) ? entry.file_refs.length : 0,
+    imageCount: Math.max(0, Number(entry?.image_count) || 0),
+  }
+  queuedInputEditText.value = String(entry?.text || '')
+  queuedInputEditError.value = ''
+  dialog.value = 'queued-input-edit'
+  await nextTick()
+  queuedInputEditField.value?.focus?.()
+}
+function closeQueuedInputEdit() {
+  if (queuedInputMutationId.value) return
+  dialog.value = ''
+  queuedInputEdit.value = null
+  queuedInputEditText.value = ''
+  queuedInputEditError.value = ''
+}
+function pendingInputByIdentity(agentId, inputId) {
+  if (activeId.value !== agentId || !inputId) return null
+  return (Array.isArray(hydrate.value?.pending_inputs) ? hydrate.value.pending_inputs : [])
+    .find(item => String(item?.input_id || '') === inputId) || null
+}
+function removeLocalPendingInput(agentId, inputId) {
+  conversationStore.removePendingInput(agentId, inputId)
+}
+async function refreshQueuedInputState(agentId) {
+  if (activeId.value === agentId) {
+    await hydrateAgentSnapshot(agentId)
+    await nextTick()
+  }
+}
+async function saveQueuedInputEdit() {
+  const target = queuedInputEdit.value
+  if (!target || target.status !== 'queued' || queuedInputMutationId.value) return
+  const identity = target.inputId || `${target.agentId}/input/${target.inputSeq}`
+  queuedInputMutationId.value = identity
+  queuedInputEditError.value = ''
+  try {
+    await editQueuedMessage(target.agentId, target.inputSeq, {
+      expectedRevision: target.revision,
+      content: queuedInputEditText.value,
+    })
+    if (dialog.value === 'queued-input-edit' && queuedInputEdit.value?.inputId === target.inputId) {
+      dialog.value = ''
+      queuedInputEdit.value = null
+      queuedInputEditText.value = ''
+      queuedInputEditError.value = ''
+    }
+    await refreshQueuedInputState(target.agentId)
+  } catch (error) {
+    await refreshQueuedInputState(target.agentId)
+    const current = pendingInputByIdentity(target.agentId, target.inputId)
+    if (current?.status === 'queued') {
+      queuedInputEdit.value = { ...target, revision: Number(current.input_revision) || target.revision }
+      if (Number(current.input_revision) !== target.revision) {
+        queuedInputEditError.value = '这条消息已被更新。你的修改仍保留；再次保存会按最新版本提交。'
+      } else if (Number(error?.status) === 409) {
+        queuedInputEditError.value = '队列正在发生变化，请稍后再试。你的修改已保留。'
+      } else {
+        queuedInputEditError.value = `保存失败：${String(error?.message || error)}。你的修改已保留。`
+      }
+    } else {
+      queuedInputEdit.value = { ...target, status: current?.status || 'unavailable' }
+      queuedInputEditError.value = current?.status === 'claimed'
+        ? '这条消息已经开始处理，无法再修改。你的修改仍保留在此处。'
+        : '这条待处理消息已不存在。你的修改仍保留在此处。'
+    }
+  } finally {
+    if (queuedInputMutationId.value === identity) queuedInputMutationId.value = ''
+  }
+}
+async function copyQueuedEditToComposer() {
+  if (input.value.trim() && !await confirmDesktopAction('输入栏已有未发送内容。要用这段修改替换它吗？')) return
+  input.value = queuedInputEditText.value
+  if (activeId.value) inputDrafts.value[activeId.value] = input.value
+  closeQueuedInputEdit()
+  await nextTick()
+  resizeComposer()
+  textarea.value?.focus?.()
+}
+async function withdrawPendingInput(agentId, entry) {
+  const inputSeq = Number(entry?.input_seq)
+  const expectedRevision = Number(entry?.input_revision)
+  const inputId = String(entry?.input_id || entry?.item_id || `${agentId}/input/${inputSeq}`)
+  if (!agentId || !Number.isSafeInteger(inputSeq) || inputSeq <= 0 || !Number.isSafeInteger(expectedRevision) || expectedRevision <= 0 || queuedInputMutationId.value) return
+  queuedInputMutationId.value = inputId
+  try {
+    await withdrawQueuedMessage(agentId, inputSeq, expectedRevision)
+    removeLocalPendingInput(agentId, inputId)
+    await refreshQueuedInputState(agentId)
+  } catch (error) {
+    await refreshQueuedInputState(agentId)
+    const current = pendingInputByIdentity(agentId, inputId)
+    if (!current) removeLocalPendingInput(agentId, inputId)
+    const message = current?.status === 'claimed'
+      ? '消息已开始处理，无法撤回。'
+      : Number(error?.status) === 409
+        ? '待处理消息已变化，请查看刷新后的内容再操作。'
+        : String(error?.message || error)
+    setAgentError(agentId, message)
+  } finally {
+    if (queuedInputMutationId.value === inputId) queuedInputMutationId.value = ''
+  }
 }
 function runEntryContextMenuItem(item) {
   if (!item || item.disabled) return
@@ -1295,21 +1922,22 @@ async function openAgentSettings(id) { await selectAgent(id); await router.push(
 async function sendFromDock() {
   const text = dockDraft.value
   const references = pendingWorkspaceReferences.value.slice()
+  if (composerIntent.value === 'blocked') { error.value = '请返回消息卡片处理待处理交互，再发送新消息。'; return }
+  if (messageSubmitPending.value) { error.value = '上一条消息仍在确认发送结果，请稍后再发送。'; return }
   if (text.trim().startsWith('/') && activeId.value && !references.length) {
+    if (composerIntent.value === 'queue') { error.value = '正在执行任务，应用命令不能加入等待队列。'; return }
     dockDraft.value = ''
     dockDrafts.value[activeId.value] = ''
     await executeSlashCommand(text.trim(), activeId.value)
     return
   }
   clearCommandNotice()
-  if (hitlQueue.value.some(item => item.kind === 'user_information')) { void submitUserInfo(undefined, 'dock'); return }
-  if (hitlQueue.value.length) { error.value = '请先返回完整对话处理待处理请求。'; return }
-  if (agentGenerating.value) return
-  if ((!text.trim() && !references.length) || !activeId.value || agentGenerating.value) return
+  if ((!text.trim() && !references.length) || !activeId.value) return
+  const queueDuringTurn = composerIntent.value === 'queue'
   const agentId = activeId.value
   dockDraft.value = ''
   dockDrafts.value[agentId] = ''
-  const sent = await sendMessageToActiveAgent(text, [], [], references)
+  const sent = await sendMessageToActiveAgent(text, [], [], references, { allowDuringTurn: queueDuringTurn })
   if (!sent) dockDraft.value = recoverFailedSend(failedSendDrafts.value, agentId, activeId.value, dockDraft.value, text)
 }
 async function requestNewTerminal(sessionId = '') {
@@ -1504,8 +2132,28 @@ function closeCurrentResource() {
   if (transition.closeTerminal) void closeTerminal('view-close', activeTerminalInstanceId.value)
   else if (transition.workspaceOpened === false) { workspaceOpened.value = false; showChat() }
   else if (transition.browserOpened === false) { browserOpened.value = false; showChat() }
+  else if (transition.historyOpened === false) { historyOpened.value = false; showChat() }
 }
 function showResourceTab(tab) { activeTab.value = tab; void router.push(routeForTab('chat')) }
+function showConversationHistory() {
+  if (!activeId.value || isWorkgroupView.value || !status.value.online) return
+  historyOpened.value = true
+  showResourceTab('history')
+}
+function onChatReadingWindowChange(state = {}) {
+  const agentId = activeId.value
+  const currentEpoch = Number(hydrate.value?.conversation_epoch) || 0
+  conversationStore.applyReadingWindowChange(agentId, activeHydrationSequence, state, currentEpoch)
+}
+async function onConversationResubmitted() {
+  const agentId = activeId.value
+  historyOpened.value = false
+  showChat()
+  if (agentId && activeId.value === agentId) {
+    try { await hydrateAgentSnapshot(agentId) }
+    catch (cause) { if (activeId.value === agentId) setAgentError(agentId, String(cause?.message || '重新发送已接收，正在等待同步对话。')) }
+  }
+}
 function activateTerminal(id, { reconnect = true } = {}) {
   const terminal = terminalInstances.value.find(item => item.id === id && item.agentId === activeId.value)
   if (!terminal) return
@@ -1697,20 +2345,13 @@ function approveSelection({ index, approvedCallIds }) {
   if (item?.kind === 'approval') void resumeHitl(index, buildApprovalSelectionResume(item.data, approvedCallIds))
 }
 function rejectAll(index) { approveSelection({ index, approvedCallIds: [] }) }
-async function submitUserInfo(index = hitlQueue.value.findIndex(item => item.kind === 'user_information'), source = 'chat') {
+async function submitUserInfo(index = hitlQueue.value.findIndex(item => item.kind === 'user_information'), submittedText = '') {
   const item = hitlQueue.value[index]
   if (!item) return false
-  const draft = source === 'dock' ? dockDraft : input
-  const submittedText = draft.value
-  const agentId = activeId.value
   const result = buildUserInfoSubmitResume(item.data, { text: submittedText, selected: userInfoSelected.value })
   if (!result.ok) { error.value = result.error; return true }
   const resumed = await resumeHitl(index, result.resume)
-  if (resumed && activeId.value === agentId && draft.value === submittedText) {
-    draft.value = ''
-    if (source === 'dock') dockDrafts.value[agentId] = ''
-    else inputDrafts.value[agentId] = ''
-  }
+  if (resumed) userInfoSelected.value = []
   return true
 }
 function decideMemoryConflict({ index, decision }) { const item = hitlQueue.value[index]; if (item?.kind === 'memory_conflict') void resumeHitl(index, buildMemoryConflictResume(item.data, decision)) }
@@ -1823,6 +2464,7 @@ function runMenuAction(action) {
   else if (action === 'stop-turn') void stopCurrentTurn()
   else if (action === 'clear-context') void clearCurrentContext()
   else if (action === 'auto-overview') void showAutoOverview()
+  else if (action === 'open-history') showConversationHistory()
   else if (action === 'create-terminal') void requestNewTerminal()
   else if (action === 'open-workspace') showWorkspace()
   else if (action === 'open-browser') showBrowser()
@@ -1880,12 +2522,23 @@ async function onFirstRunCompleted() {
 }
 function showChat() { activeTab.value = 'chat'; void router.push(routeForTab('chat')) }
 onMounted(async () => {
+  installPerformanceDiagnosticsGlobal()
+  if (window.__TAURI_INTERNALS__) {
+    try {
+      nativeWebviewGeneration = await invoke('desktop_event_scope_generation')
+    } catch (cause) {
+      error.value = `无法同步桌面窗口状态：${String(cause?.message || cause)}`
+      finishStartup()
+      return
+    }
+  }
   unlistenConfigurationChanged = onConfigurationChanged(({ kind }) => {
     if (kind === 'llm' && activeId.value) void refreshAgentModel(activeId.value)
     void refreshWorkgroupSettings()
   })
   document.addEventListener('click', onDocumentClick)
   document.addEventListener('keydown', onKeydown)
+  document.addEventListener('visibilitychange', onDocumentVisibilityChange)
   window.addEventListener('resize', resizeComposer)
   void nextTick(resizeComposer)
   void nextTick(observeComposerField)
@@ -1904,7 +2557,11 @@ onMounted(async () => {
     void syncWindowMaximized()
     void syncResourceWindowState()
     try { unlistenWindowResize = await currentWindow.onResized(() => { void syncWindowMaximized(); void syncResourceWindowState() }) } catch { /* Window resize events may be unavailable in preview mode. */ }
-    try { unlistenWindowFocus = await currentWindow.onFocusChanged(() => { void syncResourceWindowState() }) } catch { /* Preview builds may not expose focus events. */ }
+    try { unlistenWindowFocus = await currentWindow.onFocusChanged(event => {
+      desktopWindowFocused = Boolean(event?.payload)
+      void syncResourceWindowState()
+      scheduleAgentWatermarkPoll(desktopWindowFocused ? 0 : 60000)
+    }) } catch { /* Preview builds may not expose focus events. */ }
   }
   if (!window.__TAURI_INTERNALS__) {
     status.value = { online: false, setup_required: false, version: '', error: '浏览器预览模式：请在桌面应用窗口中连接本地服务。' }
@@ -1914,6 +2571,8 @@ onMounted(async () => {
   }
   waitForNodeStartup()
   await loadAgents()
+  agentWatermarkPollingEnabled = true
+  scheduleAgentWatermarkPoll(0)
   if (status.value.online) finishStartup()
   if (pendingDesktopAgentId && agents.value.some(agent => agent.agent_id === pendingDesktopAgentId)) {
     const agentId = pendingDesktopAgentId
@@ -1921,67 +2580,16 @@ onMounted(async () => {
     await selectAgent(agentId, { openChat: true })
   }
   previouslyOnline.value = status.value.online
-  unlisten = await listen('desktop-node-event', async ev => {
-    const event = ev.payload
-    if (event.event_type === 'resync_required') {
-      if (summaryRefreshTimer) clearTimeout(summaryRefreshTimer)
-      summaryRefreshTimer = window.setTimeout(() => { summaryRefreshTimer = 0; void refreshAgentSummaries() }, 0)
-      if (activeId.value) scheduleActiveAgentHydrate(activeId.value, 0)
-      return
-    }
-    if (event.event_type === 'notification_changed') {
-      const projection = handleAgentNotificationEvent(
-        agents.value,
-        agentNotificationProjections.value,
-        event,
-        agentNotificationChangeVersion,
-      )
-      agents.value = projection.agents
-      agentNotificationProjections.value = projection.projectionsByAgent
-      agentNotificationChangeVersion = projection.version
-      if (projection.shouldRefreshSummaries) {
-        if (summaryRefreshTimer) clearTimeout(summaryRefreshTimer)
-        summaryRefreshTimer = window.setTimeout(() => { summaryRefreshTimer = 0; void refreshAgentSummaries() }, 0)
-      }
-      return
-    }
-    if (event.agent_id !== activeId.value) {
-      const row = agents.value.find(agent => agent.agent_id === event.agent_id)
-      if (event.event_type === 'hitl_required' && row) row.has_pending_hitl = true
-      if (['hitl_required', 'turn_finished', 'turn_state', 'error'].includes(event.event_type)) {
-        if (summaryRefreshTimer) clearTimeout(summaryRefreshTimer)
-        summaryRefreshTimer = window.setTimeout(() => { summaryRefreshTimer = 0; void refreshAgentSummaries() }, 250)
-      }
-      return
-    }
-    turnWatchdog.noteActivity()
-    if (event.event_type === 'assistant' && event.data?.display_type === 'delta') {
-      streamingText.value += event.data.content || ''
-      return
-    }
-    applyRemoteWorkerEvent(event.event_type, event.data)
-    applyDesktopTurnEvent(event, activeId.value)
-    if (event.event_type === 'runtime/notice' && event.data?.message_kind === 'context_boundary') {
-      await selectAgent(event.agent_id)
-      return
-    }
-    if (['turn_state', 'turn_finished', 'hitl_required', 'tool_call', 'tool_result', 'error'].includes(event.event_type)) {
-      if (['tool_result', 'turn_finished'].includes(event.event_type)) {
-        if (resourceRefreshTimer) clearTimeout(resourceRefreshTimer)
-        resourceRefreshTimer = window.setTimeout(() => {
-          resourceRefreshTimer = 0
-          if (resourcePageActive('file')) void workspaceFilesPanel.value?.refreshResources?.('tool')
-          if (resourcePageActive('browser')) void browserViewerPanel.value?.refreshResources?.('tool')
-        }, 300)
-      }
-      const eventAgentId = event.agent_id
-      if (activeId.value !== eventAgentId) return
-      const terminalEvent = ['turn_finished', 'hitl_required', 'error'].includes(event.event_type)
-      scheduleActiveAgentHydrate(eventAgentId, terminalEvent ? 0 : 120)
-      const finalToolCall = event.event_type === 'tool_call' && !event.data?.partial
-      if (finalToolCall) streamingText.value = ''
-    }
-  })
+  await conversationController.subscribe(
+    handler => listen('desktop-node-event', event => handler(event.payload)),
+    event => {
+      // Count the event at Desktop ingress, before hydration may cover it or
+      // the ordered reducer may intentionally defer its application.
+      recordSSEEvent(event?.event_type || 'unknown', event?.agent_seq, event?.agent_id || 'global')
+      if (conversationController.bufferEvent(event)) return
+      applyOrderedDesktopNodeEvent(event)
+    },
+  )
   unlistenTerminal = await listen('desktop-terminal-event', ev => {
     const payload = ev.payload || {}
     const instance = terminalInstances.value.find(item => item.connectionId === payload.connection_id && item.agentId === payload.agent_id)
@@ -2024,13 +2632,22 @@ onMounted(async () => {
     const current = await refreshHealth()
     if (!previouslyOnline.value && current.online) {
       await loadAgents()
+      scheduleAgentWatermarkPoll(0)
       if (status.value.online) finishStartup()
     }
     previouslyOnline.value = current.online
   }, 2500)
+  try {
+    // Rust buffers SSE until both this JS listener and the Node stream are
+    // ready, then requests one authoritative snapshot to cover startup gaps.
+    await invoke('desktop_events_ready')
+  } catch (e) {
+    console.warn('Desktop event bridge readiness failed:', e)
+  }
   turnWatchdog.start()
 })
 onUnmounted(() => {
+  agentWatermarkPollingEnabled = false
   if (composerWriteRequest.value) void Promise.resolve(cancelWorkspaceWrite(composerWriteRequest.value)).catch(() => {})
   if (startupTimeoutTimer) window.clearTimeout(startupTimeoutTimer)
   closeScreenshotSelection()
@@ -2041,15 +2658,16 @@ onUnmounted(() => {
   window.removeEventListener('desktop-open-agent', onDesktopOpenAgent)
   window.removeEventListener('desktop-open-settings', onDesktopOpenSettings)
   window.removeEventListener('desktop-open-agent-create', onDesktopOpenAgentCreate)
+  document.removeEventListener('visibilitychange', onDocumentVisibilityChange)
   unlistenConfigurationChanged?.()
   unlistenWindowResize?.(); unlistenWindowFocus?.()
   for (const terminal of terminalInstances.value.filter(item => item.connectionId)) {
     void invoke('desktop_terminal_command', { connectionId: terminal.connectionId, agentId: terminal.agentId, commandType: 'detach' }).catch(() => {})
   }
-  unlisten?.(); unlistenWorkspaceWrite?.(); unlistenTerminal?.(); clearInterval(pollTimer); clearTimeout(summaryRefreshTimer); clearTimeout(resourceRefreshTimer); clearTimeout(activeHydrateTimer); document.removeEventListener('click', onDocumentClick); document.removeEventListener('keydown', onKeydown)
+  conversationController.dispose()
+  unlistenWorkspaceWrite?.(); unlistenTerminal?.(); clearInterval(pollTimer); clearTimeout(agentWatermarkTimer); clearTimeout(summaryRefreshTimer); clearTimeout(resourceRefreshTimer); clearTimeout(activeHydrateNoticeTimer); document.removeEventListener('click', onDocumentClick); document.removeEventListener('keydown', onKeydown)
   turnWatchdog.stop()
-  for (const url of mediaObjectUrls.values()) URL.revokeObjectURL(url)
-  mediaObjectUrls.clear()
+  mediaUrlRegistry.dispose()
 })
 </script>
 
@@ -2093,7 +2711,7 @@ onUnmounted(() => {
             </div>
           </div>
         </nav>
-        <span class="workspace-title"><strong>{{ activeAgent?.display_name || 'DAgents Desktop' }}</strong><span class="crumb"> / {{ activeTab === 'chat' ? '对话' : activeTab === 'settings' ? '设置' : activeTab === 'file' ? workspaceName : activeTab === 'workgroups' ? '工作组' : activeTab === 'browser' ? browserName : '终端' }}</span></span>
+        <span class="workspace-title"><strong>{{ activeAgent?.display_name || 'DAgents Desktop' }}</strong><span class="crumb"> / {{ activeTab === 'chat' ? '对话' : activeTab === 'settings' ? '设置' : activeTab === 'file' ? workspaceName : activeTab === 'workgroups' ? '工作组' : activeTab === 'browser' ? browserName : activeTab === 'history' ? '对话历史' : '终端' }}</span></span>
       </div>
       <div class="top-status"><span :class="['status-dot', status.online ? 'good' : 'bad']"></span>{{ status.online ? '已连接' : '未连接' }}</div>
       <div v-if="isTauri" class="window-controls">
@@ -2145,6 +2763,7 @@ onUnmounted(() => {
             <template v-for="(item, i) in menuEntries.资源" :key="i"><div v-if="item.separator" class="menu-separator" role="separator"></div><button v-else class="menu-item" type="button" role="menuitem" :disabled="item.disabled" tabindex="-1" @click="runMenuAction(item.action)"><span>{{ item.label }}</span><small v-if="item.hint">{{ item.hint }}</small></button></template>
           </div>
         </div>
+        <button v-if="activeTab !== 'workgroups' && historyOpened" class="conversation-tab conversation-history-tab" :class="{ active: activeTab === 'history' }" type="button" aria-label="对话历史" title="对话历史" @click="showResourceTab('history')"><UiIcon name="clock" :size="15" /><b>对话历史</b></button>
         <div v-if="activeTab !== 'workgroups'" class="open-resource-tabs"><div v-if="workspaceOpened" class="open-resource-tab" :class="{ active: activeTab === 'file' }"><button class="resource-tab-main" :title="workspaceName" @click="showWorkspace"><span class="icon-mask tab-icon" :style="maskStyle(folderOpenIcon)"></span><span class="resource-tab-label">{{ workspaceName }}</span></button><button class="tab-close" aria-label="关闭工作区" title="关闭工作区" @click="workspaceOpened = false; showChat()"><UiIcon name="close" :size="14" /></button></div><div v-if="browserOpened" class="open-resource-tab" :class="{ active: activeTab === 'browser' }"><button class="resource-tab-main" :title="browserName" @click="showBrowser"><span class="icon-mask tab-icon" :style="maskStyle(browserIcon)"></span><span class="resource-tab-label">{{ browserName }}</span></button><button class="tab-close" aria-label="关闭浏览器" title="关闭浏览器" @click="browserOpened = false; showChat()"><UiIcon name="close" :size="14" /></button></div><div v-for="terminal in terminalInstances.filter(item => item.agentId === activeId)" :key="terminal.id" class="open-resource-tab" :class="{ active: activeTab === 'terminal' && activeTerminalInstanceId === terminal.id }"><button class="resource-tab-main" :title="terminal.name" @click="activateTerminal(terminal.id)"><span class="icon-mask tab-icon" :style="maskStyle(terminalIcon)"></span><span class="resource-tab-label">{{ terminal.name }}</span></button><button class="tab-close" :aria-label="`关闭 ${terminal.name}`" :title="`关闭 ${terminal.name}`" @click="closeTerminal('view-close', terminal.id)"><UiIcon name="close" :size="14" /></button></div></div>
       </div>
       <div v-if="status.setup_required" class="notice setup"><span>本地服务需要首次配置</span><button @click="showSettings">打开设置</button></div>
@@ -2160,14 +2779,15 @@ onUnmounted(() => {
         <div v-else-if="status.setup_required" class="empty-state"><div class="empty-icon"><i></i></div><h2>完成本地服务首次配置</h2><p>设置本地服务名称与模型后即可开始使用。</p><button class="quiet" @click="showSettings">打开设置</button></div>
         <div v-else-if="!activeAgent" class="empty-state"><h2>选择一个 Agent</h2><p>从左侧列表选择 Agent 开始对话。</p></div>
         <template v-else>
-          <div v-if="!chatEntries.length && !streamingText && !hitlQueue.length && !turnError" class="welcome"><div class="welcome-mark"><span class="icon-mask" :style="maskStyle(activeAgent?.agent_type === 'auto' ? autoAgentIcon : normalAgentIcon)"></span></div><h1>{{ activeAgent.display_name }}</h1><p>输入任务开始；也可以从资源菜单打开工作区、浏览器或终端。</p></div>
+          <div v-if="!chatEntries.length && !hitlQueue.length && !turnError" class="welcome"><div class="welcome-mark"><span class="icon-mask" :style="maskStyle(activeAgent?.agent_type === 'auto' ? autoAgentIcon : normalAgentIcon)"></span></div><h1>{{ activeAgent.display_name }}</h1><p>输入任务开始；也可以从资源菜单打开工作区、浏览器或终端。</p></div>
           <div v-else class="desktop-chat-wrapper app__body--chat-v61">
-            <MainChatPanel ref="chatPanel" :key="activeId" :agent-id="activeId" :entries="chatEntries" :streaming-text="streamingText" :turn-error="turnError" :model-recovery-available="modelRecoveryAvailable" :model-name="llmSettings?.model || ''" :model-profile="llmSettings?.active_profile || agentActiveProfile(activeAgent)" :hitl-queue="hitlQueue" :agent-title="activeAgent.display_name" :show-workspace-switcher="false" :sending="busy || agentGenerating" :hitl-busy="busy" :hitl-busy-index="hitlBusyIndex" @approve-selection="approveSelection" @reject-all="rejectAll" @open-model-picker="openModelPicker" @open-model-settings="openModelSettings(llmSettings?.active_profile || agentActiveProfile(activeAgent))" @user-info-submit="submitUserInfo" @user-info-selected="userInfoSelected = $event" @memory-conflict-decide="decideMemoryConflict" @memory-conflict-cancel="cancelMemoryConflict" />
+            <MainChatPanel ref="chatPanel" :key="activeId" :agent-id="activeId" :entries="chatEntries" :entries-revision="chatItemsRevision" :entries-change="chatEntriesChange" :reading-window="activeReadingWindow" :turn-error="turnError" :has-earlier-history="Boolean(hydrate?.has_earlier_history)" :model-recovery-available="modelRecoveryAvailable" :model-name="llmSettings?.model || ''" :model-profile="llmSettings?.active_profile || agentActiveProfile(activeAgent)" :hitl-queue="hitlQueue" :turn-state="conversationStore.turnState" :agent-title="activeAgent.display_name" :show-workspace-switcher="false" :sending="busy || agentGenerating" :hitl-busy="busy" :hitl-busy-index="hitlBusyIndex" @approve-selection="approveSelection" @reject-all="rejectAll" @open-history="showConversationHistory" @reading-window-change="onChatReadingWindowChange" @open-model-picker="openModelPicker" @open-model-settings="openModelSettings(llmSettings?.active_profile || agentActiveProfile(activeAgent))" @user-info-submit="submitUserInfo" @user-info-selected="userInfoSelected = $event" @memory-conflict-decide="decideMemoryConflict" @memory-conflict-cancel="cancelMemoryConflict" @queued-input-context-menu="openQueuedInputContextMenu" />
           </div>
         </template>
         <div v-if="error && status.online && !status.setup_required" class="desktop-error-hint desktop-error-hint--visible" role="alert">
           <UiIcon name="alert" :size="14" aria-hidden="true" />
           <span>操作未完成</span>
+          <button v-if="canRetryHydrateSync" class="desktop-error-hint__retry" type="button" aria-label="重试同步结果" title="重试同步结果" @click.stop="retryHydrateSync"><UiIcon name="refresh-cw" :size="13" /></button>
           <button v-if="isTauri && !activeAgent" class="desktop-error-hint__retry" type="button" aria-label="重试连接" title="重试" @click.stop="loadAgents"><UiIcon name="refresh-cw" :size="13" /></button>
           <span class="desktop-error-hint__message">{{ error }}</span>
         </div>
@@ -2185,12 +2805,15 @@ onUnmounted(() => {
       <Transition name="composer-page" :css="composerPageTransitionEnabled('browser')" @after-leave="onComposerPageAfterLeave('browser', $event)" @after-enter="onComposerPageAfterEnter('browser', $event)">
       <section v-if="visitedTabs.has('browser') && (displayedTab === 'browser' || browserOpened)" v-show="composerPageVisible('browser')" data-composer-page="browser" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><BrowserViewer ref="browserViewerPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('browser')" @resource-name="browserName = $event" @open-connection-settings="openBrowserCapabilitySettings" /></section>
       </Transition>
+      <Transition name="composer-page" :css="composerPageTransitionEnabled('history')" @after-leave="onComposerPageAfterLeave('history', $event)" @after-enter="onComposerPageAfterEnter('history', $event)">
+      <section v-if="visitedTabs.has('history') && (displayedTab === 'history' || historyOpened)" v-show="composerPageVisible('history')" data-composer-page="history" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><ConversationHistoryPanel v-if="activeId && !isWorkgroupView" :key="activeId" :agent-id="activeId" :agent-name="activeAgent?.display_name || ''" @resubmitted="onConversationResubmitted" /></section>
+      </Transition>
       <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @removed="onWorkgroupRemoved" @context-menu="openDelegatedContextMenu" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
       <ComposerSurface :mode="composerMode" @transition-start="onComposerTransitionStart" @transition-settled="onComposerTransitionSettled">
       <template #chat>
       <footer class="composer-wrap"><div v-if="composerWriteRequest" class="desktop-composer-progress-pill" role="status" aria-live="polite">{{ composerWriteProgress?.phase === 'committing' ? '正在提交，取消后结果可能未知。' : composerWriteProgress?.total ? `导入进度 ${Math.min(100, Math.floor(composerWriteProgress.bytes * 100 / composerWriteProgress.total))}%` : '正在准备导入…' }}<button type="button" @click="cancelComposerImport">请求取消</button></div><div v-if="pendingImages.length || pendingFiles.length || pendingWorkspaceReferences.length" class="composer-attachments" role="group" aria-label="待发送附件和引用"><button v-for="(image, index) in pendingImages" :key="image.name + index" class="composer-attachment" type="button" :title="image.name" @click="previewImage(image)"><img :src="image.url" :alt="image.name"><span>{{ image.name }}</span><i @click.stop="removeImage(index)">×</i></button><button v-for="(file,index) in pendingFiles" :key="file.path" class="composer-attachment file-attachment" type="button" :title="file.path"><span class="icon-mask tab-icon" :style="maskStyle(fileIcon)"></span><span>{{ file.name }}</span><i @click.stop="pendingFilesByAgent[activeId].splice(index,1)">×</i></button><WorkspaceReferenceAttachments :references="pendingWorkspaceReferences" @remove="removeWorkspaceReferenceById" /></div><form class="composer" @submit.prevent="send" @dragover.prevent @drop.prevent="handleAttachmentDrop">
   <input ref="imageAttachmentInput" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple @change="addImages">
-  <textarea ref="textarea" v-model="input" class="composer-input" :disabled="!activeId || !status.online || status.setup_required" placeholder="发送消息…" title="Enter 发送，Shift+Enter 换行；可拖放或粘贴附件" @input="resizeComposer" @paste="handleAttachmentPaste" @keydown.enter.exact.prevent="send"></textarea>
+      <textarea ref="textarea" v-model="input" class="composer-input" :disabled="!activeId || !status.online || status.setup_required" placeholder="发送消息…" :title="composerIntent === 'queue' ? 'Enter 将消息加入等待队列；Shift+Enter 换行' : 'Enter 发送，Shift+Enter 换行；可拖放或粘贴附件'" @input="resizeComposer" @paste="handleAttachmentPaste" @keydown.enter.exact.prevent="send"></textarea>
   <div class="composer-toolbar-row">
     <div class="composer-toolbar-left">
       <div ref="attachmentActionAnchor" class="attachment-action">
@@ -2204,11 +2827,13 @@ onUnmounted(() => {
     </div>
     <div class="composer-toolbar-right">
       <button v-if="failedSendDraft" type="button" class="restore-failed-draft composer-restore" :disabled="!!input.trim()" @click="restoreFailedSendDraft('chat')">恢复失败消息</button>
-      <ComposerToolbar ref="composerToolbar" class="desktop-composer-toolbar" :llm-settings="llmSettings" :profile-catalog="llmProfileCatalog" :settings-profile-id="agentActiveProfile(activeAgent)" :desktop-compact="true" :disabled="turnInProgress || !activeId" :status-label="composerRuntimeStatus" @switch-profile="switchLLMProfile" @open-model-settings="openModelSettings"/>
-      <button class="send-button composer-action" type="button" :class="{ 'is-stop': agentGenerating }" :disabled="agentGenerating ? !canStopFromComposer || cancellingTurn : !canSendMessage || !hasComposerContent || !activeId" :aria-label="agentGenerating ? (cancellingTurn ? '正在停止本轮' : '停止本轮') : '发送消息'" :title="agentGenerating ? (cancellingTurn ? '正在停止本轮…' : '停止本轮') : '发送消息'" :aria-busy="cancellingTurn" @click="agentGenerating ? stopCurrentTurn() : send()"><span class="icon-mask send-icon composer-action__send" :style="maskStyle(sendIcon)" aria-hidden="true"></span><span class="icon-mask send-icon composer-action__stop" :style="maskStyle(stopIcon)" aria-hidden="true"></span></button>
+      <ComposerToolbar ref="composerToolbar" class="desktop-composer-toolbar" :llm-settings="llmSettings" :profile-catalog="llmProfileCatalog" :settings-profile-id="agentActiveProfile(activeAgent)" :desktop-compact="true" :disabled="turnInProgress || !activeId" :status-label="composerStatusLabel" :status-action-label="canRetryHydrateSync ? '重试同步结果' : ''" @status-action="retryHydrateSync" @switch-profile="switchLLMProfile" @open-model-settings="openModelSettings"/>
+      <button v-if="queuedInputsPaused" class="icon-only composer-queue-resume" type="button" :disabled="queueControlPending" :aria-label="queueControlPending ? '正在继续处理待处理消息' : '继续处理待处理消息'" :title="queueControlPending ? '正在继续处理…' : `继续处理 ${hydrate.pending_inputs.length} 条待处理消息`" @click="resumeQueuedInputs"><UiIcon name="play" :size="16" /></button>
+      <button class="send-button composer-action" type="button" :disabled="!canSendMessage || messageSubmitPending || !hasComposerContent || !activeId || !status.online || status.setup_required" :aria-label="composerIntent === 'queue' ? '加入等待队列' : '发送消息'" :title="composerIntent === 'queue' ? '加入等待队列' : '发送消息'" @click="send"><span class="icon-mask send-icon" :style="maskStyle(sendIcon)" aria-hidden="true"></span></button>
+      <button class="send-button composer-action composer-stop-action" :class="{ 'is-hidden': !agentGenerating }" type="button" :disabled="!agentGenerating || !canStopFromComposer || cancellingTurn" :aria-hidden="!agentGenerating" :tabindex="agentGenerating ? 0 : -1" :aria-label="cancellingTurn ? '正在停止本轮' : '停止本轮'" :title="cancellingTurn ? '正在停止本轮…' : '停止本轮'" :aria-busy="cancellingTurn" @click="stopCurrentTurn"><span class="icon-mask send-icon" :style="maskStyle(stopIcon)" aria-hidden="true"></span></button>
     </div>
   </div>
-</form><Transition name="composer-notice"><p v-if="commandNotice" class="composer-notice" role="status" aria-live="polite">{{ commandNotice }}</p></Transition><div class="composer-foot"><span>内容发送到当前 Agent</span></div></footer>
+</form><Transition name="composer-notice"><p v-if="commandNotice" class="composer-notice" role="status" aria-live="polite">{{ commandNotice }}</p></Transition><div class="composer-foot"><span>{{ composerIntent === 'queue' ? '按 Enter 将消息加入等待队列' : '内容发送到当前 Agent' }}</span></div></footer>
       </template>
       <template #dock>
       <ResourceAgentDock
@@ -2224,8 +2849,10 @@ onUnmounted(() => {
         :model-profile="llmSettings?.active_profile || agentActiveProfile(activeAgent)"
         :agent-name="activeAgent?.display_name || '当前智能体'"
         :can-send="canSendMessage"
+        :queueing="composerIntent === 'queue'"
         :references="pendingWorkspaceReferences"
-        :disabled="!activeId || !status.online || status.setup_required || busy || cancellingTurn"
+        :disabled="!activeId || !status.online || status.setup_required"
+        :send-pending="messageSubmitPending"
         :can-stop="canStopFromComposer"
         :cancelling="cancellingTurn"
         :failed-draft="Boolean(failedSendDraft)"
@@ -2256,6 +2883,25 @@ onUnmounted(() => {
     <TerminalOpenDialog :open="terminalOpenDialog" :choices="terminalOpenChoices" :sessions="terminalSessions" :sessions-loading="terminalSessionLoading" :sessions-error="terminalSessionError" :channels-loading="terminalChannelLoading" :channels-error="terminalChannelError" @cancel="closeTerminalOpenDialog" @create="createTerminalFromDialog" @resume="resumeTerminalFromDialog" @retry-sessions="retryTerminalSessionList" @retry-channels="retryTerminalChannels" @open-settings="openLinuxChannelSettings" />
     <TerminalEndDialog :open="Boolean(terminalEndConfirmation)" :terminal-name="terminalEndConfirmation?.name" @cancel="cancelEndTerminal" @confirm="confirmEndTerminal" />
     <ScreenshotRegionDialog v-if="screenshotSelection" :image-url="screenshotSelection.url" @cancel="closeScreenshotSelection" @confirm="confirmScreenshotSelection" @error="onScreenshotSelectionError" />
+    <div v-if="dialog === 'queued-input-edit' && queuedInputEdit" class="dialog-scrim queued-input-edit-scrim" @click.self="closeQueuedInputEdit">
+      <section class="queued-input-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="queued-input-edit-title" @keydown.esc.stop.prevent="closeQueuedInputEdit">
+        <header class="queued-input-edit-dialog__head">
+          <div><h2 id="queued-input-edit-title">编辑待处理消息</h2><p>仅修改尚未开始处理的消息。</p></div>
+          <button class="desktop-icon-button" type="button" aria-label="关闭" title="关闭" :disabled="Boolean(queuedInputMutationId)" @click="closeQueuedInputEdit"><UiIcon name="close" :size="16" /></button>
+        </header>
+        <textarea ref="queuedInputEditField" v-model="queuedInputEditText" class="queued-input-edit-dialog__field" rows="7" aria-label="消息内容" :disabled="Boolean(queuedInputMutationId)" @keydown.ctrl.enter.prevent="saveQueuedInputEdit"></textarea>
+        <p v-if="queuedInputEdit.fileCount || queuedInputEdit.imageCount" class="queued-input-edit-dialog__attachments">
+          原消息的附件会保留：<span v-if="queuedInputEdit.fileCount">{{ queuedInputEdit.fileCount }} 个文件引用</span><span v-if="queuedInputEdit.fileCount && queuedInputEdit.imageCount"> · </span><span v-if="queuedInputEdit.imageCount">{{ queuedInputEdit.imageCount }} 张图片</span>
+        </p>
+        <p v-if="queuedInputEditError" class="queued-input-edit-dialog__error" role="alert">{{ queuedInputEditError }}</p>
+        <footer class="queued-input-edit-dialog__actions">
+          <button v-if="queuedInputEdit.status !== 'queued'" type="button" class="btn btn--sm" @click="copyQueuedEditToComposer">将修改内容放入输入栏</button>
+          <span class="queued-input-edit-dialog__spacer"></span>
+          <button type="button" class="btn btn--sm" :disabled="Boolean(queuedInputMutationId)" @click="closeQueuedInputEdit">取消</button>
+          <button type="button" class="btn btn--primary btn--sm" :disabled="queuedInputEdit.status !== 'queued' || Boolean(queuedInputMutationId)" @click="saveQueuedInputEdit">{{ queuedInputMutationId ? '保存中…' : '保存修改' }}</button>
+        </footer>
+      </section>
+    </div>
     <div v-if="dialog === 'auto-overview'" class="dialog-scrim auto-overview-scrim" @click.self="dialog = ''"><section class="auto-overview-dialog"><button class="dialog-close desktop-icon-button" type="button" aria-label="关闭" title="关闭" @click="dialog = ''"><UiIcon name="close" :size="16" /></button><AutoOverviewPanel ref="autoOverviewPanel" :action-error="autoOverviewActionError" @open-chat="openAutoChat" @open-config="openAutoConfig" @context-menu="openAutoOverviewContextMenu" /></section></div>
     <div v-if="showAgentCreate" class="agent-create-overlay"><AgentCreatePage @cancel="showAgentCreate = false" @created="onAgentCreated" /></div>
     <UiContextMenu v-model="entryContextMenu" :label="entryContextMenu?.title" @select="runEntryContextMenuItem" />

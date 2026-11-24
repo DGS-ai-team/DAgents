@@ -51,6 +51,18 @@ type SkillAccess struct {
 // the session-owned lifecycle projection cannot accept the fact.
 type LifecycleCommandSink func(sessionID string, command TurnCommand) error
 
+type HistoryMutationKind string
+
+const (
+	HistoryMutationAppend  HistoryMutationKind = "append"
+	HistoryMutationInsert  HistoryMutationKind = "insert"
+	HistoryMutationReplace HistoryMutationKind = "replace"
+)
+
+// HistoryMutationSink assigns persisted identity and records the ordered model
+// working-set mutation before it is applied to the Orchestrator's history.
+type HistoryMutationSink func(kind HistoryMutationKind, index int, message llm.Message) llm.Message
+
 // Orchestrator 驱动 LLM + 工具循环并通过 Hub 推送 SSE。
 type Orchestrator struct {
 	llm             llm.Client
@@ -89,11 +101,13 @@ type Orchestrator struct {
 	turnUsage   map[string]llm.Usage
 	// turnUsageLast stores the last provider snapshot for each model step.
 	// Providers may emit cumulative usage more than once during a stream.
-	turnUsageLast  map[string]map[int]llm.Usage
-	summaryMu      sync.Mutex
-	summaryNext    map[string]bool
-	noWorkMu       sync.Mutex
-	noWorkEligible map[string]bool
+	turnUsageLast     map[string]map[int]llm.Usage
+	terminalMu        sync.Mutex
+	terminalBySession map[string]pendingTerminalResult
+	summaryMu         sync.Mutex
+	summaryNext       map[string]bool
+	noWorkMu          sync.Mutex
+	noWorkEligible    map[string]bool
 
 	ctxMetrics *contextMetricsStore
 
@@ -111,6 +125,7 @@ type Orchestrator struct {
 	contextInjectionBuilder ContextInjectionBuilder
 	lifecycleMetadata       func(sessionID string) map[string]any
 	lifecycleCommand        LifecycleCommandSink
+	historyMutation         HistoryMutationSink
 	toolBudgetCheck         func(sessionID, toolCallID string) (bool, string)
 	executionFence          ExecutionFence
 	toolExecutionStatus     ToolExecutionStatusReader
@@ -388,6 +403,19 @@ func (o *Orchestrator) SetLifecycleCommandSink(fn LifecycleCommandSink) {
 		return
 	}
 	o.lifecycleCommand = fn
+}
+
+func (o *Orchestrator) SetHistoryMutationSink(fn HistoryMutationSink) {
+	if o != nil {
+		o.historyMutation = fn
+	}
+}
+
+func (o *Orchestrator) normalizeHistoryMutation(kind HistoryMutationKind, index int, message llm.Message) llm.Message {
+	if o != nil && o.historyMutation != nil {
+		return o.historyMutation(kind, index, message)
+	}
+	return message
 }
 
 // SetToolBudgetCheck attaches the runtime-owned preflight for a ToolBatch.
@@ -930,9 +958,12 @@ func (o *Orchestrator) runOneStep(
 				reference = sessionID + "/step-" + fmt.Sprint(stepIndex)
 			}
 			partial := llm.Message{
-				Role:    "assistant",
-				Content: result.Content,
-				Source:  &llm.MessageSource{Kind: llm.MessageSourceModel},
+				Role:             "assistant",
+				Content:          result.Content,
+				ReasoningContent: result.ReasoningContent,
+				Source:           &llm.MessageSource{Kind: llm.MessageSourceModel},
+				DisplayIdentity:  llm.AssistantDisplayIdentityForStep(execution.StepID),
+				RecordID:         llm.AssistantMessageIDForStep(execution.StepID),
 				Provenance: &llm.MessageProvenance{
 					Producer: "model", Operation: "partial_response",
 					Reference: reference,
@@ -1022,6 +1053,10 @@ func (o *Orchestrator) runOneStep(
 	}
 
 	assistant := assistantMessageFromResult(result)
+	if execution, ok := ExecutionContextFromContext(ctx); ok {
+		assistant.DisplayIdentity = llm.AssistantDisplayIdentityForStep(execution.StepID)
+		assistant.RecordID = llm.AssistantMessageIDForStep(execution.StepID)
+	}
 	if err := llm.ValidateAssistantMessage(assistant); err != nil {
 		o.runTurnErrorPhase(ctx, sessionID, history, err)
 		o.publishError(sessionID, fmt.Sprintf("invalid provider tool call: %v", err))
@@ -1034,7 +1069,7 @@ func (o *Orchestrator) runOneStep(
 		Type:               CommandAssistantReceived,
 		At:                 time.Now().UTC(),
 		HasTools:           len(result.ToolCalls) > 0,
-		AssistantMessageID: Digest(assistant),
+		AssistantMessageID: assistantLifecycleID(ctx),
 		AssistantMessage:   &assistant,
 		Reason:             "assistant_message_recorded",
 	}); err != nil {

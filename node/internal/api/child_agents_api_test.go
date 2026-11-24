@@ -81,8 +81,8 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 	}
 	defer streamResp.Body.Close()
 
-	msgBody := `{"agent_id":"` + parentID + `","request_type":"message","content":"请委派子 Agent 检查 README"}`
-	msgReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL+"/v1/messages", strings.NewReader(msgBody))
+	msgBody := testIdempotentMessageBody(t, parentID, "请委派子 Agent 检查 README")
+	msgReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL+"/v1/messages", bytes.NewReader(msgBody))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,9 +149,11 @@ func TestChildAgentMockLLME2E(t *testing.T) {
 			childID, _ = envelope.Data["child_agent_id"].(string)
 		case "temporary_agent_completed":
 			gotCompleted = true
-		case "assistant":
-			if c, ok := envelope.Data["content"].(string); ok {
-				assistant.WriteString(c)
+		case "conversation_delta":
+			if envelope.Data["part"] == "content" {
+				if c, ok := envelope.Data["content"].(string); ok {
+					assistant.WriteString(c)
+				}
 			}
 		case "turn_finished":
 			gotDone = true
@@ -227,8 +229,8 @@ func TestChildAgentHTTPCancel(t *testing.T) {
 	}
 	defer streamResp.Body.Close()
 
-	msgBody := `{"agent_id":"` + parentID + `","request_type":"message","content":"启动同步子任务"}`
-	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(msgBody))
+	msgBody := testIdempotentMessageBody(t, parentID, "启动同步子任务")
+	msgResp, err := http.Post(ts.URL+"/v1/messages", "application/json", bytes.NewReader(msgBody))
 	if err != nil {
 		t.Fatal(err)
 	}

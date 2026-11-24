@@ -1,9 +1,6 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   resolveToolStepPhase,
-  toolStepIsActiveInGroup,
-  toolStepIsInProgress,
-  toolStepIsPending,
   toolStepPurpose,
   toolStepPurposeOrToolLabel,
   toolStepStatusText,
@@ -11,7 +8,6 @@ import {
   toolStepToolLabelParts,
   toolStepUserSummary,
 } from "./toolUserLabel.js";
-import { applyToolJobsSnapshot } from "../stores/toolJobs.js";
 
 describe("toolStepUserSummary", () => {
   it("uses purpose for bash_run", () => {
@@ -162,10 +158,6 @@ describe("toolStepToolLabel", () => {
 });
 
 describe("toolStepStatusText", () => {
-  beforeEach(() => {
-    applyToolJobsSnapshot({ running: 0, running_call_ids: [] });
-  });
-
   it("uses the structured status for a cancelled bash result", () => {
     expect(
       toolStepStatusText({
@@ -206,9 +198,8 @@ describe("toolStepStatusText", () => {
 
   it("shows running for parallel tool_call without result", () => {
     const call = { kind: "tool_call", data: { tool_name: "read_file", tool_call_id: "c2" } };
+    expect(resolveToolStepPhase({ callEntry: call, resultEntry: null })).toBe("running");
     expect(toolStepStatusText({ callEntry: call, resultEntry: null })).toBe("执行中");
-    expect(toolStepIsPending({ callEntry: call, resultEntry: null })).toBe(false);
-    expect(toolStepIsInProgress({ callEntry: call, resultEntry: null })).toBe(true);
   });
 
   it("treats a content-less partial tool call as generating", () => {
@@ -219,34 +210,24 @@ describe("toolStepStatusText", () => {
     };
     expect(resolveToolStepPhase({ callEntry: call, resultEntry: null })).toBe("generating");
     expect(toolStepStatusText({ callEntry: call, resultEntry: null })).toBe("生成中");
-    expect(toolStepIsInProgress({ callEntry: call, resultEntry: null })).toBe(true);
   });
 
   it("shows pending only when executionHint marks HITL-gated call", () => {
     const call = { kind: "tool_call", data: { tool_name: "bash_run", tool_call_id: "c-hitl" } };
+    expect(resolveToolStepPhase({ callEntry: call, resultEntry: null, executionHint: "pending" })).toBe("pending");
     expect(toolStepStatusText({ callEntry: call, resultEntry: null, executionHint: "pending" })).toBe(
       "待执行",
     );
-    expect(toolStepIsPending({ callEntry: call, resultEntry: null, executionHint: "pending" })).toBe(
-      true,
-    );
-    expect(toolStepIsInProgress({ callEntry: call, resultEntry: null, executionHint: "pending" })).toBe(
-      false,
-    );
   });
 
-  it("shows running when executionHint is active or call is in running list", () => {
+  it("shows running from the authoritative lifecycle hint", () => {
     const call = { kind: "tool_call", data: { tool_name: "bash_run", tool_call_id: "c3" } };
     expect(
       toolStepStatusText({ callEntry: call, resultEntry: null, executionHint: "active" }),
     ).toBe("执行中");
-    expect(toolStepIsInProgress({ callEntry: call, resultEntry: null, executionHint: "active" })).toBe(
-      true,
-    );
 
-    applyToolJobsSnapshot({ running: 1, running_call_ids: ["c3"] });
-    expect(resolveToolStepPhase({ callEntry: call, resultEntry: null })).toBe("running");
-    expect(toolStepStatusText({ callEntry: call, resultEntry: null })).toBe("执行中");
+    expect(resolveToolStepPhase({ callEntry: call, resultEntry: null, executionHint: "active" })).toBe("running");
+    expect(toolStepStatusText({ callEntry: call, resultEntry: null, executionHint: "active" })).toBe("执行中");
   });
 
   it("shows background for an explicitly queued tool result", () => {
@@ -269,41 +250,31 @@ describe("toolStepStatusText", () => {
       data: { tool_name: "bash_run", tool_call_id: "bash-last", status: "failed", exit_code: 1 },
     };
     const step = { callEntry, resultEntry, executionHint: "active" };
-    applyToolJobsSnapshot({ running: 1, running_call_ids: ["bash-last"] });
-
     expect(resolveToolStepPhase(step)).toBe("failed");
-    expect(toolStepIsActiveInGroup(step)).toBe(false);
   });
 
   it("prefers an existing failed or queued result over a stale settled hint", () => {
     const callEntry = { kind: "tool_call", data: { tool_name: "bash_run", tool_call_id: "bash-result" } };
     const failedResult = { kind: "tool_result", data: { tool_name: "bash_run", tool_call_id: "bash-result", status: "failed" } };
     const queuedResult = { kind: "tool_result", data: { tool_name: "bash_run", tool_call_id: "bash-result", status: "queued" } };
-    applyToolJobsSnapshot({ running: 1, running_call_ids: ["bash-result"] });
-
     expect(resolveToolStepPhase({ callEntry, resultEntry: failedResult, executionHint: "settled" })).toBe("failed");
     expect(resolveToolStepPhase({ callEntry, resultEntry: queuedResult, executionHint: "settled" })).toBe("background");
-    expect(toolStepIsInProgress({ callEntry, resultEntry: queuedResult, executionHint: "settled" })).toBe(true);
   });
 
-  it.each(["running", "queued"])("keeps a nonterminal bash result in progress (%s)", (status) => {
+  it.each(["running", "queued"])("projects a nonterminal bash result to its active phase (%s)", (status) => {
     const callEntry = { kind: "tool_call", data: { tool_name: "bash_run", tool_call_id: "bash-live" } };
     const resultEntry = { kind: "tool_result", data: { tool_name: "bash_run", tool_call_id: "bash-live", status } };
-    const step = { callEntry, resultEntry, executionHint: "active" };
-    applyToolJobsSnapshot({ running: 1, running_call_ids: ["bash-live"] });
-
-    expect(toolStepIsActiveInGroup(step)).toBe(true);
+    expect(resolveToolStepPhase({ callEntry, resultEntry, executionHint: "active" })).toBe(status === "queued" ? "background" : "running");
   });
 
-  it("prefers a real running job over a stale partial tool call", () => {
+  it("prefers the authoritative active lifecycle over a partial tool call", () => {
     const call = {
       kind: "tool_call",
       partial: true,
       data: { tool_name: "bash_run", tool_call_id: "c-partial-running" },
     };
-    applyToolJobsSnapshot({ running: 1, running_call_ids: ["c-partial-running"] });
-    expect(resolveToolStepPhase({ callEntry: call })).toBe("running");
-    expect(toolStepStatusText({ callEntry: call })).toBe("执行中");
+    expect(resolveToolStepPhase({ callEntry: call, executionHint: "active" })).toBe("running");
+    expect(toolStepStatusText({ callEntry: call, executionHint: "active" })).toBe("执行中");
   });
 
 });

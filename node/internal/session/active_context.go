@@ -104,6 +104,7 @@ func (m *Manager) ResetActiveContext(ctx context.Context, sessionID, boundary, r
 	r.activeContextStart = b.Index
 	r.lastContextResetID = rid
 	r.historyRevision++
+	r.noteCheckpointDirtyLocked()
 	r.mu.Unlock()
 	if err := r.persist(ctx); err != nil {
 		r.mu.Lock()

@@ -8,14 +8,21 @@ import (
 // RuntimeState 保存会话的非生命周期运行时状态。
 // Turn/Step/Interaction 状态统一由生命周期事件重放得到，不在这里复制。
 type RuntimeState struct {
-	// InputBoxState is the serialized FIFO tail of external user/trigger/child-agent
-	// inputs. Resume/cancel remain control-plane operations and are not stored
-	// here.
+	// InputBoxState stores only queue watermarks and the queue storage version.
+	// Input payloads live in conversation_input_queue; receipts live in
+	// conversation_inputs. Resume/cancel remain control-plane operations.
 	InputBoxState json.RawMessage `json:"input_box_state,omitempty"`
 	// HistoryRevision monotonically identifies the committed message snapshot.
 	// It is independent from the SSE Hub sequence and the Turn lifecycle
 	// sequence, so hydrate callers can reject an older transcript projection.
 	HistoryRevision uint64 `json:"history_revision,omitempty"`
+	// ContextCheckpointRevision is allocated independently by conversation
+	// storage and does not share the transcript revision namespace.
+	ContextCheckpointRevision uint64 `json:"context_checkpoint_revision,omitempty"`
+	// ConversationRevision is the CAS revision for explicit record/checkpoint deltas.
+	ConversationRevision uint64 `json:"conversation_revision,omitempty"`
+	ActiveRoundID        string `json:"active_round_id,omitempty"`
+	ActiveRevisionID     string `json:"active_revision_id,omitempty"`
 	// ToolCallProjectionHiddenThroughGeneration preserves a context-clear display
 	// boundary while leaving lifecycle facts available for recovery.
 	ToolCallProjectionHiddenThroughGeneration uint64 `json:"tool_call_projection_hidden_through_generation,omitempty"`

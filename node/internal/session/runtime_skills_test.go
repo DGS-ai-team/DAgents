@@ -2,13 +2,16 @@ package session
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
+	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 )
 
@@ -103,6 +106,156 @@ func TestRuntimeCompressionRefreshesSkillMetadataPromptBoundary(t *testing.T) {
 	latestPrompt := rt.orch.SystemPromptForSession(rt.session.ID)
 	if !strings.Contains(latestPrompt, "writer: v2") || strings.Contains(latestPrompt, "writer: v1") {
 		t.Fatalf("compression did not refresh the prompt metadata boundary: %q", latestPrompt)
+	}
+}
+
+func TestManualCompressionPreservesPersistedConversationRecords(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	skillPath := filepath.Join(root, "skills", "writer", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRuntimeSkill(t, skillPath, "v1", "body")
+	dbPath := filepath.Join(root, "sessions.db")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if st != nil {
+			_ = st.Close()
+		}
+	}()
+
+	client := &compressionSkillBoundaryClient{skillPath: skillPath}
+	initial := []llm.Message{
+		llm.UserMessage("第一轮用户原文", llm.UserNameHuman),
+		{Role: "assistant", Content: "第一轮助手原文"},
+		llm.UserMessage("第二轮用户原文", llm.UserNameHuman),
+	}
+	rt := newRuntimeWithPublisher(
+		"session-compress-records", "agent-1", stream.NewHub(32, logx.Discard()), nil, client, nil, nil, st, logx.Discard(),
+		initial, nil, nil, 0, 0,
+		TurnOptions{WorkspaceRoot: root, SkillsRoot: filepath.Dir(filepath.Dir(skillPath)), SkillsEnabled: true, SkillsMaxInPrompt: 2, CompressionBlocking: 1}, nil,
+	)
+	rt.mu.Lock()
+	for i := range rt.messages {
+		recordID, idErr := llm.NewOpaqueRecordID()
+		if idErr != nil {
+			rt.mu.Unlock()
+			t.Fatal(idErr)
+		}
+		rt.messages[i].RecordID = recordID
+		rt.noteRecordUpsertLocked(rt.messages[i])
+	}
+	rt.noteCheckpointDirtyLocked()
+	rt.mu.Unlock()
+	if err := rt.persist(ctx); err != nil {
+		t.Fatalf("persist initial conversation: %v", err)
+	}
+	before, err := st.LoadConversationRecords(ctx, rt.session.ID)
+	if err != nil {
+		t.Fatalf("load initial conversation records: %v", err)
+	}
+	if len(before) < len(initial) {
+		t.Fatalf("initial persisted record count = %d, want at least %d", len(before), len(initial))
+	}
+	_, checkpointBefore, found, err := st.LoadConversationRevisions(ctx, rt.session.ID)
+	if err != nil || !found {
+		t.Fatalf("load initial revisions: found=%v err=%v", found, err)
+	}
+	beforeMessages := rt.messagesSnapshot()
+	rt.mu.Lock()
+	beforeHistoryRevision := rt.historyRevision
+	rt.deltaMu.Lock()
+	beforeCheckpointDirty := rt.checkpointDirty
+	rt.deltaMu.Unlock()
+	rt.mu.Unlock()
+	faultDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := faultDB.Exec(`CREATE TRIGGER fail_manual_compression_checkpoint BEFORE INSERT ON context_checkpoints WHEN NEW.conversation_id='session-compress-records' BEGIN SELECT RAISE(ABORT,'injected compression checkpoint failure'); END`); err != nil {
+		faultDB.Close()
+		t.Fatal(err)
+	}
+	faultDB.Close()
+
+	failed := rt.compressContext(ctx)
+	if failed.Status != "persistence_failed" {
+		t.Fatalf("compression with failed checkpoint persistence = %+v, want persistence_failed", failed)
+	}
+	if got := rt.messagesSnapshot(); !reflect.DeepEqual(got, beforeMessages) {
+		t.Fatalf("failed compression changed in-memory messages: got=%+v want=%+v", got, beforeMessages)
+	}
+	rt.mu.Lock()
+	gotHistoryRevision := rt.historyRevision
+	rt.deltaMu.Lock()
+	gotCheckpointDirty := rt.checkpointDirty
+	rt.deltaMu.Unlock()
+	rt.mu.Unlock()
+	if gotHistoryRevision != beforeHistoryRevision || gotCheckpointDirty != beforeCheckpointDirty {
+		t.Fatalf("failed compression left in-memory revisions dirty: history=%d/%d checkpoint_dirty=%v/%v", gotHistoryRevision, beforeHistoryRevision, gotCheckpointDirty, beforeCheckpointDirty)
+	}
+	afterFailure, err := st.LoadConversationRecords(ctx, rt.session.ID)
+	if err != nil || !reflect.DeepEqual(afterFailure, before) {
+		t.Fatalf("failed compression changed persisted records: records=%+v err=%v", afterFailure, err)
+	}
+	_, checkpointAfterFailure, found, err := st.LoadConversationRevisions(ctx, rt.session.ID)
+	if err != nil || !found || checkpointAfterFailure != checkpointBefore {
+		t.Fatalf("failed compression changed checkpoint revision: got=%d want=%d found=%v err=%v", checkpointAfterFailure, checkpointBefore, found, err)
+	}
+	faultDB, err = sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := faultDB.Exec(`DROP TRIGGER fail_manual_compression_checkpoint`); err != nil {
+		faultDB.Close()
+		t.Fatal(err)
+	}
+	faultDB.Close()
+
+	result := rt.compressContext(ctx)
+	if result.Status != "applied" {
+		t.Fatalf("compression result = %+v", result)
+	}
+	after, err := st.LoadConversationRecords(ctx, rt.session.ID)
+	if err != nil {
+		t.Fatalf("load records after compression: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("record count after compression = %d, want %d", len(after), len(before))
+	}
+	for i := range before {
+		if after[i].RecordID != before[i].RecordID || after[i].Content != before[i].Content || after[i].Role != before[i].Role {
+			t.Fatalf("compression changed persisted record %d: before=%+v after=%+v", i, before[i], after[i])
+		}
+	}
+	_, checkpointAfter, found, err := st.LoadConversationRevisions(ctx, rt.session.ID)
+	if err != nil || !found || checkpointAfter <= checkpointBefore {
+		t.Fatalf("checkpoint revision after compression = %d, before=%d found=%v err=%v", checkpointAfter, checkpointBefore, found, err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store before cold reopen: %v", err)
+	}
+	st = nil
+	reopened, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen store after compression: %v", err)
+	}
+	st = reopened
+	reopenedRecords, err := st.LoadConversationRecords(ctx, rt.session.ID)
+	if err != nil {
+		t.Fatalf("load conversation records after cold reopen: %v", err)
+	}
+	if len(reopenedRecords) != len(before) {
+		t.Fatalf("record count after cold reopen = %d, want %d", len(reopenedRecords), len(before))
+	}
+	for i := range before {
+		if reopenedRecords[i].RecordID != before[i].RecordID || reopenedRecords[i].Content != before[i].Content || reopenedRecords[i].Role != before[i].Role {
+			t.Fatalf("cold reopen changed persisted record %d: before=%+v reopened=%+v", i, before[i], reopenedRecords[i])
+		}
 	}
 }
 

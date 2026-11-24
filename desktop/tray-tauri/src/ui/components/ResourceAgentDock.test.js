@@ -5,7 +5,7 @@ import { h, nextTick } from 'vue'
 import ResourceAgentDock from './ResourceAgentDock.vue'
 
 describe('ResourceAgentDock', () => {
-  it('renders one compact input row with status, expansion, and a single send action', () => {
+  it('renders stable send and stop slots alongside status and expansion controls', () => {
     const wrapper = mount(ResourceAgentDock, {
       props: { modelValue: 'hello', status: 'pending', pendingKind: 'approval', canSend: true },
     })
@@ -13,8 +13,9 @@ describe('ResourceAgentDock', () => {
     expect(wrapper.find('.dock-status-icon').classes()).toContain('icon-mask')
     expect(wrapper.find('.dock-status-icon').attributes('aria-label')).toContain('等待工具审批')
     expect(wrapper.find('.dock-status-icon').attributes('title')).toContain('等待工具审批')
-    expect(wrapper.findAll('.dock-action')).toHaveLength(1)
-    expect(wrapper.find('.dock-action').attributes('aria-label')).toBe('发送消息')
+    expect(wrapper.findAll('.dock-action')).toHaveLength(2)
+    expect(wrapper.find('.dock-send-action').attributes('aria-label')).toBe('发送消息')
+    expect(wrapper.find('.dock-stop-action').classes()).toContain('is-hidden')
     expect(wrapper.find('.dock-details-panel').exists()).toBe(false)
     expect(wrapper.find('.dock-heading').exists()).toBe(false)
     wrapper.unmount()
@@ -31,24 +32,27 @@ describe('ResourceAgentDock', () => {
     wrapper.unmount()
   })
 
-  it('keeps send mode for a user-answer wait while preserving stop mode for approval waits', async () => {
+  it('queues ordinary input during user-answer and tool-approval waits without replacing the stop control', async () => {
     const wrapper = mount(ResourceAgentDock, {
-      props: { modelValue: 'answer', status: 'pending', pendingKind: 'user_input', canSend: true, canStop: false },
+      props: { modelValue: 'answer', status: 'pending', pendingKind: 'user_input', canSend: true, queueing: true, canStop: false },
     })
-    const action = wrapper.find('.dock-action')
-    expect(action.attributes('aria-label')).toBe('发送消息')
-    expect(action.attributes('disabled')).toBeUndefined()
+    const sendAction = wrapper.find('.dock-send-action')
+    const stopAction = wrapper.find('.dock-stop-action')
+    expect(sendAction.attributes('aria-label')).toBe('加入等待队列')
+    expect(sendAction.attributes('disabled')).toBeUndefined()
+    expect(stopAction.classes()).toContain('is-hidden')
     expect(wrapper.find('.dock-status-icon').attributes('aria-label')).toContain('等待你补充信息')
     expect(wrapper.find('.dock-expand-toggle').attributes('title')).toBe('展开消息区，查看待补充信息')
     await wrapper.find('.dock-input-surface').trigger('submit')
     expect(wrapper.emitted('send')).toHaveLength(1)
     expect(wrapper.emitted('stop')).toBeUndefined()
 
-    await wrapper.setProps({ canSend: false, canStop: true, pendingKind: 'approval' })
-    expect(wrapper.find('.dock-action').attributes('aria-label')).toBe('停止本轮')
+    await wrapper.setProps({ canSend: true, queueing: true, canStop: true, pendingKind: 'approval' })
+    expect(wrapper.find('.dock-send-action').attributes('aria-label')).toBe('加入等待队列')
+    expect(wrapper.find('.dock-stop-action').classes()).not.toContain('is-hidden')
     expect(wrapper.find('.dock-status-icon').attributes('aria-label')).toContain('等待工具审批')
     expect(wrapper.find('.dock-expand-toggle').attributes('title')).toBe('展开消息区，查看待审批请求')
-    await wrapper.find('.dock-action').trigger('click')
+    await wrapper.find('.dock-stop-action').trigger('click')
     expect(wrapper.emitted('stop')).toHaveLength(1)
     wrapper.unmount()
   })
@@ -69,7 +73,7 @@ describe('ResourceAgentDock', () => {
     wrapper.unmount()
   })
 
-  it('emits input, send, stop, and failed-draft restore actions without duplicate action buttons', async () => {
+  it('keeps send and stop controls mounted while emitting input, queue, stop, and restore actions', async () => {
     const wrapper = mount(ResourceAgentDock, {
       props: {
         modelValue: '', status: 'idle', canSend: true, failedDraft: true,
@@ -83,22 +87,36 @@ describe('ResourceAgentDock', () => {
     await wrapper.find('.dock-input-surface').trigger('submit')
     expect(wrapper.emitted('send')).toHaveLength(1)
 
-    const actionElement = wrapper.find('.dock-action').element
-    await wrapper.setProps({ status: 'generating', canStop: true, cancelling: false })
-    expect(wrapper.findAll('.dock-action')).toHaveLength(1)
-    expect(wrapper.find('.dock-action').element).toBe(actionElement)
-    expect(wrapper.find('.dock-action').attributes('aria-label')).toBe('停止本轮')
+    const sendElement = wrapper.find('.dock-send-action').element
+    const stopElement = wrapper.find('.dock-stop-action').element
+    await wrapper.setProps({ status: 'generating', canStop: true, canSend: true, queueing: true, cancelling: false })
+    expect(wrapper.findAll('.dock-action')).toHaveLength(2)
+    expect(wrapper.find('.dock-send-action').element).toBe(sendElement)
+    expect(wrapper.find('.dock-stop-action').element).toBe(stopElement)
+    expect(wrapper.find('.dock-send-action').attributes('aria-label')).toBe('加入等待队列')
+    expect(wrapper.find('.dock-stop-action').attributes('aria-label')).toBe('停止本轮')
     await wrapper.find('.dock-input-surface').trigger('submit')
-    expect(wrapper.emitted('send')).toHaveLength(1)
+    expect(wrapper.emitted('send')).toHaveLength(2)
     expect(wrapper.emitted('stop')).toBeUndefined()
-    await wrapper.find('.dock-action').trigger('click')
+    await wrapper.find('.dock-stop-action').trigger('click')
     expect(wrapper.emitted('stop')).toHaveLength(1)
     await wrapper.setProps({ cancelling: true })
-    await wrapper.find('.dock-action').trigger('click')
+    await wrapper.find('.dock-stop-action').trigger('click')
     expect(wrapper.emitted('stop')).toHaveLength(1)
     await wrapper.setProps({ cancelling: false, canStop: false })
-    await wrapper.find('.dock-action').trigger('click')
+    await wrapper.find('.dock-stop-action').trigger('click')
     expect(wrapper.emitted('stop')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('keeps the composer editable while a submission acknowledgement is pending', async () => {
+    const wrapper = mount(ResourceAgentDock, {
+      props: { modelValue: 'queued message', status: 'generating', canSend: true, queueing: true, sendPending: true },
+    })
+    expect(wrapper.find('.dock-message-input').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.dock-send-action').attributes('disabled')).toBeDefined()
+    await wrapper.find('.dock-message-input').setValue('draft stays editable')
+    expect(wrapper.emitted('update:modelValue').at(-1)).toEqual(['draft stays editable'])
     wrapper.unmount()
   })
 

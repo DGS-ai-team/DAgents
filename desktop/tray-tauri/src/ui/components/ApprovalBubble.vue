@@ -11,6 +11,7 @@ const props = defineProps({
   data: { type: Object, required: true },
   busy: { type: Boolean, default: false },
   requestKey: { type: String, default: "" },
+  streamItemKey: { type: String, default: "" },
 });
 
 const emit = defineEmits(["approve-selection", "reject-all"]);
@@ -95,7 +96,7 @@ function riskText(risk) {
 </script>
 
 <template>
-  <section class="approval-bubble" :aria-labelledby="headingId">
+  <section class="approval-bubble" :aria-labelledby="headingId" :data-stream-item-key="streamItemKey || undefined">
     <header class="approval-bubble__header">
       <h3 :id="headingId">需要确认</h3>
       <span v-if="items.length === 1 && items[0].risk" class="approval-risk" :class="`approval-risk--${items[0].risk}`">

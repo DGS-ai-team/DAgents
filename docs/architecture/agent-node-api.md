@@ -100,11 +100,18 @@ Content-Type: application/json
 ```http
 POST /v1/agents/{agent_id}/ensure
 GET  /v1/agents/{agent_id}/hydrate
+GET  /v1/agents/watermarks
 POST /v1/messages
 Content-Type: application/json
 
-{ "agent_id": "agt-xxx", "content": "你好" }
+{ "agent_id": "agt-xxx", "request_type": "message", "content": "你好", "client_request_id": "send-6b3e3551", "conversation_epoch": 1 }
 ```
+
+Hydrate 主聊天只读取最近 5 个已结束所选轮次与活动轮次，并包含必要的上下文边界标记。响应以 `has_earlier_history`、`earlier_round_count`、`window_start_round` 和 `window_end_round` 表示窗口状态；更早 transcript 通过下方轮次 / legacy item 分页 API 读取。
+
+hydrate 另返回独立的 `conversation_revision`，用于判断持久会话 transcript 是否前进；它与模型上下文 `history_revision`、Turn `lifecycle_seq` 和 SSE 序号属于不同版本域。`GET /v1/agents/watermarks` 批量返回 `stream_epoch` 以及每个已存储或已加载会话的 `conversation_id`、`conversation_revision`、`latest_agent_seq` 和 `result_commit_status`。该探测只查询会话 revision 元数据，不读取 runtime state JSON、transcript、工具结果或 checkpoint，也不会为了探测而启动会话。响应中的 `latest_agent_seq` 是待核对的目标提示，不是快照覆盖游标；客户端只能用版本差异触发既有 hydrate / 摘要刷新，不得把它当作已消费序号续订。
+
+Hydrate 还会返回 `stream_epoch`、`covered_agent_seq`、`covered_stream_seq` 与 `assistant_drafts`。Node 在同一个 Hub 读边界中捕获可靠 Agent 游标、全局流序号和当前 assistant / reasoning 草稿（每项包含 `item_id`、`turn_id`、`attempt_id`、`part`、累计 `text`、`through_chunk_seq`、`through_agent_seq` 与 `through_stream_seq`），再构造 runtime 投影。高频正文以 ephemeral `conversation_delta` 实时发送，不推进可靠 `agent_seq`；Desktop 使用全局流覆盖位对齐快照期间的这些增量。已提交的 assistant item、重试开始、终态 Turn 和上下文边界会从草稿快照中清除，旧 attempt 与终态 Turn 的迟到片段会被拒绝。`stream_seq_hint` / `agent_seq_hint` 仍只是响应时读取的诊断提示，不能代替覆盖水位。
 
 ### 2.3 Policy（按 Agent / SQLite）
 
@@ -142,11 +149,23 @@ Content-Type: application/json
 {
   "agent_id": "agt-xxx",
   "request_type": "message",
-  "content": "列出当前目录"
+  "content": "列出当前目录",
+  "client_request_id": "send-6b3e3551",
+  "conversation_epoch": 1
 }
 ```
 
-`request_type`：`message` | `resume`。
+`request_type`：`message` | `resume`。普通消息必须携带唯一的 `client_request_id` 与当前 hydrate 返回的 `conversation_epoch`。Node 在 durable 输入回执中校验规范化请求内容（正文、内容块、文件引用与用户名）：同 ID 同内容返回原输入身份，同 ID 不同内容返回 `409 input_request_conflict`，清空对话后旧 epoch 返回 `409 conversation_changed`。消息载荷的持久权威表为 `conversation_input_queue`，幂等回执位于 `conversation_inputs`；runtime `input_box_state` 只保存调度水位与 schema version，不再持有待执行消息正文。响应包含 `input_id`、`input_seq`、`input_revision`、`status`、`conversation_epoch` 与 `duplicate`。
+
+发送结果不明时可读取原回执，不要换 ID 重试：
+
+```http
+GET /v1/agents/{agent_id}/inputs?client_request_id=send-6b3e3551&conversation_epoch=1
+```
+
+`found: true` 返回原身份及当前 `queued` / `claimed` / `consumed` / `cancelled` 状态；`found: false` 时可用原 ID 和原内容重试。`resume` 作为控制请求不使用消息幂等字段。
+
+历史读取与 hydrate 分开：`GET /v1/agents/{agent_id}/conversations/{conversation_id}/rounds` 按 `before_round_id` 稳定锚点读取已结束轮次摘要；`GET .../rounds/{round_id}/revisions` 列出保留的终态版本，`GET .../rounds/{round_id}/items` 再按 `after_item_id` 分页读取所选或指定版本的只读 transcript。查看旧 revision 不会改变 live selected revision 或恢复 checkpoint。尚无轮次归属的旧记录由 `GET .../legacy-items` 按原始 item 顺序分页，不会被猜测分组。当前 1 Agent = 1 conversation，因此两 ID 相同。分页项目使用与 hydrate 一致的安全 transcript 投影，过滤内部上下文项；hydrate 首屏 transcript 目标不超过 512 KiB，每个 assistant 工具调用记录最多内联 50 个摘要。完整参数和结果由 `GET .../rounds/{round_id}/tool-steps/{tool_call_id}` 按需读取，剩余工具由 `GET .../rounds/{round_id}/tool-steps?source_item_id=...&after_tool_call_id=...&limit=50` 分页；Node 在一项中配对返回 call 与 result，result 查询使用持久化 `tool_call_id` 索引。超长消息正文通过 `GET .../rounds/{round_id}/items/{item_id}/content?part=content|reasoning` 按需读取。最新且当前选中的已结束 human 轮次另提供 `GET .../resubmit-target` 与 `POST .../resubmit`：服务端在读取、接收输入和启动新执行时校验会话空闲、轮次归属、选中版本与 checkpoint；重发创建同一逻辑轮的新 revision，旧版本继续只读保留，已有工具副作用不回滚。
 
 resume 示例（审批，与 `node/internal/hitl/resume.go` 一致）：
 
@@ -200,7 +219,7 @@ GET /v1/streams?agent_id=agt-xxx&after_agent_seq=42
 - 历史被截断时发送 `resync_required`，Client 必须 hydrate 后继续，不得静默跳过缺失事件。
 - 帧格式见 [附录/SSE事件速查.md](../handbook/附录/SSE事件速查.md)。
 
-核心事件：`assistant`、`reasoning`、`tool_call`、`tool_result`、`turn_state`、`hitl_required`、`turn_finished`、`notification_changed`、`side_effect_turn_start`、`side_effect_applied`、`side_effects_cleared`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`resync_required`。
+核心事件：`conversation_delta`（ephemeral assistant / reasoning 增量）、`tool_call`、`tool_result`、`turn_state`、`conversation_patch`、`hitl_required`、`turn_finished`、`notification_changed`、`side_effect_turn_start`、`side_effect_applied`、`side_effects_cleared`、`temporary_agent_created` / `temporary_agent_completed` / `temporary_agent_cancelled`、`error`、`resync_required`。旧 `assistant` / `reasoning` 流式事件不再由当前 Node 发布。
 
 **本地 turn** 统一使用 `hitl_required`。子 Agent 相关路径仍可能出现 `approval_required` / `user_information_required`，UI 按同类 HITL 处理即可。
 
@@ -289,7 +308,7 @@ async tool result 在 **任务未完成**（HITL、open batch、tool loop）时 
 | Apply（步首，可合并 `get_callback`） | 写入 1 条或多条 | **`side_effect_applied`**（无新 callback SSE） |
 | Continue LLM | 正常 assistant 流 | 流式 + `turn_finished` |
 
-**`implicit_turn` 语义**：**非**用户 `POST /v1/messages` 驱动的 turn。Client 收到 `side_effect_turn_start` 后应开启与 user submit 相同的 turn 栅栏（Go `TurnGate.BeginImplicitTurn`、Web `beginImplicitTurn`、Python `begin_implicit_turn`），以便接收后续 `assistant` / `turn_finished`。
+**`implicit_turn` 语义**：**非**用户 `POST /v1/messages` 驱动的 turn。Client 收到 `side_effect_turn_start` 后应开启与 user submit 相同的 turn 栅栏（Go `TurnGate.BeginImplicitTurn`、Web `beginImplicitTurn`、Python `begin_implicit_turn`），以便接收后续 `conversation_delta` / `turn_finished`。
 
 **Cancel 与缓冲**（`POST /v1/agents/{id}/cancel`）：
 
@@ -300,6 +319,8 @@ async tool result 在 **任务未完成**（HITL、open batch、tool loop）时 
 | 缓冲空 | 仅 abort，**不** schedule continue |
 | `pending` HITL **且** 缓冲非空 | **不** schedule continue；仅 resume 步首 Apply（普通 human message 不打断 pending） |
 | `POST .../clear-context` / `DELETE ...` | **丢弃** server 缓冲并发送 `side_effects_cleared`（与 Cancel 保留缓冲不同） |
+
+此外，HTTP cancel 同时暂停根级 `InputBox` 外部输入队列。`hydrate` 返回 `queue_paused` 和 `queue_control_revision`；用户显式继续时调用 `POST /v1/agents/{id}/inputs/control`，携带当前 revision 才会恢复 claim。此控制与上表描述的 side-effect 缓冲是两套不同队列：cancel 后既保留 side-effect recovery 缓冲，也保留已接受的 queued user inputs；不会因为当前 Turn 结束而自动启动下一条用户输入。内部审批准备轮的替换取消不会暂停用户队列。
 
 实现：`session/side_effects.go`、`session/runtime_side_effects.go`、`turn/sse_publish.go` → `PublishSideEffectCallback` / `PublishSideEffectTurnStart` / `PublishSideEffectApplied` / `PublishSideEffectsCleared`。
 

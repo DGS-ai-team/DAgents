@@ -50,6 +50,12 @@ export function getAgentInfo() {
   return apiFetch("/v1/node/info");
 }
 
+// Lightweight, content-free conversation revisions used to detect missed SSE
+// delivery without hydrating every background Agent.
+export function getAgentWatermarks() {
+  return apiFetch("/v1/agents/watermarks");
+}
+
 // 用户反馈由 Node 权威保存并负责向当前 Manage 投递；Desktop 只保存未提交草稿。
 export function listFeedback(params = {}) {
   return apiFetch("/v1/feedback", { params });
@@ -283,6 +289,52 @@ export function getAgentHydrate(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/hydrate`);
 }
 
+export function listConversationRounds(agentId, conversationId = agentId, { beforeRoundId = "", limit = 10 } = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(conversationId)}/rounds`, {
+    params: { before_round_id: beforeRoundId, limit },
+  });
+}
+
+export function listConversationRoundRevisions(agentId, conversationId, roundId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(conversationId)}/rounds/${encodeURIComponent(roundId)}/revisions`);
+}
+
+export function listConversationRoundItems(agentId, conversationId, roundId, { revisionId = "", afterItemId = "", limit = 50 } = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(conversationId)}/rounds/${encodeURIComponent(roundId)}/items`, {
+    params: { revision_id: revisionId, after_item_id: afterItemId, limit },
+  });
+}
+
+export function listConversationRoundToolSteps(agentId, conversationId, roundId, { revisionId = "", sourceItemId = "", afterToolCallId = "", limit = 50 } = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(conversationId)}/rounds/${encodeURIComponent(roundId)}/tool-steps`, {
+    params: { revision_id: revisionId, source_item_id: sourceItemId, after_tool_call_id: afterToolCallId, limit },
+  });
+}
+
+export function getConversationRoundToolStep(agentId, conversationId, roundId, toolCallId, { revisionId = "", sourceItemId = "" } = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(conversationId)}/rounds/${encodeURIComponent(roundId)}/tool-steps/${encodeURIComponent(toolCallId)}`, {
+    params: { revision_id: revisionId, source_item_id: sourceItemId },
+  });
+}
+
+export function getConversationItemContent(agentId, conversationId, roundId, itemId, { revisionId = "", part = "content" } = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(conversationId)}/rounds/${encodeURIComponent(roundId)}/items/${encodeURIComponent(itemId)}/content`, {
+    params: { revision_id: revisionId, part },
+  });
+}
+
+export function listConversationLegacyItems(agentId, conversationId = agentId, { afterItemId = "", limit = 50 } = {}) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(conversationId)}/legacy-items`, {
+    params: { after_item_id: afterItemId, limit },
+  });
+}
+
+export function getConversationResubmitTarget(agentId, conversationId, roundId, revisionId) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(conversationId)}/rounds/${encodeURIComponent(roundId)}/resubmit-target`, {
+    params: { revision_id: revisionId },
+  });
+}
+
 export function getAgentContext(agentId, { fullMessages = false } = {}) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/context`, {
     params: fullMessages ? { full_messages: "1" } : {},
@@ -291,6 +343,13 @@ export function getAgentContext(agentId, { fullMessages = false } = {}) {
 
 export function cancelAgentTurn(agentId) {
   return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/cancel`, { method: "POST", body: {} });
+}
+
+export function setInputQueuePaused(agentId, paused, expectedRevision) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/inputs/control`, {
+    method: "POST",
+    body: { paused: Boolean(paused), expected_revision: Number(expectedRevision) || 0 },
+  });
 }
 
 export function listTransfers(agentId = "") {
@@ -327,11 +386,159 @@ export function postAgentAck(agentId, agentSeq) {
   });
 }
 
-export function submitMessage(agentId, content, contentParts = null, fileRefs = null) {
-  const body = { agent_id: agentId, request_type: "message", content: content || "" };
-  if (Array.isArray(contentParts) && contentParts.length) {
-    body.content_parts = contentParts;
+function makeClientRequestId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  return `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`
+}
+
+export function newClientRequestId() {
+  return makeClientRequestId()
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`
   }
+  return JSON.stringify(value)
+}
+
+async function messageFingerprint(body) {
+  const text = stableStringify(body)
+  if (globalThis.crypto?.subtle && globalThis.TextEncoder) {
+    const bytes = new TextEncoder().encode(text)
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes)
+    return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
+  }
+  // This fallback only indexes a session-local retry hint; Node performs the
+  // authoritative SHA-256 payload check before accepting a duplicate.
+  let a = 0x811c9dc5
+  let b = 0x9e3779b9
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index)
+    a = Math.imul(a ^ code, 0x01000193)
+    b = Math.imul(b ^ code, 0x85ebca6b)
+  }
+  return `${(a >>> 0).toString(16)}${(b >>> 0).toString(16)}`
+}
+
+function pendingMessageStorageKey(agentId) {
+  return `dagents.pending-message.${encodeURIComponent(agentId)}`
+}
+
+function readPendingMessageIds(agentId) {
+  try {
+    const parsed = JSON.parse(globalThis.sessionStorage?.getItem(pendingMessageStorageKey(agentId)) || '[]')
+    return Array.isArray(parsed) ? parsed.filter(item => item && typeof item.id === 'string' && typeof item.fingerprint === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function writePendingMessageIds(agentId, entries) {
+  try {
+    if (!globalThis.sessionStorage) return
+    const bounded = entries.slice(-32)
+    if (bounded.length) globalThis.sessionStorage.setItem(pendingMessageStorageKey(agentId), JSON.stringify(bounded))
+    else globalThis.sessionStorage.removeItem(pendingMessageStorageKey(agentId))
+  } catch {
+    // The durable Node receipt remains authoritative; sessionStorage only lets
+    // an in-window retry reuse the same request ID after an uncertain outcome.
+  }
+}
+
+function forgetPendingMessageId(agentId, requestId) {
+  writePendingMessageIds(agentId, readPendingMessageIds(agentId).filter(item => item.id !== requestId))
+}
+
+function receiptAsAccepted(agentId, receipt) {
+  return {
+    accepted: true,
+    agent_id: agentId,
+    input_id: receipt.input_id,
+    input_seq: receipt.input_seq,
+    input_revision: receipt.input_revision,
+    status: receipt.status,
+    conversation_epoch: receipt.conversation_epoch,
+    duplicate: true,
+  }
+}
+
+export function getInputReceipt(agentId, clientRequestId, conversationEpoch) {
+  const params = new URLSearchParams({ client_request_id: clientRequestId, conversation_epoch: String(conversationEpoch) })
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/inputs?${params.toString()}`)
+}
+
+async function submitIdempotentInput(agentId, endpoint, body, { clientRequestId: requestedId = "", onClientRequestId } = {}) {
+  const fingerprint = await messageFingerprint({ endpoint, body })
+  const pending = readPendingMessageIds(agentId)
+  const existing = pending.find(item => item.fingerprint === fingerprint && item.conversation_epoch === body.conversation_epoch)
+  const clientRequestId = existing?.id || String(requestedId || "").trim() || makeClientRequestId()
+  if (!existing) {
+    pending.push({ id: clientRequestId, fingerprint, conversation_epoch: body.conversation_epoch })
+    writePendingMessageIds(agentId, pending)
+  }
+  onClientRequestId?.(clientRequestId)
+  body.client_request_id = clientRequestId
+
+  const post = () => apiFetch(endpoint, { method: "POST", body })
+  const reconcile = async () => {
+    const receipt = await getInputReceipt(agentId, clientRequestId, body.conversation_epoch)
+    return receipt?.found ? receiptAsAccepted(agentId, receipt) : null
+  }
+  const isDefiniteRejection = error => Number(error?.status) >= 400 && Number(error?.status) < 500
+  try {
+    const result = await post()
+    forgetPendingMessageId(agentId, clientRequestId)
+    return result
+  } catch (firstError) {
+    if (isDefiniteRejection(firstError)) {
+      forgetPendingMessageId(agentId, clientRequestId)
+      throw firstError
+    }
+    try {
+      const recovered = await reconcile()
+      if (recovered) {
+        forgetPendingMessageId(agentId, clientRequestId)
+        return recovered
+      }
+    } catch {
+      firstError.unknownSubmission = true
+      throw firstError
+    }
+    try {
+      const retried = await post()
+      forgetPendingMessageId(agentId, clientRequestId)
+      return retried
+    } catch (retryError) {
+      if (isDefiniteRejection(retryError)) {
+        forgetPendingMessageId(agentId, clientRequestId)
+        throw retryError
+      }
+      try {
+        const recovered = await reconcile()
+        if (recovered) {
+          forgetPendingMessageId(agentId, clientRequestId)
+          return recovered
+        }
+      } catch {
+        // Keep the request ID in sessionStorage. A later identical send will
+        // reconcile or replay the same ID rather than silently creating a
+        // second accepted input.
+      }
+      retryError.unknownSubmission = true
+      throw retryError
+    }
+  }
+}
+
+export async function submitMessage(agentId, content, contentParts = null, fileRefs = null, {
+  conversationEpoch = 1,
+  clientRequestId = "",
+  onClientRequestId,
+} = {}) {
+  const body = { agent_id: agentId, request_type: "message", content: content || "" };
+  if (Array.isArray(contentParts) && contentParts.length) body.content_parts = contentParts;
   if (Array.isArray(fileRefs) && fileRefs.length) {
     body.file_refs = fileRefs.map((file) => ({
       path: file?.path || "",
@@ -343,7 +550,50 @@ export function submitMessage(agentId, content, contentParts = null, fileRefs = 
       ...(file?.anchor && typeof file.anchor === "object" ? { anchor: file.anchor } : {}),
     }));
   }
-  return apiFetch("/v1/messages", { method: "POST", body });
+  body.conversation_epoch = Math.max(1, Number(conversationEpoch) || 1)
+  return submitIdempotentInput(agentId, "/v1/messages", body, { clientRequestId, onClientRequestId })
+}
+
+export async function submitConversationResubmit(agentId, roundId, {
+  revisionId,
+  conversationRevision,
+  conversationEpoch,
+  preCheckpointRevision,
+  content,
+  contentParts = null,
+  fileRefs = null,
+  userMessageName = "",
+} = {}) {
+  const body = {
+    expected_selected_revision_id: String(revisionId || ""),
+    expected_conversation_revision: Number(conversationRevision) || 0,
+    pre_checkpoint_revision: Number(preCheckpointRevision) || 0,
+    conversation_epoch: Math.max(1, Number(conversationEpoch) || 1),
+    content: String(content || ""),
+  }
+  if (Array.isArray(contentParts) && contentParts.length) body.content_parts = contentParts
+  if (Array.isArray(fileRefs) && fileRefs.length) body.file_refs = fileRefs
+  if (userMessageName) body.user_message_name = userMessageName
+  const endpoint = `/v1/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(agentId)}/rounds/${encodeURIComponent(roundId)}/resubmit`
+  return submitIdempotentInput(agentId, endpoint, body)
+}
+
+export function editQueuedMessage(agentId, inputSeq, { expectedRevision, content, contentParts, fileRefs, userMessageName } = {}) {
+  const body = { expected_revision: expectedRevision, content: content || "" };
+  if (Array.isArray(contentParts)) body.content_parts = contentParts;
+  if (Array.isArray(fileRefs)) body.file_refs = fileRefs;
+  if (userMessageName) body.user_message_name = userMessageName;
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/inputs/${encodeURIComponent(inputSeq)}`, {
+    method: "PATCH",
+    body,
+  });
+}
+
+export function withdrawQueuedMessage(agentId, inputSeq, expectedRevision) {
+  return apiFetch(`/v1/agents/${encodeURIComponent(agentId)}/inputs/${encodeURIComponent(inputSeq)}`, {
+    method: "DELETE",
+    body: { expected_revision: expectedRevision },
+  });
 }
 
 export function submitResume(agentId, resumeValue) {

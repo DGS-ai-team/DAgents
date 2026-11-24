@@ -63,6 +63,7 @@ func ToolResultMessageWithMetadata(toolCallID, name, content string, metadata to
 	return Message{
 		Role:               "tool",
 		ToolCallID:         strings.TrimSpace(toolCallID),
+		RecordID:           ToolResultRecordID(toolCallID),
 		Name:               strings.TrimSpace(name),
 		Content:            content,
 		Source:             &source,

@@ -1,6 +1,6 @@
 import { extractToolApprovals } from "../stores/hitl.js";
-import { toolCallIdFromEntry } from "../stores/toolJobs.js";
-import { toolExecutionForCall, turnStateStore } from "../stores/turnState.js";
+import { toolCallIdFromEntry } from "../utils/toolIdentity.js";
+import { resolveToolStepPhase } from "../utils/toolUserLabel.js";
 
 function shouldSkipEntry(entry) {
   if (!entry) return true;
@@ -12,14 +12,6 @@ function shouldSkipEntry(entry) {
     !entry.streaming &&
     !(entry.kind === "user" && Array.isArray(entry.file_refs) && entry.file_refs.length)
   ) return true;
-  // 兜底：过滤注入型 user（日期 / 异步回灌等），与后端 hydrate 跳过对齐
-  if (entry.kind === "user") {
-    const name = String(entry.name || entry.data?.name || "").trim();
-    if (["date", "async_tool", "compression", "compression_sidecar", "tool_vision"].includes(name)) {
-      return true;
-    }
-    if (String(entry.text || "").startsWith("当天日期为：")) return true;
-  }
   return false;
 }
 
@@ -30,6 +22,9 @@ function entryBlockId(entry) {
 function isSkippableBetweenTools(entry) {
   if (!entry) return true;
   if (entry.kind === "system") return true;
+  // Summary-pagination markers are visual separators only. They must not
+  // break the call/result association of the loaded tool rows around them.
+  if (entry.kind === "tool_group_more") return true;
   // 多工具并行时，hydrate 顺序常为 callA, callB, resultA, resultB；
   // 扫描匹配 result 时允许越过其它 tool_call。
   if (entry.kind === "tool_call") return true;
@@ -85,55 +80,65 @@ function awaitingApprovalCallIds(hitlQueue = []) {
 }
 
 /**
- * 用 coordinator 的执行状态补全 tool_step 生命周期信息。
- * 后端同批免审批工具并行执行：未完成的 final tool_call 一律 active（执行中）。
- * 仅当该 call 已出现在 HITL 审批队列时标 pending（尚未开跑）。
+ * 将 transcript、HITL 和 coordinator 执行状态收敛为单一展示 phase。
+ * 后端同批免审批工具并行执行：未完成的 final tool_call 一律 running；
+ * 仅当 call 在 HITL 队列中时展示为 pending，并由审批卡独占呈现。
  */
-export function annotateToolExecutionHints(items, hitlQueue = [], authority = turnStateStore) {
+export function annotateToolExecutionPhases(items, hitlQueue = [], authority = null) {
   if (!Array.isArray(items) || !items.length) return items;
   const toolSteps = items.filter((item) => item?.kind === "tool_step");
   if (!toolSteps.length) return items;
 
   const awaiting = awaitingApprovalCallIds(hitlQueue);
+  const executionByCallId = new Map();
+  for (const execution of Array.isArray(authority?.toolExecutions) ? authority.toolExecutions : []) {
+    const id = String(execution?.toolCallId || "").trim();
+    if (id && !executionByCallId.has(id)) executionByCallId.set(id, execution);
+  }
   for (const item of toolSteps) {
     const id = toolCallIdFromEntry(item.callEntry) || toolCallIdFromEntry(item.resultEntry);
-    const execution = id
-      ? (authority === turnStateStore ? toolExecutionForCall(id) : authority?.toolExecutions?.find((row) => row.toolCallId === id))
-      : null;
+    const execution = id ? executionByCallId.get(id) : null;
     const status = String(execution?.status || "").trim().toLowerCase();
-    if (["succeeded", "completed", "failed", "error", "denied", "rejected", "cancelled", "canceled", "timed_out", "unknown"].includes(status)) {
-      item.lifecycleStatus = status;
+    const lifecycleStatus = ["succeeded", "completed", "failed", "error", "denied", "rejected", "cancelled", "canceled", "timed_out", "unknown"].includes(status)
+      ? status
+      : "";
+
+    // Keep the coordinator's pending/running hint local to this projection.
+    // UI consumers receive only the canonical phase, not two competing status
+    // fields that each component has to reconcile again.
+    let executionHint = null;
+    if (!item.resultEntry && item.callEntry && !item.callEntry.partial) {
+      if (["succeeded", "completed"].includes(status)) {
+        executionHint = "settled";
+      } else if (["failed", "error", "timed_out", "unknown"].includes(status)) {
+        executionHint = "failed";
+      } else if (["denied", "rejected"].includes(status)) {
+        executionHint = "rejected";
+      } else if (["cancelled", "canceled"].includes(status)) {
+        executionHint = "cancelled";
+      } else if (status === "running") {
+        executionHint = "active";
+      } else if (awaiting.has(id) || ["proposed", "pending"].includes(status)) {
+        executionHint = "pending";
+      } else if (authority?.authority === "turn_coordinator") {
+        // A final call is an intent until execution starts. Do not display it
+        // as running merely because its result has not reached the transcript.
+        executionHint = "pending";
+      }
     }
 
-    // A result can be persisted from an adapter with a generic or stale status
-    // while the coordinator already has the final outcome. Preserve lifecycle
-    // status independently so the row can present the authoritative outcome.
-    if (item.resultEntry || !item.callEntry || item.callEntry.partial) continue;
-
-    if (["succeeded", "completed"].includes(status)) {
-      item.executionHint = "settled";
-    } else if (["failed", "error", "timed_out", "unknown"].includes(status)) {
-      item.executionHint = "failed";
-    } else if (["denied", "rejected"].includes(status)) {
-      item.executionHint = "rejected";
-    } else if (["cancelled", "canceled"].includes(status)) {
-      item.executionHint = "cancelled";
-    } else if (["running"].includes(status)) {
-      item.executionHint = "active";
-    } else if (awaiting.has(id) || ["proposed", "pending"].includes(status)) {
-      item.executionHint = "pending";
-    } else if (authority?.authority === "turn_coordinator") {
-      // A final tool_call is an intent until the authoritative execution
-      // projection says it has started. Do not label it as running merely
-      // because the transcript has not received a result yet.
-      item.executionHint = "pending";
-    }
+    item.phase = resolveToolStepPhase({
+      callEntry: item.callEntry,
+      resultEntry: item.resultEntry,
+      lifecycleStatus,
+      executionHint,
+    });
   }
   return items;
 }
 
 /** 合并同 blockId 的 tool_call + tool_result 为 tool_step（F-UI6）。 */
-export function buildStream(entries, hitlQueue = []) {
+export function buildStream(entries, hitlQueue = [], authority = null) {
   const items = [];
   const mergedResultIndices = new Set();
   const toolResultMatches = buildToolResultMatches(entries);
@@ -190,12 +195,12 @@ export function buildStream(entries, hitlQueue = []) {
     });
   });
 
-  const annotated = annotateToolExecutionHints(items, hitlQueue);
+  const annotated = annotateToolExecutionPhases(items, hitlQueue, authority);
   // 待批工具由 ApprovalBubble 独占展示，避免 ToolSummaryRow「待执行」与审批卡双份。
   const awaiting = awaitingApprovalCallIds(hitlQueue);
   return annotated.filter(
     (item) => {
-      if (item?.kind !== "tool_step" || item.executionHint !== "pending") return true;
+      if (item?.kind !== "tool_step" || item.phase !== "pending" || !item.callEntry || item.resultEntry) return true;
       const id = toolCallIdFromEntry(item.callEntry);
       return !awaiting.has(id);
     },

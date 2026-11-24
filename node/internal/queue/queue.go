@@ -33,12 +33,23 @@ type Envelope struct {
 	Content                  string
 	ContentParts             []llm.ContentPart
 	FileReferences           []llm.FileReference
-	UserName                 string // request_type=message 时写入 llm.Message.Name；空串由 runtime 规范为 human
+	UserName                 string                       // request_type=message 时写入 llm.Message.Name；空串由 runtime 规范为 human
+	ConversationResubmit     *ConversationResubmitRequest `json:"conversation_resubmit,omitempty"`
 	ResumeValue              map[string]any
 	TriggerID                string // 非空表示 trigger fire 投递；输入被消费后清除 pending 标记
 	DeliveryID               string // 稳定的 trigger delivery identity
 	AsyncToolResult          *AsyncToolResultPayload
 	SideEffectContinueSource string // side_effect_continue 来源（task_complete_produce / cancel_recovery 等）
+}
+
+// ConversationResubmitRequest marks an accepted user input as a replacement
+// attempt for the current selected revision of one terminal logical round.
+// It is transport metadata only and is never passed to the model provider.
+type ConversationResubmitRequest struct {
+	RoundID                      string `json:"round_id"`
+	ExpectedSelectedRevisionID   string `json:"expected_selected_revision_id"`
+	ExpectedConversationRevision uint64 `json:"expected_conversation_revision"`
+	PreCheckpointRevision        uint64 `json:"pre_checkpoint_revision"`
 }
 
 type queuedItem struct {

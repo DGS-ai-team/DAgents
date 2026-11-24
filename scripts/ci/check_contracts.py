@@ -49,11 +49,39 @@ def openapi_routes(document: dict) -> set[tuple[str, str]]:
     return routes
 
 
+def validate_openapi_local_refs(document: dict, errors: list[str]) -> None:
+    """Fail contract validation when a local JSON Pointer is unresolved."""
+    def resolve(reference: str):
+        if not reference.startswith("#/"):
+            return True
+        value = document
+        for raw_part in reference[2:].split("/"):
+            part = raw_part.replace("~1", "/").replace("~0", "~")
+            if not isinstance(value, dict) or part not in value:
+                return False
+            value = value[part]
+        return True
+
+    def visit(value, path: str) -> None:
+        if isinstance(value, dict):
+            reference = value.get("$ref")
+            if isinstance(reference, str) and not resolve(reference):
+                errors.append(f"OpenAPI unresolved local $ref at {path}: {reference}")
+            for key, child in value.items():
+                visit(child, f"{path}.{key}")
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, f"{path}[{index}]")
+
+    visit(document, "$")
+
+
 def validate_openapi(errors: list[str]) -> None:
     try:
         document = yaml.safe_load(OPENAPI_FILE.read_text(encoding="utf-8"))
         if not isinstance(document, dict):
             raise ValueError("document root is not an object")
+        validate_openapi_local_refs(document, errors)
         documented = openapi_routes(document)
     except (OSError, ValueError, yaml.YAMLError) as error:
         errors.append(f"OpenAPI cannot be loaded: {error}")

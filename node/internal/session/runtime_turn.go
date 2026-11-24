@@ -41,6 +41,7 @@ func (r *runtime) runTurnStepAtEpoch(
 				}
 				r.messages = append(append([]llm.Message(nil), r.messages[:currentStart]...), active...)
 				r.historyRevision++
+				r.noteCheckpointDirtyLocked()
 				r.mu.Unlock()
 			}
 			if skip {
@@ -76,6 +77,7 @@ func (r *runtime) runTurnStepAtEpoch(
 			contextCompacted = true
 			r.messages = append(append([]llm.Message(nil), r.messages[:start]...), active...)
 			r.historyRevision++
+			r.noteCheckpointDirtyLocked()
 			contextAfterDigest = turn.Digest(active)
 			contextAfterCount = len(active)
 		}
@@ -91,6 +93,9 @@ func (r *runtime) runTurnStepAtEpoch(
 		return turn.StepOutcome{Err: fmt.Errorf("cannot execute step without an active Turn/Step")}, history
 	}
 	executionEpoch := r.sessionEpoch
+	r.deltaMu.Lock()
+	r.historyMutationTurnEpoch = executionEpoch
+	r.deltaMu.Unlock()
 	turnCtx, cancel := context.WithCancel(parent)
 	cancelToken := &struct{}{}
 	turnCtx = turn.WithExecutionContext(turnCtx, execution)
@@ -163,12 +168,6 @@ func (r *runtime) finishTurnIdle(outcome turn.StepOutcome) {
 				}
 			}
 		}
-	}
-	// No-work is a successful terminal fact only after lifecycle persistence has
-	// completed without error. A failed/cancelled turn must follow the ordinary
-	// error path and must never emit a successful no_work notification.
-	if outcome.Err == nil && outcome.NoWork && state.TurnStatus == turn.TurnStatusCompleted && r.orch != nil {
-		r.orch.PublishNoWorkFinished(r.session.ID)
 	}
 	if r.orch != nil {
 		r.orch.EndAutoIdleActivation(r.session.ID)

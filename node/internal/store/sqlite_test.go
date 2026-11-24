@@ -20,7 +20,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 
 	ctx := context.Background()
 	msgs := []llm.Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "hi"}}
-	if err := s.Save(ctx, Record{AgentID: "sess-1", NodeID: "a1", Messages: msgs}); err != nil {
+	if err := s.SaveConversationSnapshot(ctx, Record{AgentID: "sess-1", NodeID: "a1", Messages: msgs}); err != nil {
 		t.Fatal(err)
 	}
 	rec, err := s.Load(ctx, "sess-1")
@@ -44,13 +44,21 @@ func TestClearAndDelete(t *testing.T) {
 	defer s.Close()
 
 	ctx := context.Background()
-	_ = s.Save(ctx, Record{AgentID: "s1", NodeID: "a", Messages: []llm.Message{{Role: "user", Content: "x"}}})
+	_ = s.SaveConversationSnapshot(ctx, Record{AgentID: "s1", NodeID: "a", Messages: []llm.Message{{Role: "user", Content: "x"}}})
 	if err := s.ClearMessages(ctx, "s1"); err != nil {
 		t.Fatal(err)
 	}
 	rec, _ := s.Load(ctx, "s1")
 	if len(rec.Messages) != 0 {
 		t.Fatal("expected empty messages")
+	}
+	history, err := s.LoadConversationRecords(ctx, "s1")
+	if err != nil || len(history) != 0 {
+		t.Fatalf("expected cleared display history, got %d records err=%v", len(history), err)
+	}
+	checkpoint, err := s.LoadConversationCheckpoint(ctx, "s1")
+	if err != nil || checkpoint == nil || len(checkpoint.Messages) != 0 {
+		t.Fatalf("expected empty checkpoint, got %+v err=%v", checkpoint, err)
 	}
 	ok, err := s.Delete(ctx, "s1")
 	if err != nil || !ok {
@@ -68,9 +76,8 @@ func TestSaveLoadRuntimeState(t *testing.T) {
 
 	ctx := context.Background()
 	if err := s.Save(ctx, Record{
-		AgentID:  "sess-pending",
-		NodeID:   "a1",
-		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+		AgentID: "sess-pending",
+		NodeID:  "a1",
 		RuntimeState: RuntimeState{
 			InputBoxState: json.RawMessage(`{"seq":2,"items":[]}`),
 		},
@@ -91,7 +98,7 @@ func TestList(t *testing.T) {
 	s, _ := Open(path)
 	defer s.Close()
 	ctx := context.Background()
-	_ = s.Save(ctx, Record{AgentID: "s1", NodeID: "a", Messages: []llm.Message{{Role: "user", Content: "a"}}, UpdatedAt: time.Now()})
+	_ = s.SaveConversationSnapshot(ctx, Record{AgentID: "s1", NodeID: "a", Messages: []llm.Message{{Role: "user", Content: "a"}}, UpdatedAt: time.Now()})
 	list, err := s.List(ctx)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list=%v err=%v", list, err)

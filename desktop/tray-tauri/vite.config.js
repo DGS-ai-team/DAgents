@@ -15,7 +15,7 @@ export default defineConfig(() => ({
       { find: "@shared-frontend", replacement: fileURLToPath(new URL("../../shared/frontend", import.meta.url)) },
       { find: /^morphicons\/vue$/, replacement: fileURLToPath(new URL("./node_modules/morphicons/dist/vue.js", import.meta.url)) },
       { find: /^morphicons\/adapters$/, replacement: fileURLToPath(new URL("./node_modules/morphicons/dist/adapters.js", import.meta.url)) },
-      { find: "vue", replacement: fileURLToPath(new URL("./node_modules/vue/dist/vue.esm-bundler.js", import.meta.url)) },
+      { find: /^vue$/, replacement: fileURLToPath(new URL("./node_modules/vue/dist/vue.esm-bundler.js", import.meta.url)) },
       { find: "@tauri-apps/api", replacement: fileURLToPath(new URL("./node_modules/@tauri-apps/api", import.meta.url)) },
       { find: "vue-router", replacement: fileURLToPath(new URL("./node_modules/vue-router/dist/vue-router.mjs", import.meta.url)) },
       { find: "marked", replacement: fileURLToPath(new URL("./node_modules/marked/lib/marked.esm.js", import.meta.url)) },

@@ -90,9 +90,10 @@ check "Skills: load → inject → unload" bash -c '
 check "Mock message turn (queue + context growth)" bash -c '
   CREATE=$(curl -sf -X POST "'"${BASE}"'/v1/sessions" -H "Content-Type: application/json" -d "{}")
   SID=$(printf "%s" "${CREATE}" | json_field session_id)
+  REQUEST_ID="feature-tour-${SID}-ping"
   curl -sf -X POST "'"${BASE}"'/v1/messages" \
     -H "Content-Type: application/json" \
-    -d "{\"session_id\":\"${SID}\",\"content\":\"feature tour ping\"}" | grep -q "\"accepted\":true"
+    -d "{\"agent_id\":\"${SID}\",\"request_type\":\"message\",\"content\":\"feature tour ping\",\"client_request_id\":\"${REQUEST_ID}\",\"conversation_epoch\":1}" | grep -q "\"accepted\":true"
   for i in 1 2 3 4 5 6 7 8 9 10; do
     CTX=$(curl -sf "'"${BASE}"'/v1/sessions/${SID}/context")
     if echo "${CTX}" | grep -q "feature tour ping"; then

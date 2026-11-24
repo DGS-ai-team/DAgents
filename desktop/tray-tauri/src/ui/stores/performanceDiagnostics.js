@@ -1,6 +1,7 @@
 const STORAGE_KEY = "dagents_webui_perf_debug";
 const MAX_RECENT_EVENTS = 120;
 const MAX_RECENT_SPANS = 160;
+const MAX_SEQUENCE_STREAMS = 64;
 const LONG_TASK_THRESHOLD_MS = 50;
 
 let enabled = readEnabled();
@@ -36,7 +37,9 @@ function emptyStats() {
     eventTypes: {},
     firstEventAt: null,
     lastEventAt: null,
+    sequenceStreamKey: "",
     lastSeq: 0,
+    sequenceCursors: new Map(),
     seqGaps: 0,
     durations: {},
     longTasks: { count: 0, totalMs: 0, maxMs: 0 },
@@ -99,13 +102,26 @@ export function isPerformanceDiagnosticsEnabled() {
   return enabled;
 }
 
-export function recordSSEEvent(type, seq = 0) {
+export function recordSSEEvent(type, seq = 0, streamKey = "default") {
   if (!enabled) return;
   const eventType = String(type || "unknown");
   const eventSeq = Number(seq) || 0;
+  const nextStreamKey = String(streamKey || "default");
+  let cursor = stats.sequenceCursors.get(nextStreamKey);
+  if (!cursor) {
+    if (stats.sequenceCursors.size >= MAX_SEQUENCE_STREAMS) {
+      const oldestKey = stats.sequenceCursors.keys().next().value;
+      stats.sequenceCursors.delete(oldestKey);
+    }
+    cursor = { lastSeq: 0, lastEventAt: null };
+    stats.sequenceCursors.set(nextStreamKey, cursor);
+  } else {
+    stats.sequenceCursors.delete(nextStreamKey);
+    stats.sequenceCursors.set(nextStreamKey, cursor);
+  }
   const at = now();
-  const previousAt = stats.lastEventAt;
-  const previousSeq = stats.lastSeq;
+  const previousAt = cursor.lastEventAt;
+  const previousSeq = cursor.lastSeq;
   const gap = eventSeq > 0 && previousSeq > 0 && eventSeq > previousSeq + 1
     ? eventSeq - previousSeq - 1
     : 0;
@@ -114,14 +130,18 @@ export function recordSSEEvent(type, seq = 0) {
   stats.eventTypes[eventType] = (stats.eventTypes[eventType] || 0) + 1;
   stats.firstEventAt ??= at;
   stats.lastEventAt = at;
+  stats.sequenceStreamKey = nextStreamKey;
+  cursor.lastEventAt = at;
   if (gap > 0) stats.seqGaps += gap;
-  if (eventSeq > stats.lastSeq) stats.lastSeq = eventSeq;
+  if (eventSeq > cursor.lastSeq) cursor.lastSeq = eventSeq;
+  stats.lastSeq = cursor.lastSeq;
 
   pushBounded(
     stats.recentEvents,
     {
       at: Date.now(),
       type: eventType,
+      streamKey: nextStreamKey,
       seq: eventSeq,
       gap,
       interArrivalMs: previousAt == null ? null : round(at - previousAt),
@@ -138,6 +158,18 @@ export function measureSync(name, fn, details = {}) {
   } finally {
     recordDuration(name, now() - started, details);
   }
+}
+
+/** Force and time a real layout read for the supplied DOM subtree. */
+export function measureElementLayout(name, element, details = {}) {
+  if (!enabled || !element?.getBoundingClientRect) return null;
+  const domNodes = typeof element.querySelectorAll === "function"
+    ? element.querySelectorAll("*").length
+    : 0;
+  return measureSync(name, () => {
+    const rect = element.getBoundingClientRect();
+    return { width: round(rect.width), height: round(rect.height) };
+  }, { domNodes, ...details });
 }
 
 export function startPerformanceSpan(name, details = {}) {

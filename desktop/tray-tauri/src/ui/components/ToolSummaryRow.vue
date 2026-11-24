@@ -1,42 +1,52 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import {
   resolveToolStepPhase,
   toolStepStatusText,
   toolStepPurposeOrToolLabel,
 } from "../utils/toolUserLabel.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
-import { toolCallIdFromEntry, toolNameFromEntry } from "../stores/toolJobs.js";
+import { toolCallIdFromEntry, toolNameFromEntry } from "../utils/toolIdentity.js";
 import { childProgressForTool } from "../stores/remoteWorkers.js";
 import { childAgentIdsFromResult, isTemporaryAgentTool } from "../utils/temporaryAgentResults.js";
 import ToolExecBubble from "./ToolExecBubble.vue";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
 import UiIcon from "./UiIcon.vue";
 import ChildAgentProgressPanel from "./ChildAgentProgressPanel.vue";
+import { getConversationRoundToolStep } from "../api/node.js";
 
 const props = defineProps({
   callEntry: { type: Object, default: null },
   resultEntry: { type: Object, default: null },
-  /** buildStream 标注：active=并行执行中，pending=HITL 待批尚未开跑 */
-  executionHint: { type: String, default: null },
-  /** turn_state.tool_executions 中的权威终态，优先于冲突的 transcript result status */
-  lifecycleStatus: { type: String, default: "" },
+  conversationOrdinal: { type: Number, default: 0 },
+  streamItemKey: { type: String, default: "" },
+  /** null uses local state; a parent can retain expansion state while lazily unmounting rows. */
+  expanded: { type: Boolean, default: null },
+  /** buildStream 已收敛的工具状态；缺省时为独立工具行计算 */
+  phase: { type: String, default: "" },
   verbose: { type: Boolean, default: false },
   embedded: { type: Boolean, default: false },
+  agentId: { type: String, default: "" },
 });
+const emit = defineEmits(["expanded-change"]);
 
-const expanded = ref(false);
-const everExpanded = ref(false);
+const localExpanded = ref(false);
+const isExpanded = computed(() => props.expanded === null ? localExpanded.value : props.expanded);
+const loadedCallEntry = ref(null);
+const loadedResultEntry = ref(null);
+const detailsLoading = ref(false);
+const detailsError = ref("");
 
 const stepArgs = computed(() => ({
   callEntry: props.callEntry,
   resultEntry: props.resultEntry,
-  executionHint: props.executionHint,
-  lifecycleStatus: props.lifecycleStatus,
+  phase: props.phase,
 }));
 const toolLabel = computed(() => toolStepPurposeOrToolLabel(stepArgs.value));
-const phase = computed(() => resolveToolStepPhase(stepArgs.value));
-const detailEntry = computed(() => props.resultEntry || props.callEntry);
+const resolvedPhase = computed(() => resolveToolStepPhase(stepArgs.value));
+const detailCallEntry = computed(() => loadedCallEntry.value || props.callEntry);
+const detailResultEntry = computed(() => loadedResultEntry.value || props.resultEntry);
+const detailEntry = computed(() => detailResultEntry.value || detailCallEntry.value);
 const visual = computed(() => resolveToolVisual(props.callEntry || props.resultEntry || {}));
 const toolCallId = computed(
   () => toolCallIdFromEntry(props.callEntry) || toolCallIdFromEntry(props.resultEntry),
@@ -50,43 +60,81 @@ const childProgress = computed(() => {
   return childProgressForTool(toolCallId.value, childAgentIds.value);
 });
 const status = computed(() => {
-  if (phase.value === "running") return "执行中";
+  if (resolvedPhase.value === "running") return "执行中";
   const base = toolStepStatusText(stepArgs.value);
-  if (phase.value === "idle") return "状态未知";
-  if (phase.value === "pending") return "待批准";
+  if (resolvedPhase.value === "idle" && props.callEntry?.details_available && !props.resultEntry) return "结果待读取";
+  if (resolvedPhase.value === "idle") return "状态未知";
+  if (resolvedPhase.value === "pending") return "待批准";
   return base;
 });
-const ariaLabel = computed(() => `${toolLabel.value}，${status.value || "工具操作"}，${expanded.value ? "收起详情" : "展开详情"}`);
+const ariaLabel = computed(() => `${toolLabel.value}，${status.value || "工具操作"}，${isExpanded.value ? "收起详情" : "展开详情"}`);
+
+async function loadDetails() {
+  const sourceItemId = String(props.callEntry?.detail_item_id || props.resultEntry?.detail_item_id || "").trim();
+  const roundId = String(props.callEntry?.round_id || props.resultEntry?.round_id || "").trim();
+  const revisionId = String(props.callEntry?.round_revision_id || props.resultEntry?.round_revision_id || "").trim();
+  const callId = toolCallId.value;
+  if (!props.agentId || !sourceItemId || !roundId || !revisionId || !callId || detailsLoading.value) return;
+  detailsLoading.value = true;
+  detailsError.value = "";
+  try {
+    const response = await getConversationRoundToolStep(props.agentId, props.agentId, roundId, callId, { revisionId, sourceItemId });
+    const step = response?.steps?.find(item => String(item?.tool_call_id || "") === callId);
+    if (!step?.call_entry) throw new Error("工具详情暂不可用");
+    loadedCallEntry.value = step.call_entry;
+    loadedResultEntry.value = step.result_entry || null;
+  } catch (cause) {
+    detailsError.value = String(cause?.message || "读取工具详情失败");
+  } finally {
+    detailsLoading.value = false;
+  }
+}
 
 function toggle() {
-  expanded.value = !expanded.value;
-  if (expanded.value) everExpanded.value = true;
+  const next = !isExpanded.value;
+  if (props.expanded === null) localExpanded.value = next;
+  else emit("expanded-change", next);
 }
+
+watch(isExpanded, (value) => {
+  if (value && !loadedCallEntry.value && (props.callEntry?.details_available || props.resultEntry?.details_available)) void loadDetails();
+}, { immediate: true });
+
+watch(() => [props.callEntry?.id, props.resultEntry?.id], () => {
+  loadedCallEntry.value = null;
+  loadedResultEntry.value = null;
+  detailsError.value = "";
+});
 
 </script>
 
 <template>
   <div
     class="tool-summary-row"
-    :class="{ 'tool-summary-row--expanded': expanded, 'tool-summary-row--embedded': embedded, [`tool-summary-row--${visual.kind}`]: true }"
+    :data-conversation-ordinal="conversationOrdinal || undefined"
+    :data-stream-item-key="streamItemKey || undefined"
+    :class="{ 'tool-summary-row--expanded': isExpanded, 'tool-summary-row--embedded': embedded, [`tool-summary-row--${visual.kind}`]: true }"
   >
     <button
       type="button"
       class="tool-summary-row__head"
-      :aria-expanded="expanded"
+      :aria-expanded="isExpanded"
       :aria-label="ariaLabel"
       @click="toggle"
     >
       <span class="tool-summary-row__visual" :title="visual.label" aria-hidden="true"><ToolGroupIcon :name="visual.kind" /></span>
       <span class="tool-summary-row__text" :title="toolLabel">{{ toolLabel }}</span>
       <span v-if="status" class="tool-summary-row__status">{{ status }}</span>
-      <UiIcon class="tool-summary-row__chevron" :name="expanded ? 'chevron-down' : 'chevron-right'" :size="14" aria-hidden="true" />
+      <UiIcon class="tool-summary-row__chevron" :name="isExpanded ? 'chevron-down' : 'chevron-right'" :size="14" aria-hidden="true" />
     </button>
-    <div v-if="everExpanded && detailEntry" v-show="expanded" class="tool-summary-row__detail">
+    <div v-if="isExpanded && (detailEntry || detailsLoading || detailsError)" class="tool-summary-row__detail">
+      <p v-if="detailsLoading" class="tool-summary-row__detail-state" role="status">正在读取完整工具参数与结果…</p>
+      <p v-else-if="detailsError" class="tool-summary-row__detail-state is-error" role="alert">{{ detailsError }}</p>
       <ToolExecBubble
+        v-if="!detailsLoading && detailEntry"
         :entry="detailEntry"
-        :call-entry="callEntry"
-        :result-entry="resultEntry"
+        :call-entry="detailCallEntry"
+        :result-entry="detailResultEntry"
         :verbose="verbose"
         embedded
       />
@@ -209,6 +257,14 @@ function toggle() {
   padding: 0 8px 8px;
   border-top: 1px solid var(--color-border);
 }
+
+.tool-summary-row__detail-state {
+  margin: 8px 0 0;
+  color: var(--color-text-subtle);
+  font-size: 12px;
+}
+
+.tool-summary-row__detail-state.is-error { color: var(--color-danger); }
 
 .tool-summary-row__detail :deep(.msg--tool-centered) {
   margin: 0;

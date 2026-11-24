@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,11 +12,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 // This test intentionally starts the real dagents-node binary twice. It is
@@ -102,7 +106,124 @@ func TestProcessRestartRecovery(t *testing.T) {
 		}
 	})
 
-	t.Run("auto_default_trigger_fires_once_and_reopens", func(t *testing.T) {
+	t.Run("hydrate_terminal_message_after_all_stream_events_are_missed", func(t *testing.T) {
+		llmServer := newProcessLLMServer(t, processLLMAuto)
+		defer llmServer.Close()
+
+		root, baseURL := startProcessNode(t, binary, llmServer.URL)
+		first := newNodeProcess(t, binary, root)
+		waitNodeHealthy(t, first, baseURL)
+		completeProcessOnboarding(t, baseURL, llmServer.URL)
+
+		agentID := createProcessAgent(t, baseURL, nil)
+		postProcessMessage(t, baseURL, agentID, "reply with a short completion")
+
+		// Poll only the hydrate API. No SSE subscriber is installed, so every
+		// streaming and terminal notification is intentionally missed by the
+		// client. The durable transcript must still reach a terminal view.
+		beforeRestart := waitProcessHydrateReply(t, baseURL, agentID, "auto completed 1", 12*time.Second)
+		if beforeRestart.ConversationRevision == 0 {
+			t.Fatalf("completed hydrate did not expose a conversation revision: %+v", beforeRestart)
+		}
+		if !beforeRestart.TranscriptSynchronized || beforeRestart.TurnState.ResultCommitStatus == "failed" {
+			t.Fatalf("terminal reply was visible before restart without a durable transcript commit: %+v", beforeRestart)
+		}
+		firstRevision := beforeRestart.ConversationRevision
+		postProcessMessage(t, baseURL, agentID, "reply to a second independent turn")
+		beforeRestart = waitProcessHydrateReply(t, baseURL, agentID, "auto completed 2", 12*time.Second)
+		if beforeRestart.ConversationRevision <= firstRevision {
+			t.Fatalf("second terminal message did not advance conversation revision: before=%d after=%d", firstRevision, beforeRestart.ConversationRevision)
+		}
+		if got := llmServer.Calls(); got != 2 {
+			t.Fatalf("LLM calls before restart=%d, want 2", got)
+		}
+
+		first.Kill(t)
+		assertProcessCheckpointDeltas(t, root, agentID, 2)
+		second := newNodeProcess(t, binary, root)
+		waitNodeHealthy(t, second, baseURL)
+
+		afterRestart := getProcessHydrate(t, baseURL, agentID)
+		if afterRestart.Active {
+			t.Fatalf("reopened hydrate still reports active turn: %+v", afterRestart)
+		}
+		if !afterRestart.TranscriptSynchronized || afterRestart.TurnState.ResultCommitStatus == "failed" {
+			t.Fatalf("reopened hydrate did not report a durable transcript commit: %+v", afterRestart)
+		}
+		if !processHydrateContainsAssistant(afterRestart, "auto completed 2") {
+			t.Fatalf("reopened hydrate lost terminal assistant message (pre-restart hydrate: %+v): %+v", beforeRestart, afterRestart)
+		}
+		if afterRestart.ConversationRevision != beforeRestart.ConversationRevision {
+			t.Fatalf("conversation revision changed across restart: before=%d after=%d", beforeRestart.ConversationRevision, afterRestart.ConversationRevision)
+		}
+		if !reflect.DeepEqual(afterRestart.Transcript, beforeRestart.Transcript) {
+			t.Fatalf("reopened transcript differs from pre-restart hydrate:\nbefore=%+v\nafter=%+v", beforeRestart.Transcript, afterRestart.Transcript)
+		}
+		if got := llmServer.Calls(); got != 2 {
+			t.Fatalf("LLM calls after restart=%d, want no replay", got)
+		}
+		second.Kill(t)
+	})
+
+	t.Run("manual_compression_preserves_hydrate_history_after_restart", func(t *testing.T) {
+		llmServer := newProcessLLMServer(t, processLLMAuto)
+		defer llmServer.Close()
+
+		root, baseURL := startProcessNode(t, binary, llmServer.URL)
+		first := newNodeProcess(t, binary, root)
+		waitNodeHealthy(t, first, baseURL)
+		completeProcessOnboarding(t, baseURL, llmServer.URL)
+
+		agentID := createProcessAgent(t, baseURL, nil)
+		postProcessMessage(t, baseURL, agentID, "first human turn with history to preserve")
+		waitProcessHydrateReply(t, baseURL, agentID, "auto completed 1", 12*time.Second)
+		postProcessMessage(t, baseURL, agentID, "second human turn after the first")
+		beforeCompression := waitProcessHydrateReply(t, baseURL, agentID, "auto completed 2", 12*time.Second)
+		if beforeCompression.ConversationRevision == 0 || len(beforeCompression.Transcript) < 4 {
+			t.Fatalf("pre-compression hydrate is missing durable turns: %+v", beforeCompression)
+		}
+
+		compressResp, err := http.Post(baseURL+"/v1/agents/"+agentID+"/compress", "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var compressResult struct {
+			Status string `json:"status"`
+		}
+		decodeErr := json.NewDecoder(compressResp.Body).Decode(&compressResult)
+		compressResp.Body.Close()
+		if compressResp.StatusCode != http.StatusOK || decodeErr != nil {
+			t.Fatalf("compress status=%d decode=%v", compressResp.StatusCode, decodeErr)
+		}
+		if compressResult.Status != "applied" {
+			t.Fatalf("manual compression status=%q, want applied", compressResult.Status)
+		}
+		afterCompression := getProcessHydrate(t, baseURL, agentID)
+		if !processHydrateContainsAssistant(afterCompression, "auto completed 2") {
+			t.Fatalf("post-compression hydrate lost the completed human turn: %+v", afterCompression)
+		}
+		callsAfterCompression := llmServer.Calls()
+		if callsAfterCompression != 3 {
+			t.Fatalf("LLM calls after two turns and compression=%d, want 3", callsAfterCompression)
+		}
+
+		first.Kill(t)
+		second := newNodeProcess(t, binary, root)
+		waitNodeHealthy(t, second, baseURL)
+		afterRestart := getProcessHydrate(t, baseURL, agentID)
+		if afterRestart.ConversationRevision != afterCompression.ConversationRevision {
+			t.Fatalf("conversation revision changed after compressed restart: before=%d after=%d", afterCompression.ConversationRevision, afterRestart.ConversationRevision)
+		}
+		if !reflect.DeepEqual(afterRestart.Transcript, afterCompression.Transcript) {
+			t.Fatalf("reopened hydrate transcript differs after compression:\nbefore=%+v\nafter=%+v", afterCompression.Transcript, afterRestart.Transcript)
+		}
+		if got := llmServer.Calls(); got != callsAfterCompression {
+			t.Fatalf("LLM calls after reopen=%d, want unchanged %d", got, callsAfterCompression)
+		}
+		second.Kill(t)
+	})
+
+	t.Run("auto_default_trigger_fires_without_sse_and_reopens", func(t *testing.T) {
 		llmServer := newProcessLLMServer(t, processLLMAuto)
 		defer llmServer.Close()
 		root, baseURL := startProcessNodeWithTriggers(t, binary, llmServer.URL, true)
@@ -116,13 +237,17 @@ func TestProcessRestartRecovery(t *testing.T) {
 		})
 		triggerID := "auto-default:" + agentID
 		waitProcessTriggerFireCount(t, baseURL, triggerID, 1, 15*time.Second)
-		waitProcessEvent(t, baseURL, agentID, "turn.completed", 15*time.Second)
+		hydrate := waitProcessHydrateReply(t, baseURL, agentID, "auto completed 1", 15*time.Second)
 		if got := llmServer.Calls(); got != 1 {
 			t.Fatalf("auto trigger model calls=%d want 1", got)
 		}
-		hydrate := getProcessHydrate(t, baseURL, agentID)
+		hydrate = getProcessHydrate(t, baseURL, agentID)
 		if hydrate.Active || hydrate.QueuePending != 0 || hydrate.PendingHITL != nil {
 			t.Fatalf("auto hydrate after completion=%+v", hydrate)
+		}
+		beforeRestartEpoch, beforeRestartWatermark := getProcessAgentWatermark(t, baseURL, agentID)
+		if beforeRestartEpoch == "" || beforeRestartWatermark.ConversationRevision != hydrate.ConversationRevision || beforeRestartWatermark.LatestAgentSeq == 0 {
+			t.Fatalf("completed Auto watermark=%+v epoch=%q hydrate=%+v", beforeRestartWatermark, beforeRestartEpoch, hydrate)
 		}
 		waitProcessTriggerSettled(t, baseURL, triggerID, 15*time.Second)
 		// Move the enabled schedule into the future through the public Auto
@@ -132,9 +257,18 @@ func TestProcessRestartRecovery(t *testing.T) {
 			"expected_revision": 1, "responsibility": "process test", "wake_interval_seconds": 60,
 			"dreaming_enabled": false, "dreaming_time": "03:00", "timezone": "UTC",
 		})
+		beforeRestartTranscript := append([]map[string]any(nil), hydrate.Transcript...)
+
 		first.Kill(t)
 		second := newNodeProcess(t, binary, root)
 		waitNodeHealthy(t, second, baseURL)
+		afterRestartEpoch, afterRestartWatermark := getProcessAgentWatermark(t, baseURL, agentID)
+		if afterRestartEpoch == "" || afterRestartEpoch == beforeRestartEpoch {
+			t.Fatalf("stream epoch did not change across restart: before=%q after=%q", beforeRestartEpoch, afterRestartEpoch)
+		}
+		if afterRestartWatermark.ConversationRevision != beforeRestartWatermark.ConversationRevision {
+			t.Fatalf("watermark revision changed across restart: before=%+v after=%+v", beforeRestartWatermark, afterRestartWatermark)
+		}
 		waitProcessTriggerFireCount(t, baseURL, triggerID, 1, 5*time.Second)
 		trigger := getProcessTrigger(t, baseURL, triggerID)
 		if trigger.Controller != "auto" || trigger.OwnerAgentID != agentID || !trigger.Enabled || trigger.FireCount != 1 || trigger.NextFireAt <= float64(time.Now().Unix()) || trigger.PendingDeliveryID != "" || trigger.RecoveryRequired {
@@ -147,8 +281,42 @@ func TestProcessRestartRecovery(t *testing.T) {
 		if hydrate.Active || hydrate.QueuePending != 0 || hydrate.PendingHITL != nil {
 			t.Fatalf("auto hydrate after reopen=%+v", hydrate)
 		}
+		if !reflect.DeepEqual(hydrate.Transcript, beforeRestartTranscript) {
+			t.Fatalf("Auto transcript changed or replayed after restart: before=%+v after=%+v", beforeRestartTranscript, hydrate.Transcript)
+		}
 		second.Kill(t)
 	})
+}
+
+func assertProcessCheckpointDeltas(t *testing.T, root, agentID string, minimum int) {
+	t.Helper()
+	dbPath := filepath.Join(root, ".runtime", "memory", "sessions.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var deltas int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM context_checkpoints WHERE conversation_id=? AND checkpoint_kind='delta'`, agentID).Scan(&deltas); err != nil {
+		t.Fatalf("inspect checkpoint deltas after process stop: %v", err)
+	}
+	if deltas < minimum {
+		rows, queryErr := db.Query(`SELECT revision,checkpoint_kind,base_revision,lineage FROM context_checkpoints WHERE conversation_id=? ORDER BY revision`, agentID)
+		if queryErr != nil {
+			t.Fatalf("list checkpoint rows: %v", queryErr)
+		}
+		var details []string
+		for rows.Next() {
+			var revision, base int
+			var kind, lineage string
+			if scanErr := rows.Scan(&revision, &kind, &base, &lineage); scanErr != nil {
+				t.Fatalf("scan checkpoint row: %v", scanErr)
+			}
+			details = append(details, fmt.Sprintf("r%d:%s(base=%d,lineage=%s)", revision, kind, base, lineage))
+		}
+		_ = rows.Close()
+		t.Fatalf("process restart fixture persisted %d incremental checkpoints for agent %s, want at least %d; checkpoints=%v", deltas, agentID, minimum, details)
+	}
 }
 
 type processLLMMode string
@@ -192,8 +360,8 @@ func (s *processLLMServer) handle(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
-	if call == 1 && mode == processLLMAuto {
-		writeProcessSSE(w, map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "auto completed"}, "finish_reason": "stop"}}})
+	if mode == processLLMAuto {
+		writeProcessSSE(w, map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": fmt.Sprintf("auto completed %d", call)}, "finish_reason": "stop"}}})
 	} else if call == 1 {
 		toolName := "ask_user_information"
 		arguments := `{"question":"Which environment should be used?"}`
@@ -453,16 +621,59 @@ func setProcessToolPolicy(t *testing.T, baseURL, agentID, tool, mode string) {
 func postProcessMessage(t *testing.T, baseURL, agentID, content string) {
 	t.Helper()
 	postProcessJSON(t, http.MethodPost, baseURL+"/v1/messages", map[string]any{
-		"agent_id":     agentID,
-		"request_type": "message",
-		"content":      content,
+		"agent_id":           agentID,
+		"request_type":       "message",
+		"content":            content,
+		"client_request_id":  fmt.Sprintf("process-test-%d", time.Now().UnixNano()),
+		"conversation_epoch": uint64(1),
 	})
 }
 
 type processHydrate struct {
-	Active       bool            `json:"active"`
-	QueuePending int             `json:"queue_pending"`
-	PendingHITL  json.RawMessage `json:"pending_hitl"`
+	Active                 bool            `json:"active"`
+	QueuePending           int             `json:"queue_pending"`
+	PendingHITL            json.RawMessage `json:"pending_hitl"`
+	ConversationRevision   uint64          `json:"conversation_revision"`
+	TranscriptSynchronized bool            `json:"transcript_synchronized"`
+	TurnState              struct {
+		ResultCommitStatus string `json:"result_commit_status"`
+	} `json:"turn_state"`
+	Transcript []map[string]any `json:"transcript"`
+}
+
+type processConversationWatermark struct {
+	AgentID              string `json:"agent_id"`
+	ConversationID       string `json:"conversation_id"`
+	ConversationRevision uint64 `json:"conversation_revision"`
+	LatestAgentSeq       int    `json:"latest_agent_seq"`
+	ResultCommitStatus   string `json:"result_commit_status"`
+}
+
+func getProcessAgentWatermark(t *testing.T, baseURL, agentID string) (string, processConversationWatermark) {
+	t.Helper()
+	resp, err := http.Get(baseURL + "/v1/agents/watermarks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("watermarks status=%d body=%s", resp.StatusCode, body)
+	}
+	var body struct {
+		StreamEpoch string                         `json:"stream_epoch"`
+		Agents      []processConversationWatermark `json:"agents"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	for _, watermark := range body.Agents {
+		if watermark.AgentID == agentID && watermark.ConversationID == agentID {
+			return body.StreamEpoch, watermark
+		}
+	}
+	t.Fatalf("watermarks response missing conversation %s: %+v", agentID, body.Agents)
+	return "", processConversationWatermark{}
 }
 
 func getProcessHydrate(t *testing.T, baseURL, agentID string) processHydrate {
@@ -483,6 +694,30 @@ func getProcessHydrate(t *testing.T, baseURL, agentID string) processHydrate {
 		out.PendingHITL = nil
 	}
 	return out
+}
+
+func processHydrateContainsAssistant(hydrate processHydrate, want string) bool {
+	for _, entry := range hydrate.Transcript {
+		if entry["kind"] == "assistant" && strings.Contains(fmt.Sprint(entry["text"]), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func waitProcessHydrateReply(t *testing.T, baseURL, agentID, want string, timeout time.Duration) processHydrate {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var latest processHydrate
+	for time.Now().Before(deadline) {
+		latest = getProcessHydrate(t, baseURL, agentID)
+		if !latest.Active && latest.TranscriptSynchronized && processHydrateContainsAssistant(latest, want) {
+			return latest
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for terminal hydrate reply %q: %+v", want, latest)
+	return processHydrate{}
 }
 
 func waitProcessTriggerFireCount(t *testing.T, baseURL, triggerID string, want int, timeout time.Duration) {

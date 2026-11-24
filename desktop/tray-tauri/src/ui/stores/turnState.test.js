@@ -1,25 +1,33 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  applyTurnState,
-  applyTurnFinishedEvent,
-  applyHydrateTurnState,
-  applyDesktopTurnEvent,
   budgetExhaustionMessage,
-  beginTurnCancellation,
-  isTurnInteractionWaiting,
-  isTurnProcessing,
-  isTurnTerminal,
-  resetTurnState,
-  setOutputChannel,
-  toolExecutionForCall,
-  turnStateStore,
+  createTurnStateStore,
 } from "./turnState.js";
-import { hasStatus, resetStatusLines, syncTurnStatus } from "./statusLines.js";
+
+let turnStateStore;
+let applyTurnState;
+let applyTurnFinishedEvent;
+let applyHydrateTurnState;
+let applyDesktopTurnEvent;
+let isTurnInteractionWaiting;
+let isTurnProcessing;
+let isTurnTerminal;
+let resetTurnState;
+let toolExecutionForCall;
 
 describe("turnState", () => {
   beforeEach(() => {
-    resetTurnState();
-    resetStatusLines();
+    const lifecycle = createTurnStateStore();
+    turnStateStore = lifecycle.state;
+    applyTurnState = lifecycle.applyTurnState;
+    applyTurnFinishedEvent = lifecycle.applyTurnFinishedEvent;
+    applyHydrateTurnState = lifecycle.applyHydrateTurnState;
+    applyDesktopTurnEvent = lifecycle.applyDesktopTurnEvent;
+    isTurnInteractionWaiting = lifecycle.isTurnInteractionWaiting;
+    isTurnProcessing = lifecycle.isTurnProcessing;
+    isTurnTerminal = lifecycle.isTurnTerminal;
+    resetTurnState = lifecycle.resetTurnState;
+    toolExecutionForCall = lifecycle.toolExecutionForCall;
   });
 
   it("accepts lifecycle events in sequence and ignores stale events", () => {
@@ -163,28 +171,6 @@ describe("turnState", () => {
     expect(turnStateStore.turnId).toBe("new-turn");
   });
 
-  it("shows thinking when reasoning output arrives without using it as turn authority", () => {
-    applyTurnState({
-      authority: "turn_coordinator",
-      phase: "model_generating",
-      turn_id: "turn-1",
-      generation: 1,
-      lifecycle_seq: 10,
-    });
-    setOutputChannel("reasoning");
-    syncTurnStatus(turnStateStore);
-    expect(hasStatus("thinking")).toBe(true);
-    expect(isTurnProcessing()).toBe(true);
-  });
-
-  it("distinguishes assistant output from reasoning output", () => {
-    applyTurnState({ phase: "model_generating", turn_id: "turn-1", generation: 1 });
-    setOutputChannel("assistant");
-    syncTurnStatus(turnStateStore);
-    expect(hasStatus("assistant_generating")).toBe(true);
-    expect(hasStatus("thinking")).toBe(false);
-  });
-
   it("keeps tool execution and interaction states explicit", () => {
     applyTurnState({
       phase: "tool_executing",
@@ -219,22 +205,6 @@ describe("turnState", () => {
       retryable: false,
       incomplete: false,
     });
-  });
-
-  it("keeps an accepted submission busy until the authoritative turn starts", () => {
-    turnStateStore.submitState = "accepted";
-    applyTurnState({ phase: "idle", terminal: false }, { source: "hydrate" });
-    expect(isTurnProcessing()).toBe(true);
-
-    applyTurnState({ phase: "queued", turn_id: "turn-2", generation: 2 });
-    expect(isTurnProcessing()).toBe(true);
-    expect(turnStateStore.submitState).toBe("idle");
-  });
-
-  it("preserves cancellation confirmation when the terminal event arrives", () => {
-    beginTurnCancellation();
-    applyTurnState({ phase: "cancelled", terminal: true, turn_id: "turn-3" });
-    expect(turnStateStore.cancelState).toBe("confirmed");
   });
 
   it("releases a matching turn from its correlated terminal event", () => {

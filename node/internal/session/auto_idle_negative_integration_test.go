@@ -163,6 +163,7 @@ func TestAutoIdleNegativeCasesDoNotSuppressNotifications(t *testing.T) {
 				if ev.Type != "hitl_required" {
 					continue
 				}
+				approvalNotifySeq := waitForNotifySequence(t, mgr, sid, before.NotifySeq+1).NotifySeq
 				if _, err := mgr.EnqueueMessage(context.Background(), sid, "resume", "", nil, map[string]any{"type": "user_information", "tool_call_id": "ask-before-idle", "answer": "确认"}, ""); err != nil {
 					t.Fatal(err)
 				}
@@ -170,8 +171,8 @@ func TestAutoIdleNegativeCasesDoNotSuppressNotifications(t *testing.T) {
 				if noWork, _ := finished.Data["no_work"].(bool); noWork {
 					t.Fatalf("ASK recovery then idle became no_work: %#v", finished.Data)
 				}
-				if got := mgr.NotificationState(sid).NotifySeq; got <= before.NotifySeq {
-					t.Fatalf("ASK approval did not notify: before=%d after=%d", before.NotifySeq, got)
+				if approvalNotifySeq <= before.NotifySeq {
+					t.Fatalf("ASK approval did not advance notification: before=%d after=%d", before.NotifySeq, approvalNotifySeq)
 				}
 				if client.calls != 2 {
 					t.Fatalf("calls=%d", client.calls)
@@ -246,10 +247,7 @@ func TestTrustedAutoIdleSuppressesNotifyButPersistsHistory(t *testing.T) {
 	if finish, _ := ordinary.Data["finish_reason"].(string); finish != "stop" {
 		t.Fatalf("ordinary finish=%q", finish)
 	}
-	baseline := mgr.NotificationState(sess.ID).NotifySeq
-	if baseline <= 0 {
-		t.Fatalf("ordinary natural-language completion did not advance notification: %+v", mgr.NotificationState(sess.ID))
-	}
+	baseline := waitForNotifySequence(t, mgr, sess.ID, 1).NotifySeq
 	if err := mgr.EnqueueAutoTriggerMessage(sess.ID, "auto-default:agent-positive", "检查", "delivery-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -273,6 +271,19 @@ func TestTrustedAutoIdleSuppressesNotifyButPersistsHistory(t *testing.T) {
 	}
 	assertAutoIdleRuntimeHistory(t, mgr.getRuntime(sess.ID).activeMessagesSnapshot())
 	assertAutoIdleHistory(t, st, sess.ID)
+	snapshots, snapshotErr := st.ListCompletedTurnSnapshots(context.Background(), sess.ID, 0, 20)
+	if snapshotErr != nil {
+		t.Fatal(snapshotErr)
+	}
+	var noWorkSnapshot bool
+	for _, snapshot := range snapshots {
+		if snapshot.Status == "no_work" {
+			noWorkSnapshot = true
+		}
+	}
+	if !noWorkSnapshot {
+		t.Fatalf("trusted idle completion did not persist explicit no_work snapshot status: %+v", snapshots)
+	}
 	mgr.Stop()
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
@@ -299,6 +310,21 @@ func TestTrustedAutoIdleSuppressesNotifyButPersistsHistory(t *testing.T) {
 		t.Fatalf("history missing after reopen: %q", joined)
 	}
 	assertAutoIdleHistory(t, reopened, sess.ID)
+}
+
+func waitForNotifySequence(t *testing.T, mgr *Manager, sessionID string, minimum int) NotificationState {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		state := mgr.NotificationState(sessionID)
+		if state.NotifySeq >= minimum {
+			return state
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	state := mgr.NotificationState(sessionID)
+	t.Fatalf("notification sequence did not reach %d: %+v", minimum, state)
+	return state
 }
 
 func assertAutoIdleHistory(t *testing.T, st *store.SQLiteStore, sessionID string) {

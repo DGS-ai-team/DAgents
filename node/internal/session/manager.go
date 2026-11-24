@@ -4,8 +4,10 @@ package session
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -57,6 +59,8 @@ type TurnOptions struct {
 	// construction, so the constructor must start from the revision loaded from
 	// SQLite instead of the zero value.
 	initialHistoryRevision                           uint64
+	initialConversationRevision                      uint64
+	initialContextCheckpointRevision                 uint64
 	initialToolCallProjectionHiddenThroughGeneration uint64
 	initialActiveContextStart                        int
 	initialLastContextResetID                        string
@@ -144,6 +148,12 @@ func effectiveWorkspaceRoot(opts TurnOptions) string {
 
 func withInitialHistoryRevision(opts TurnOptions, revision uint64) TurnOptions {
 	opts.initialHistoryRevision = revision
+	return opts
+}
+
+func withInitialConversationRevisions(opts TurnOptions, conversation, checkpoint uint64) TurnOptions {
+	opts.initialConversationRevision = conversation
+	opts.initialContextCheckpointRevision = checkpoint
 	return opts
 }
 
@@ -597,7 +607,7 @@ func (m *Manager) createWithOptionsReuse(
 		return nil, false, false, err
 	}
 	created := len(restore.Messages) == 0 && !restore.Found
-	turnOpts = withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialToolCallProjectionBoundary(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ToolCallProjectionHiddenThroughGeneration), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+	turnOpts = withInitialConversationRevisions(withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialToolCallProjectionBoundary(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ToolCallProjectionHiddenThroughGeneration), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded), restore.ConversationRevision, restore.ContextCheckpointRevision)
 	turnOpts.initialLastHumanInteraction = restore.LastHumanInteraction
 	if turnOpts.ConditionValidator == nil {
 		turnOpts.ConditionValidator = m.conditionValidator
@@ -607,7 +617,9 @@ func (m *Manager) createWithOptionsReuse(
 	}
 	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
 		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
-	rt.restoreInputBoxState(restore.InputBoxState)
+	if err := rt.restoreInputBoxState(restore.InputBoxState); err != nil {
+		return nil, false, false, err
+	}
 	rt.reconcileRestoredInputBox()
 	if _, err := rt.recoverDreamingAttemptAfterLifecycle(); err != nil {
 		return nil, false, false, err
@@ -718,7 +730,7 @@ func (m *Manager) replaceWithOptions(
 		}
 	}
 	created := len(restore.Messages) == 0 && !restore.Found
-	turnOpts = withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialToolCallProjectionBoundary(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ToolCallProjectionHiddenThroughGeneration), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+	turnOpts = withInitialConversationRevisions(withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialToolCallProjectionBoundary(withInitialHistoryRevision(turnOpts, restore.HistoryRevision), restore.ToolCallProjectionHiddenThroughGeneration), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded), restore.ConversationRevision, restore.ContextCheckpointRevision)
 	turnOpts.initialLastHumanInteraction = restore.LastHumanInteraction
 	if turnOpts.ConditionValidator == nil {
 		turnOpts.ConditionValidator = m.conditionValidator
@@ -728,7 +740,10 @@ func (m *Manager) replaceWithOptions(
 	}
 	rt := newRuntimeWithPublisher(id, runtimeAgentID, m.hub, m.hub, llmClient, toolExec, policyEngine, m.store, m.logger,
 		restore.Messages, restore.LoadedSkills, restore.HookStore, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
-	rt.restoreInputBoxState(restore.InputBoxState)
+	if err := rt.restoreInputBoxState(restore.InputBoxState); err != nil {
+		m.mu.Unlock()
+		return nil, false, err
+	}
 	rt.reconcileRestoredInputBox()
 	if _, err := rt.recoverDreamingAttemptAfterLifecycle(); err != nil {
 		m.mu.Unlock()
@@ -783,7 +798,7 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 			return nil, false, err
 		}
 		created := len(restore.Messages) == 0 && !restore.Found
-		turnOpts := withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialToolCallProjectionBoundary(withInitialHistoryRevision(m.turn, restore.HistoryRevision), restore.ToolCallProjectionHiddenThroughGeneration), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded)
+		turnOpts := withInitialConversationRevisions(withInitialLifecycleEvents(withInitialDreamingAttempt(withInitialLastContextResetID(withInitialActiveContextStart(withInitialToolCallProjectionBoundary(withInitialHistoryRevision(m.turn, restore.HistoryRevision), restore.ToolCallProjectionHiddenThroughGeneration), restore.ActiveContextStart), restore.LastContextResetID), restore.DreamingAttempt), restore.LifecycleEvents, restore.LifecycleEventsLoaded), restore.ConversationRevision, restore.ContextCheckpointRevision)
 		turnOpts.initialLastHumanInteraction = restore.LastHumanInteraction
 		if turnOpts.ConditionValidator == nil {
 			turnOpts.ConditionValidator = m.conditionValidator
@@ -793,7 +808,9 @@ func (m *Manager) Create(requestedID string) (*Session, bool, error) {
 		}
 		rt := newRuntime(id, m.agentID, m.hub, m.llm, m.tools, m.policy, m.store, m.logger,
 			restore.Messages, restore.LoadedSkills, restore.HookStore, restore.NotifySeq, restore.AckSeq, turnOpts, m.triggerDelivery)
-		rt.restoreInputBoxState(restore.InputBoxState)
+		if err := rt.restoreInputBoxState(restore.InputBoxState); err != nil {
+			return nil, false, err
+		}
 		rt.reconcileRestoredInputBox()
 		if _, err := rt.recoverDreamingAttemptAfterLifecycle(); err != nil {
 			return nil, false, err
@@ -839,6 +856,8 @@ type sessionRestoreData struct {
 	NotifySeq                                 int
 	AckSeq                                    int
 	HistoryRevision                           uint64
+	ConversationRevision                      uint64
+	ContextCheckpointRevision                 uint64
 	ToolCallProjectionHiddenThroughGeneration uint64
 	ActiveContextStart                        int
 	LastContextResetID                        string
@@ -862,21 +881,23 @@ func (m *Manager) loadSessionData(sessionID string) (sessionRestoreData, error) 
 	}
 	lifecycle, lifecycleErr := m.loadLifecycleProjectionData(context.Background(), sessionID, rec.NodeID)
 	if lifecycleErr != nil {
-		lifecycle.events = nil
+		return sessionRestoreData{}, fmt.Errorf("load turn lifecycle for session %q: %w", sessionID, lifecycleErr)
 	}
 	lastHumanAt := recoverLastHumanInteraction(
 		lifecycle.events,
 		rec.RuntimeState.LastHumanInteraction,
 	)
 	return sessionRestoreData{
-		Found:                true,
-		Messages:             rec.Messages,
-		LoadedSkills:         rec.LoadedSkills,
-		HookStore:            rec.RuntimeState.HookStore,
-		LastHumanInteraction: lastHumanAt,
-		NotifySeq:            rec.RuntimeState.NotifySeq,
-		AckSeq:               rec.RuntimeState.AckSeq,
-		HistoryRevision:      rec.RuntimeState.HistoryRevision,
+		Found:                     true,
+		Messages:                  rec.Messages,
+		LoadedSkills:              rec.LoadedSkills,
+		HookStore:                 rec.RuntimeState.HookStore,
+		LastHumanInteraction:      lastHumanAt,
+		NotifySeq:                 rec.RuntimeState.NotifySeq,
+		AckSeq:                    rec.RuntimeState.AckSeq,
+		HistoryRevision:           rec.RuntimeState.HistoryRevision,
+		ConversationRevision:      rec.RuntimeState.ConversationRevision,
+		ContextCheckpointRevision: rec.RuntimeState.ContextCheckpointRevision,
 		ToolCallProjectionHiddenThroughGeneration: rec.RuntimeState.ToolCallProjectionHiddenThroughGeneration,
 		ActiveContextStart:                        rec.RuntimeState.ActiveContextStart,
 		LastContextResetID:                        rec.RuntimeState.LastContextResetID,
@@ -1075,6 +1096,14 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 		start = len(rec.Messages)
 	}
 	activeMessages := append([]llm.Message(nil), rec.Messages[start:]...)
+	queuePending := inputBoxPendingCount(rec.RuntimeState.InputBoxState)
+	if headerIsRowBacked(rec.RuntimeState.InputBoxState) {
+		rows, err := m.store.LoadInputQueue(context.Background(), sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("load persisted input queue: %w", err)
+		}
+		queuePending = countQueuedInputRows(rows)
+	}
 	lifecycle, hasLifecycleProjection, _, projectionErr := m.loadLifecycleProjection(context.Background(), sessionID, rec.NodeID)
 	if projectionErr != nil {
 		m.logger.Warn("load persisted turn lifecycle projection failed", "session_id", sessionID, "error", projectionErr)
@@ -1091,7 +1120,7 @@ func (m *Manager) GetContextView(sessionID string) (*ContextView, error) {
 		PendingToolCallsCount: pendingToolCallsCount(pending),
 		ToolLoopCount:         stepCount,
 		LoadedSkills:          rec.LoadedSkills,
-		QueuePending:          inputBoxPendingCount(rec.RuntimeState.InputBoxState),
+		QueuePending:          queuePending,
 		Messages:              activeMessages,
 		HasActiveTurn:         lifecycle.HasActiveTurn,
 		TurnID:                lifecycle.TurnID,
@@ -1223,8 +1252,32 @@ func (m *Manager) ClearContext(sessionID string) (cancelled bool, err error) {
 	if !projected {
 		lifecycle.Generation = 0
 	}
+	mailbox := NewInputBox()
+	if len(rec.RuntimeState.InputBoxState) > 0 {
+		var restoreErr error
+		if headerIsRowBacked(rec.RuntimeState.InputBoxState) {
+			var rows []store.InputQueueRow
+			rows, restoreErr = m.store.LoadInputQueue(context.Background(), sid)
+			if restoreErr == nil {
+				restoreErr = mailbox.RestoreQueueRows(rec.RuntimeState.InputBoxState, rows)
+			}
+		} else {
+			restoreErr = mailbox.Restore(rec.RuntimeState.InputBoxState)
+		}
+		if restoreErr != nil {
+			return false, fmt.Errorf("restore input state before clear: %w", restoreErr)
+		}
+	}
+	newConversationEpoch := mailbox.ConversationEpoch() + 1
+	if newConversationEpoch == 0 {
+		return false, fmt.Errorf("conversation epoch exhausted")
+	}
+	mailbox.DropStale(newConversationEpoch)
 	state := store.RuntimeState{
-		HistoryRevision: rec.RuntimeState.HistoryRevision + 1,
+		InputBoxState:                             mailbox.SnapshotForPersistence(),
+		HistoryRevision:                           rec.RuntimeState.HistoryRevision + 1,
+		ConversationRevision:                      rec.RuntimeState.ConversationRevision + 1,
+		ContextCheckpointRevision:                 rec.RuntimeState.ContextCheckpointRevision + 1,
 		ToolCallProjectionHiddenThroughGeneration: lifecycle.Generation,
 		LastHumanInteraction:                      time.Now().UTC(),
 	}
@@ -1278,7 +1331,7 @@ func (m *Manager) EnqueueMessage(
 	resumeValue map[string]any,
 	userMessageName string,
 ) (priority string, err error) {
-	return m.enqueueMessage(sessionID, requestType, content, contentParts, nil, resumeValue, userMessageName)
+	return m.enqueueMessage(sessionID, requestType, content, contentParts, nil, resumeValue, userMessageName, nil)
 }
 
 // EnqueueMessageWithFileReferences accepts structured local file metadata
@@ -1292,7 +1345,164 @@ func (m *Manager) EnqueueMessageWithFileReferences(
 	resumeValue map[string]any,
 	userMessageName string,
 ) (priority string, err error) {
-	return m.enqueueMessage(sessionID, requestType, content, contentParts, fileReferences, resumeValue, userMessageName)
+	return m.enqueueMessage(sessionID, requestType, content, contentParts, fileReferences, resumeValue, userMessageName, nil)
+}
+
+// EnqueueMessageWithReceipt is the HTTP ingress variant. It returns the
+// durable InputBox sequence for human messages so Desktop can correlate its
+// queued row with the eventual transcript item. Control messages have seq 0.
+func (m *Manager) EnqueueMessageWithReceipt(
+	_ context.Context,
+	sessionID, requestType, content string,
+	contentParts []llm.ContentPart,
+	fileReferences []llm.FileReference,
+	resumeValue map[string]any,
+	userMessageName string,
+) (priority string, inputSeq uint64, err error) {
+	priority, err = m.enqueueMessage(sessionID, requestType, content, contentParts, fileReferences, resumeValue, userMessageName, &inputSeq)
+	return priority, inputSeq, err
+}
+
+// EnqueueMessageWithIdempotency is the Desktop/HTTP ingress for retry-safe
+// human messages. Request digest, conversation epoch, InputBox sequence and
+// durable receipt are committed through the same InputBox runtime snapshot.
+func (m *Manager) EnqueueMessageWithIdempotency(
+	_ context.Context,
+	sessionID, content string,
+	contentParts []llm.ContentPart,
+	fileReferences []llm.FileReference,
+	userMessageName, clientRequestID, payloadDigest string,
+	conversationEpoch uint64,
+) (InputReceipt, bool, error) {
+	rt := m.getRuntime(sessionID)
+	if rt == nil {
+		return InputReceipt{}, false, fmt.Errorf("agent_not_found")
+	}
+	if rt.executionIsStopped() {
+		return InputReceipt{}, false, fmt.Errorf("result_commit_recovery_required")
+	}
+	if !llm.UserInputValidWithFileReferences(content, contentParts, fileReferences) {
+		return InputReceipt{}, false, fmt.Errorf("invalid_message")
+	}
+	if !m.turn.MultimodalEnabled && llm.UserInputHasImages(content, contentParts) {
+		return InputReceipt{}, false, fmt.Errorf("multimodal_disabled")
+	}
+	if strings.TrimSpace(clientRequestID) == "" || len(strings.TrimSpace(clientRequestID)) > 128 || strings.TrimSpace(payloadDigest) == "" || conversationEpoch == 0 {
+		return InputReceipt{}, false, fmt.Errorf("invalid_input_receipt")
+	}
+	env := queue.Envelope{
+		RequestType:    queue.RequestTypeMessage,
+		Content:        content,
+		ContentParts:   contentParts,
+		FileReferences: fileReferences,
+		UserName:       userMessageName,
+	}
+	receipt := InputReceipt{
+		ClientRequestID:   clientRequestID,
+		PayloadDigest:     payloadDigest,
+		ConversationEpoch: conversationEpoch,
+	}
+	return rt.appendInputWithReceipt(InputKindUser, env, receipt)
+}
+
+func (m *Manager) LoadConversationResubmitTarget(ctx context.Context, sessionID, roundID, revisionID string) (store.ConversationResubmitTarget, uint64, error) {
+	var empty store.ConversationResubmitTarget
+	rt := m.getRuntime(sessionID)
+	if rt == nil || rt.inputBox == nil || m.store == nil {
+		return empty, 0, fmt.Errorf("agent_not_found")
+	}
+	rt.ingressMu.Lock()
+	defer rt.ingressMu.Unlock()
+	gate := rt.executionGate
+	if gate != nil {
+		gate.mu.Lock()
+		defer gate.mu.Unlock()
+		if gate.maintenance || gate.dispatches != 0 {
+			return empty, 0, store.ErrConversationResubmitConflict
+		}
+	}
+	if rt.executionIsStopped() || rt.turnState() != "idle" || rt.queue.Len() != 0 || rt.inputBox.Len() != 0 || rt.inputBox.HasInFlight() || rt.hasPendingHITL() {
+		return empty, 0, store.ErrConversationResubmitConflict
+	}
+	target, err := m.store.LoadConversationResubmitTarget(ctx, sessionID, roundID, revisionID)
+	if err != nil {
+		return empty, 0, err
+	}
+	return target, rt.inputBox.ConversationEpoch(), nil
+}
+
+func (m *Manager) EnqueueConversationResubmit(
+	ctx context.Context,
+	sessionID string,
+	request queue.ConversationResubmitRequest,
+	content string,
+	contentParts []llm.ContentPart,
+	fileReferences []llm.FileReference,
+	userMessageName, clientRequestID, payloadDigest string,
+	conversationEpoch uint64,
+) (InputReceipt, bool, error) {
+	rt := m.getRuntime(sessionID)
+	if rt == nil || rt.inputBox == nil || m.store == nil {
+		return InputReceipt{}, false, fmt.Errorf("agent_not_found")
+	}
+	if !llm.UserInputValidWithFileReferences(content, contentParts, fileReferences) {
+		return InputReceipt{}, false, fmt.Errorf("invalid_message")
+	}
+	if !m.turn.MultimodalEnabled && llm.UserInputHasImages(content, contentParts) {
+		return InputReceipt{}, false, fmt.Errorf("multimodal_disabled")
+	}
+	if strings.TrimSpace(request.RoundID) == "" || strings.TrimSpace(request.ExpectedSelectedRevisionID) == "" || request.ExpectedConversationRevision == 0 ||
+		strings.TrimSpace(clientRequestID) == "" || len(strings.TrimSpace(clientRequestID)) > 128 || strings.TrimSpace(payloadDigest) == "" || conversationEpoch == 0 {
+		return InputReceipt{}, false, fmt.Errorf("invalid_input_receipt")
+	}
+	env := queue.Envelope{
+		RequestType: queue.RequestTypeMessage, Content: content, ContentParts: contentParts,
+		FileReferences: fileReferences, UserName: userMessageName, ConversationResubmit: &request,
+	}
+	receipt := InputReceipt{ClientRequestID: clientRequestID, PayloadDigest: payloadDigest, ConversationEpoch: conversationEpoch}
+	guard := store.ConversationResubmitGuard{
+		RoundID: request.RoundID, ExpectedSelectedRevisionID: request.ExpectedSelectedRevisionID,
+		ExpectedConversationRevision: request.ExpectedConversationRevision,
+		PreCheckpointRevision:        request.PreCheckpointRevision,
+	}
+	return rt.appendConversationResubmitWithReceipt(env, receipt, guard)
+}
+
+func (m *Manager) LookupInputReceipt(ctx context.Context, sessionID, clientRequestID string, conversationEpoch uint64) (InputReceipt, bool, error) {
+	if rt := m.getRuntime(sessionID); rt != nil && rt.inputBox != nil {
+		if m.store == nil {
+			return rt.inputBox.LookupReceipt(clientRequestID, conversationEpoch)
+		}
+		if conversationEpoch == 0 || conversationEpoch != rt.inputBox.ConversationEpoch() {
+			return InputReceipt{}, false, ErrInputConversationChanged
+		}
+		receipt, found, err := m.store.LookupInputReceipt(ctx, strings.TrimSpace(sessionID), clientRequestID)
+		if err != nil || !found {
+			return InputReceipt{}, found, err
+		}
+		return rt.inputBox.ProjectReceipt(receipt, conversationEpoch)
+	}
+	if m.store == nil {
+		return InputReceipt{}, false, fmt.Errorf("agent_not_found")
+	}
+	receipt, found, runtimeState, err := m.store.LookupInputReceiptWithRuntimeState(ctx, strings.TrimSpace(sessionID), clientRequestID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return InputReceipt{}, false, fmt.Errorf("agent_not_found")
+		}
+		return InputReceipt{}, false, err
+	}
+	if !found {
+		currentEpoch, epochErr := ConversationEpochFromSnapshot(runtimeState.InputBoxState)
+		if epochErr != nil {
+			return InputReceipt{}, false, epochErr
+		}
+		if conversationEpoch == 0 || conversationEpoch != currentEpoch {
+			return InputReceipt{}, false, ErrInputConversationChanged
+		}
+		return InputReceipt{}, false, nil
+	}
+	return ProjectInputReceiptInSnapshot(runtimeState.InputBoxState, receipt, conversationEpoch)
 }
 
 func (m *Manager) enqueueMessage(
@@ -1301,6 +1511,7 @@ func (m *Manager) enqueueMessage(
 	fileReferences []llm.FileReference,
 	resumeValue map[string]any,
 	userMessageName string,
+	inputSeq *uint64,
 ) (priority string, err error) {
 	m.mu.RLock()
 	rt := m.sessions[strings.TrimSpace(sessionID)]
@@ -1310,6 +1521,9 @@ func (m *Manager) enqueueMessage(
 		return "", fmt.Errorf("agent_not_found")
 	}
 	m.mu.RUnlock()
+	if rt.executionIsStopped() {
+		return "", fmt.Errorf("result_commit_recovery_required")
+	}
 	m.logger.Debug("enqueue message",
 		"session_id", sessionID,
 		"request_type", requestType,
@@ -1384,13 +1598,76 @@ func (m *Manager) enqueueMessage(
 		ResumeValue:    resumeValue,
 	}
 	if requestType == queue.RequestTypeMessage {
-		if _, err := rt.appendInput(InputKindUser, env); err != nil {
+		seq, err := rt.appendInput(InputKindUser, env)
+		if err != nil {
 			return "", err
+		}
+		if inputSeq != nil {
+			*inputSeq = seq
 		}
 	} else if err := rt.enqueue(env, p); err != nil {
 		return "", err
 	}
 	return string(p), nil
+}
+
+// EditQueuedMessage replaces a queued human input only when its revision still
+// matches the caller's view. The consumer and edits share InputBox's claim
+// boundary, so an input cannot be edited after claim.
+func (m *Manager) EditQueuedMessage(
+	sessionID string,
+	inputSeq, expectedRevision uint64,
+	content string,
+	contentParts []llm.ContentPart,
+	fileReferences []llm.FileReference,
+	userMessageName string,
+) (InputRecord, error) {
+	rt := m.getRuntime(sessionID)
+	if rt == nil {
+		return InputRecord{}, fmt.Errorf("agent_not_found")
+	}
+	previous, err := rt.inputBox.QueuedUserInput(inputSeq)
+	if err != nil {
+		return InputRecord{}, err
+	}
+	if contentParts == nil {
+		contentParts = previous.Env.ContentParts
+	}
+	if fileReferences == nil {
+		fileReferences = previous.Env.FileReferences
+	}
+	if strings.TrimSpace(userMessageName) == "" {
+		userMessageName = previous.Env.UserName
+		if strings.TrimSpace(userMessageName) == "" {
+			userMessageName = llm.UserNameHuman
+		}
+	}
+	if !llm.UserInputValidWithFileReferences(content, contentParts, fileReferences) {
+		return InputRecord{}, fmt.Errorf("invalid_message")
+	}
+	if !m.turn.MultimodalEnabled && llm.UserInputHasImages(content, contentParts) {
+		return InputRecord{}, fmt.Errorf("multimodal_disabled")
+	}
+	env := queue.Envelope{
+		RequestType:          queue.RequestTypeMessage,
+		Content:              content,
+		ContentParts:         contentParts,
+		FileReferences:       fileReferences,
+		UserName:             userMessageName,
+		ConversationResubmit: previous.Env.ConversationResubmit,
+	}
+	return rt.editQueuedInput(inputSeq, expectedRevision, env)
+}
+
+// DeleteQueuedMessage withdraws an unclaimed human input at its expected
+// revision. A claim that wins the race returns ErrInputNotQueued.
+func (m *Manager) DeleteQueuedMessage(sessionID string, inputSeq, expectedRevision uint64) error {
+	rt := m.getRuntime(sessionID)
+	if rt == nil {
+		return fmt.Errorf("agent_not_found")
+	}
+	_, err := rt.deleteQueuedInput(inputSeq, expectedRevision)
+	return err
 }
 
 // EnqueueAsyncToolResult 将异步工具完成结构化回灌入队（request_type=async_tool_result）。
@@ -1425,6 +1702,46 @@ type CancelTurnResult struct {
 	TurnID     string
 	Generation uint64
 	Terminal   bool
+}
+
+type InputQueueControlResult struct {
+	Paused   bool   `json:"queue_paused"`
+	Revision uint64 `json:"queue_control_revision"`
+}
+
+// SetInputQueuePaused changes the durable root-input claim gate using the
+// caller's control revision. A zero expected revision is reserved for
+// internal unconditional transitions such as stopping the active Turn.
+func (m *Manager) SetInputQueuePaused(sessionID string, paused bool, expectedRevision uint64) (InputQueueControlResult, error) {
+	rt := m.getRuntime(sessionID)
+	if rt == nil {
+		return InputQueueControlResult{}, fmt.Errorf("agent_not_found")
+	}
+	revision, _, err := rt.setInputQueuePaused(paused, expectedRevision)
+	if err != nil {
+		return InputQueueControlResult{}, err
+	}
+	currentPaused, currentRevision := rt.inputBox.QueueControlState()
+	if currentRevision != revision {
+		revision = currentRevision
+	}
+	return InputQueueControlResult{Paused: currentPaused, Revision: revision}, nil
+}
+
+// StopTurnAndPauseQueue fences the next root-input claim before cancellation.
+// It is intentionally one control operation from the Desktop's perspective:
+// the active Turn may stop, but already accepted follow-up messages remain
+// queued until the user explicitly resumes them.
+func (m *Manager) StopTurnAndPauseQueue(sessionID string) (CancelTurnResult, InputQueueControlResult, error) {
+	rt := m.getRuntime(sessionID)
+	if rt == nil {
+		return CancelTurnResult{}, InputQueueControlResult{}, fmt.Errorf("agent_not_found")
+	}
+	control, err := m.SetInputQueuePaused(sessionID, true, 0)
+	if err != nil {
+		return CancelTurnResult{}, InputQueueControlResult{}, err
+	}
+	return m.CancelTurnWithResult(sessionID), control, nil
 }
 
 // CancelTurnWithResult cancels the current Turn and returns its terminal

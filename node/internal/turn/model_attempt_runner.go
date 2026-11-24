@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
@@ -56,9 +57,11 @@ func (o *Orchestrator) runModelRequest(
 				return result, retryErr
 			}
 		}
+		execution, _ := ExecutionContextFromContext(ctx)
+		attemptID := ModelAttemptID(execution.TurnID, execution.StepID, attempt+1)
 		if err := o.emitLifecycleCommand(ctx, sessionID, TurnCommand{
 			Type: CommandModelRequestStarted, At: time.Now().UTC(),
-			RequestDigest: requestDigest, MaxAttempts: o.modelRetryLimit + 1, Reason: "model_request_started",
+			RequestDigest: requestDigest, AttemptID: attemptID, MaxAttempts: o.modelRetryLimit + 1, Reason: "model_request_started",
 		}); err != nil {
 			if !o.executionBoundaryOpen(ctx) {
 				return result, context.Canceled
@@ -68,6 +71,8 @@ func (o *Orchestrator) runModelRequest(
 		o.resetUsageAttempt(sessionID, stepIndex)
 		attemptProducedOutput := false
 		var streamedContent strings.Builder
+		var streamedReasoning strings.Builder
+		var contentChunkSeq, reasoningChunkSeq atomic.Uint64
 		result, err = o.llm.StreamChat(ctx, llm.ChatRequest{
 			SystemPrompt: systemPrompt,
 			Messages:     messages,
@@ -78,13 +83,22 @@ func (o *Orchestrator) runModelRequest(
 					attemptProducedOutput = true
 					streamedContent.WriteString(delta)
 				}
-				o.publishAssistant(sessionID, delta)
+				seq := uint64(0)
+				if attemptID != "" {
+					seq = contentChunkSeq.Add(1)
+				}
+				o.publishAssistant(sessionID, delta, llm.AssistantDisplayIdentityForStep(execution.StepID), execution.TurnID, execution.StepID, attemptID, seq)
 			},
 			OnReasoningDelta: func(delta string) {
 				if delta != "" {
 					attemptProducedOutput = true
+					streamedReasoning.WriteString(delta)
 				}
-				o.publishReasoning(sessionID, delta)
+				seq := uint64(0)
+				if attemptID != "" {
+					seq = reasoningChunkSeq.Add(1)
+				}
+				o.publishReasoning(sessionID, delta, llm.AssistantDisplayIdentityForStep(execution.StepID), execution.TurnID, execution.StepID, attemptID, seq)
 			},
 			OnToolCallDelta: func(calls []llm.ToolCall) {
 				for i, tc := range calls {
@@ -120,6 +134,9 @@ func (o *Orchestrator) runModelRequest(
 			// This is exactly what the live stream displayed, even if an adapter
 			// omitted the partial ChatResult while returning its error.
 			result.Content = streamedContent.String()
+		}
+		if streamedReasoning.Len() > 0 {
+			result.ReasoningContent = streamedReasoning.String()
 		}
 		if result.Content != "" || result.ReasoningContent != "" || len(result.ToolCalls) > 0 {
 			attemptProducedOutput = true

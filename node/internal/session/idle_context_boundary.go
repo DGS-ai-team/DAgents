@@ -72,6 +72,10 @@ func (r *runtime) maybeStartIdleConversation(ctx context.Context, envEpoch uint6
 		llm.MessageSource{Kind: llm.MessageSourceRuntime, Form: llm.MessageFormNotice},
 		&llm.MessageProvenance{Producer: idleContextBoundaryProducer, Operation: "continue-from-archive", Reference: archivePath},
 	)
+	bridge.RecordID, err = llm.NewOpaqueRecordID()
+	if err != nil {
+		return err
+	}
 	r.lifecycleMu.Lock()
 	r.persistMu.Lock()
 	state = r.turnCoordinator.Snapshot()
@@ -91,7 +95,9 @@ func (r *runtime) maybeStartIdleConversation(ctx context.Context, envEpoch uint6
 	r.activeContextStart = len(r.messages)
 	r.lastContextResetID = resetID
 	r.messages = append(r.messages, bridge)
+	r.noteRecordUpsertLocked(bridge)
 	r.historyRevision++
+	r.noteCheckpointDirtyLocked()
 	newRevision := r.historyRevision
 	r.mu.Unlock()
 	if err := r.persistLocked(ctx); err != nil {
@@ -99,6 +105,9 @@ func (r *runtime) maybeStartIdleConversation(ctx context.Context, envEpoch uint6
 		if r.lastContextResetID == resetID && r.historyRevision == newRevision && len(r.messages) > 0 && llm.IsMessageSource(r.messages[len(r.messages)-1], llm.MessageSourceRuntime, llm.MessageFormNotice, idleContextBoundaryProducer) {
 			r.messages = r.messages[:len(r.messages)-1]
 			r.activeContextStart, r.lastContextResetID, r.historyRevision = oldStart, oldID, oldRevision
+			r.deltaMu.Lock()
+			delete(r.recordDeltaUpserts, bridge.RecordID)
+			r.deltaMu.Unlock()
 		}
 		r.mu.Unlock()
 		r.persistMu.Unlock()

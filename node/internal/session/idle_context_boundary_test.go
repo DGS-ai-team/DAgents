@@ -43,6 +43,15 @@ func TestIdleConversationBoundaryPersistsThroughRestartReplacementAndClear(t *te
 		{Role: "assistant", Content: "服务已恢复，日志没有新的错误。"},
 	}
 	rt.historyRevision = 9
+	for index := range rt.messages {
+		id, idErr := llm.NewOpaqueRecordID()
+		if idErr != nil {
+			t.Fatal(idErr)
+		}
+		rt.messages[index].RecordID = id
+		rt.noteRecordUpsertLocked(rt.messages[index])
+	}
+	rt.noteCheckpointDirtyLocked()
 	rt.lastHumanInteraction = time.Now().Add(-2 * time.Second)
 	rt.mu.Unlock()
 	if err := rt.persist(ctx); err != nil {
@@ -74,7 +83,8 @@ func TestIdleConversationBoundaryPersistsThroughRestartReplacementAndClear(t *te
 		t.Fatalf("archive retry path=%q reference=%q err=%v", archived, bridge.Provenance.Reference, err)
 	}
 	rec, err := st.Load(ctx, sess.ID)
-	if err != nil || rec == nil || rec.RuntimeState.ActiveContextStart != 2 || len(rec.Messages) != 3 {
+	fullHistory, historyErr := st.LoadConversationRecords(ctx, sess.ID)
+	if err != nil || historyErr != nil || rec == nil || rec.RuntimeState.ActiveContextStart != 0 || len(rec.Messages) != 1 || len(fullHistory) != 3 {
 		t.Fatalf("persisted boundary record=%+v err=%v", rec, err)
 	}
 

@@ -57,7 +57,7 @@ func seedLifecycleEvent(
 
 func seedRestartRecord(t *testing.T, st *store.SQLiteStore, sessionID string, messages []llm.Message) {
 	t.Helper()
-	if err := st.Save(context.Background(), store.Record{
+	if err := st.SaveConversationSnapshot(context.Background(), store.Record{
 		AgentID:  sessionID,
 		NodeID:   "restart-test-node",
 		Messages: messages,

@@ -18,6 +18,16 @@ type RelayHub struct {
 
 // Publish 实现 stream.Publisher；忽略 orchestrator 传入的 agentID，统一发往父 Agent。
 func (h *RelayHub) Publish(_agentID, eventType string, data map[string]any) stream.Event {
+	return h.publish(eventType, data, true)
+}
+
+// PublishEphemeral relays transient child progress without advancing the
+// parent's replay cursor.
+func (h *RelayHub) PublishEphemeral(_agentID, eventType string, data map[string]any) stream.Event {
+	return h.publish(eventType, data, false)
+}
+
+func (h *RelayHub) publish(eventType string, data map[string]any, replayable bool) stream.Event {
 	if eventType == "turn_finished" {
 		// 子 turn 的终态不代表父 Agent 回合结束，避免 Client 误判。
 		return stream.Event{}
@@ -33,5 +43,8 @@ func (h *RelayHub) Publish(_agentID, eventType string, data map[string]any) stre
 	if h.Observe != nil {
 		h.Observe(eventType, data)
 	}
-	return h.Inner.Publish(h.ParentAgentID, eventType, data)
+	if replayable {
+		return h.Inner.Publish(h.ParentAgentID, eventType, data)
+	}
+	return h.Inner.PublishEphemeral(h.ParentAgentID, eventType, data)
 }

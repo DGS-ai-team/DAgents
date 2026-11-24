@@ -77,6 +77,7 @@ type TurnCommand struct {
 	InteractionKind      string
 	InteractionRevision  int64
 	RequestDigest        string
+	AttemptID            string
 	AssistantMessageID   string
 	AssistantMessage     *llm.Message
 	RuntimeRevision      int64
@@ -158,9 +159,12 @@ type ToolExecutionView struct {
 // provider-facing assistant envelope during crash recovery. It intentionally
 // avoids coupling the lifecycle package to the LLM message types.
 type ToolCallProjection struct {
-	ID        string
-	ToolName  string
-	Arguments json.RawMessage
+	ID                 string
+	ToolName           string
+	Arguments          json.RawMessage
+	StepID             string
+	AssistantMessageID string
+	BatchIndex         int
 }
 
 // TurnCoordinator owns the logical Turn/Step state machine for one Session.
@@ -225,6 +229,38 @@ func (c *TurnCoordinator) DispatchDurable(command TurnCommand, persist func(Turn
 		}
 	}
 	return snapshot, nil
+}
+
+// DispatchBatchDurable applies a sequence of lifecycle commands as one
+// in-memory transition. The persistence callback sees every intermediate
+// projection and must commit their facts atomically. Any validation or write
+// failure restores the exact pre-batch projection.
+func (c *TurnCoordinator) DispatchBatchDurable(commands []TurnCommand, persist func([]TurnCommand, []CoordinatorSnapshot) error) ([]CoordinatorSnapshot, error) {
+	if c == nil {
+		return nil, fmt.Errorf("turn coordinator is nil")
+	}
+	if len(commands) == 0 {
+		return nil, fmt.Errorf("lifecycle command batch is empty")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	checkpoint := c.checkpointLocked()
+	snapshots := make([]CoordinatorSnapshot, 0, len(commands))
+	for _, command := range commands {
+		snapshot, err := c.dispatchLocked(command)
+		if err != nil {
+			c.restoreCheckpointLocked(checkpoint)
+			return nil, err
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	if persist != nil {
+		if err := persist(commands, snapshots); err != nil {
+			c.restoreCheckpointLocked(checkpoint)
+			return nil, err
+		}
+	}
+	return snapshots, nil
 }
 
 func (c *TurnCoordinator) dispatchLocked(command TurnCommand) (CoordinatorSnapshot, error) {
@@ -572,6 +608,7 @@ func replayCommand(event TurnEventEnvelope) (TurnCommand, bool, error) {
 		PromptDigest         string                `json:"prompt_digest"`
 		ToolDigest           string                `json:"tool_digest"`
 		RequestDigest        string                `json:"request_digest"`
+		AttemptID            string                `json:"attempt_id"`
 		AssistantMessageID   string                `json:"assistant_message_id"`
 		ArgumentsJSON        string                `json:"arguments_json"`
 		ContextSnapshot      *ModelContextSnapshot `json:"context_snapshot"`
@@ -608,6 +645,7 @@ func replayCommand(event TurnEventEnvelope) (TurnCommand, bool, error) {
 		RuntimeRevision:      meta.RuntimeRevision, RuntimeDigest: meta.RuntimeDigest,
 		PromptDigest: meta.PromptDigest, ToolDigest: meta.ToolDigest,
 		RequestDigest:      meta.RequestDigest,
+		AttemptID:          meta.AttemptID,
 		AssistantMessageID: meta.AssistantMessageID,
 		Budget:             meta.Budget,
 		Usage:              meta.Usage,
@@ -918,11 +956,10 @@ func (c *TurnCoordinator) startModelAttemptLocked(command TurnCommand) error {
 	if c.turn.ModelUsagePending {
 		c.turn.ModelUsageMissing = true
 	}
-	attemptBase := strings.TrimSpace(command.RequestDigest)
-	if attemptBase == "" {
-		attemptBase = c.step.ID
+	attemptID := ModelAttemptID(c.turn.ID, c.step.ID, attemptNumber)
+	if command.AttemptID != "" && command.AttemptID != attemptID {
+		return fmt.Errorf("model attempt identity mismatch")
 	}
-	attemptID := fmt.Sprintf("%s-attempt-%d", attemptBase, attemptNumber)
 	attempt := ModelAttempt{ID: attemptID, StepID: c.step.ID, TurnID: c.turn.ID, Attempt: attemptNumber, RequestDigest: command.RequestDigest, Status: ModelAttemptStatusRunning, MaxAttempts: command.MaxAttempts, StartedAt: command.At}
 	c.attempts = append(c.attempts, attempt)
 	c.turn.ModelUsagePending = true
@@ -1415,7 +1452,7 @@ func (c *TurnCoordinator) snapshotLocked() CoordinatorSnapshot {
 				byCall[execution.ToolCallID] = execution
 			}
 		}
-		for _, callID := range c.batch.ToolCallIDs {
+		for batchIndex, callID := range c.batch.ToolCallIDs {
 			execution := byCall[callID]
 			if execution == nil {
 				continue
@@ -1423,6 +1460,7 @@ func (c *TurnCoordinator) snapshotLocked() CoordinatorSnapshot {
 			result.ActiveToolCalls = append(result.ActiveToolCalls, ToolCallProjection{
 				ID: execution.ToolCallID, ToolName: execution.ToolName,
 				Arguments: append(json.RawMessage(nil), execution.Arguments...),
+				StepID:    c.step.ID, AssistantMessageID: c.step.AssistantMsgID, BatchIndex: batchIndex,
 			})
 		}
 	}
@@ -1625,7 +1663,7 @@ func (c *TurnCoordinator) ActiveToolCalls() []ToolCallProjection {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.batch == nil || len(c.batch.ToolCallIDs) == 0 {
+	if c.turn == nil || c.step == nil || c.batch == nil || len(c.batch.ToolCallIDs) == 0 {
 		return nil
 	}
 	byCall := make(map[string]*ToolExecution, len(c.executions))
@@ -1636,15 +1674,18 @@ func (c *TurnCoordinator) ActiveToolCalls() []ToolCallProjection {
 		byCall[execution.ToolCallID] = execution
 	}
 	calls := make([]ToolCallProjection, 0, len(c.batch.ToolCallIDs))
-	for _, callID := range c.batch.ToolCallIDs {
+	for batchIndex, callID := range c.batch.ToolCallIDs {
 		execution := byCall[callID]
 		if execution == nil {
 			continue
 		}
 		calls = append(calls, ToolCallProjection{
-			ID:        execution.ToolCallID,
-			ToolName:  execution.ToolName,
-			Arguments: append(json.RawMessage(nil), execution.Arguments...),
+			ID:                 execution.ToolCallID,
+			ToolName:           execution.ToolName,
+			Arguments:          append(json.RawMessage(nil), execution.Arguments...),
+			StepID:             c.step.ID,
+			AssistantMessageID: c.step.AssistantMsgID,
+			BatchIndex:         batchIndex,
 		})
 	}
 	return calls

@@ -12,9 +12,10 @@ import (
 func TestMessagesToTranscriptEntries_basicTurn(t *testing.T) {
 	t.Parallel()
 	messages := []llm.Message{
-		{Role: "user", Content: "hello"},
+		{Role: "user", Content: "hello", RecordID: "input-1"},
 		{
 			Role:             "assistant",
+			RecordID:         "step-1/assistant",
 			ReasoningContent: "think",
 			Content:          "hi",
 			ToolCalls: []llm.ToolCall{{
@@ -26,7 +27,7 @@ func TestMessagesToTranscriptEntries_basicTurn(t *testing.T) {
 				},
 			}},
 		},
-		{Role: "tool", ToolCallID: "call-1", Name: "bash_run", Content: "hi\n"},
+		{Role: "tool", RecordID: "tool-result-1", ToolCallID: "call-1", Name: "bash_run", Content: "hi\n"},
 	}
 	entries := MessagesToTranscriptEntries(messages)
 	if len(entries) != 5 {
@@ -35,26 +36,42 @@ func TestMessagesToTranscriptEntries_basicTurn(t *testing.T) {
 	if entries[0]["kind"] != "user" || entries[0]["text"] != "hello" {
 		t.Fatalf("user entry = %#v", entries[0])
 	}
+	if entries[0]["item_id"] != "input-1" {
+		t.Fatalf("user item identity = %#v", entries[0]["item_id"])
+	}
 	if entries[1]["kind"] != "reasoning" {
 		t.Fatalf("reasoning entry = %#v", entries[1])
+	}
+	if entries[1]["item_id"] != "step-1/assistant/reasoning" {
+		t.Fatalf("reasoning item identity = %#v", entries[1]["item_id"])
 	}
 	if entries[2]["kind"] != "assistant" {
 		t.Fatalf("assistant entry = %#v", entries[2])
 	}
+	if entries[2]["item_id"] != "step-1/assistant/content" {
+		t.Fatalf("assistant item identity = %#v", entries[2]["item_id"])
+	}
 	if entries[3]["kind"] != "tool_call" || entries[3]["blockId"] != "call-1" {
 		t.Fatalf("tool_call entry = %#v", entries[3])
 	}
+	if entries[3]["item_id"] != "tool-call/call-1" {
+		t.Fatalf("tool_call item identity = %#v", entries[3]["item_id"])
+	}
 	if entries[4]["kind"] != "tool_result" || entries[4]["blockId"] != "call-1" {
 		t.Fatalf("tool_result entry = %#v", entries[4])
+	}
+	if entries[4]["item_id"] != "tool-result-1" {
+		t.Fatalf("tool_result item identity = %#v", entries[4]["item_id"])
 	}
 }
 
 func TestMessagesToTranscriptEntries_userFileReferences(t *testing.T) {
 	t.Parallel()
 	messages := []llm.Message{{
-		Role:           "user",
-		Content:        "请读取",
-		FileReferences: []llm.FileReference{{Path: `D:\work\README.md`, Name: "README.md", Revision: "rev-2", Anchor: &llm.FileReferenceAnchor{Type: "text-range", Label: "第 4 行", Quote: "原文摘录", Location: map[string]any{"startLine": 4}}}},
+		Role:            "user",
+		Content:         "请读取",
+		ClientRequestID: "request-transcript-1",
+		FileReferences:  []llm.FileReference{{Path: `D:\work\README.md`, Name: "README.md", Revision: "rev-2", Anchor: &llm.FileReferenceAnchor{Type: "text-range", Label: "第 4 行", Quote: "原文摘录", Location: map[string]any{"startLine": 4}}}},
 	}}
 	entries := MessagesToTranscriptEntries(messages)
 	if len(entries) != 1 {
@@ -62,6 +79,12 @@ func TestMessagesToTranscriptEntries_userFileReferences(t *testing.T) {
 	}
 	if entries[0]["text"] != "请读取" {
 		t.Fatalf("text = %#v", entries[0]["text"])
+	}
+	if entries[0]["client_request_id"] != "request-transcript-1" {
+		t.Fatalf("client request identity = %#v", entries[0]["client_request_id"])
+	}
+	if entries[0]["item_id"] != "input-request/request-transcript-1" {
+		t.Fatalf("request ID fallback identity = %#v", entries[0]["item_id"])
 	}
 	refs, ok := entries[0]["file_refs"].([]llm.FileReference)
 	if !ok || len(refs) != 1 || refs[0].Path != `D:\work\README.md` {
@@ -97,14 +120,18 @@ func TestMessagesToTranscriptEntries_skipsInjectedUserMessages(t *testing.T) {
 		llm.UserMessage("异步工具结果回灌", llm.UserNameAsyncTool),
 		llm.UserMessage("压缩摘要", llm.UserNameCompression),
 		llm.UserMessage("<skill_instructions>正文</skill_instructions>", llm.UserNameSkill),
+		{Role: "user", Content: "当天日期为：我想了解这个缩写的来历"},
 		{Role: "user", Content: "真实用户问题"},
 	}
 	entries := MessagesToTranscriptEntries(messages)
-	if len(entries) != 1 {
-		t.Fatalf("len = %d, want 1", len(entries))
+	if len(entries) != 2 {
+		t.Fatalf("len = %d, want 2", len(entries))
 	}
-	if entries[0]["kind"] != "user" || entries[0]["text"] != "真实用户问题" {
-		t.Fatalf("entry = %#v", entries[0])
+	if entries[0]["kind"] != "user" || entries[0]["text"] != "当天日期为：我想了解这个缩写的来历" {
+		t.Fatalf("prefix-like user entry = %#v", entries[0])
+	}
+	if entries[1]["kind"] != "user" || entries[1]["text"] != "真实用户问题" {
+		t.Fatalf("entry = %#v", entries[1])
 	}
 }
 

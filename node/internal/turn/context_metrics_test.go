@@ -46,6 +46,7 @@ func TestTurnContextMetrics_toolCallAndDoneSSE(t *testing.T) {
 		t.Fatalf("metrics after executeTool = %+v", m)
 	}
 	orch.publishTurnFinished("sess-m", "stop")
+	orch.PublishCommittedTurnFinished("sess-m", "stop", nil)
 	var finishedPayload map[string]any
 	for i := 0; i < 5; i++ {
 		ev := <-ch

@@ -337,7 +337,7 @@ func (b *workgroupAgentBridge) runAgentTurn(
 			}
 			data := cloneMap(ev.Data)
 			isChildEvent := strings.TrimSpace(stringValue(data["child_agent_id"])) != ""
-			if ev.Type == "assistant" && !isChildEvent {
+			if !isChildEvent && ev.Type == "conversation_delta" && stringValue(data["part"]) == "content" {
 				assistantText.WriteString(stringValue(data["content"]))
 			}
 			_ = b.emitFrame(map[string]any{

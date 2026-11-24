@@ -79,11 +79,7 @@ defaults:
 		t.Fatalf("workspaceRoot=%q want Agent workspace %q", workspaceRoot, wantWorkspaceRoot)
 	}
 
-	msgBody, _ := json.Marshal(map[string]any{
-		"agent_id":     created.AgentID,
-		"request_type": "message",
-		"content":      "hello agent",
-	})
+	msgBody := testIdempotentMessageBody(t, created.AgentID, "hello agent")
 	req = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(msgBody))
 	rr = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)

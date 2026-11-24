@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/tokens"
@@ -73,6 +74,73 @@ func TestMessageToAPIPayloadDoesNotExposeInternalToolMetadataField(t *testing.T)
 	}
 	if _, ok := payload["provenance"]; ok {
 		t.Fatalf("internal provenance leaked into provider payload: %+v", payload)
+	}
+}
+
+func TestProviderPayloadsDoNotExposeAssistantDisplayIdentity(t *testing.T) {
+	message := Message{
+		Role:            "assistant",
+		Content:         "answer",
+		DisplayIdentity: AssistantDisplayIdentityForStep("step-provider"),
+	}
+	for name, encode := range map[string]func(Message) (map[string]any, error){
+		"openai":   MessageToAPIPayload,
+		"deepseek": MessageToDeepSeekAPIPayload,
+	} {
+		t.Run(name, func(t *testing.T) {
+			payload, err := encode(message)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{"display_identity", "item_id", "content_item_id", "reasoning_item_id", "item_version"} {
+				if _, leaked := payload[key]; leaked {
+					t.Fatalf("internal identity field %q leaked in provider payload: %#v", key, payload)
+				}
+			}
+		})
+	}
+}
+
+func TestClientRequestIdentityPersistsInternallyButIsNotSentToProviders(t *testing.T) {
+	message := Message{Role: "user", Content: "hello", ClientRequestID: "request-private-1"}
+	raw, err := json.Marshal(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored Message
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored.ClientRequestID != message.ClientRequestID {
+		t.Fatalf("durable message round trip lost request identity: %#v", restored)
+	}
+	journal := MessageToJournalPayload(message)
+	if journal["client_request_id"] != "request-private-1" {
+		t.Fatalf("journal lost request identity: %#v", journal)
+	}
+	for name, encode := range map[string]func(Message) (map[string]any, error){
+		"openai":   MessageToAPIPayload,
+		"deepseek": MessageToDeepSeekAPIPayload,
+	} {
+		t.Run(name, func(t *testing.T) {
+			payload, err := encode(message)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, leaked := payload["client_request_id"]; leaked {
+				t.Fatalf("internal request identity leaked to provider: %#v", payload)
+			}
+		})
+	}
+}
+
+func TestAssistantDisplayIdentityRequiresStepID(t *testing.T) {
+	if got := AssistantDisplayIdentityForStep(" "); got != nil {
+		t.Fatalf("identity without a trusted Step ID = %#v, want nil", got)
+	}
+	identity := AssistantDisplayIdentityForStep("step-7")
+	if identity == nil || identity.ContentItemID != "step-7/assistant/content" || identity.ReasoningItemID != "step-7/assistant/reasoning" || identity.ItemVersion != 1 {
+		t.Fatalf("identity = %#v", identity)
 	}
 }
 

@@ -20,14 +20,19 @@ import (
 // Record 为 Agent 运行时元数据与消息快照。
 // AgentID 为对话/Agent 实例 id（主键）；NodeID 为所属 Node 身份（历史列曾误名 agent_id）。
 type Record struct {
-	AgentID          string
-	NodeID           string
-	Messages         []llm.Message
-	LoadedSkills     []skills.LoadedSkill
-	RuntimeState     RuntimeState
-	FirstUserMessage string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	AgentID                string
+	NodeID                 string
+	Messages               []llm.Message
+	LoadedSkills           []skills.LoadedSkill
+	RuntimeState           RuntimeState
+	FirstUserMessage       string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	AcceptedInputReceipt   *InputReceipt
+	InputQueueRows         []InputQueueRow
+	CompletedInputSeq      uint64
+	CompletedInputRevision uint64
+	ResubmitGuard          *ConversationResubmitGuard
 }
 
 // Summary 为列表项摘要。
@@ -96,18 +101,27 @@ CREATE TABLE IF NOT EXISTS agent_runtimes (
 	if err := s.initChildRunSchema(); err != nil {
 		return err
 	}
-	return nil
+	if err := s.initConversationInputSchema(); err != nil {
+		return err
+	}
+	return s.migrateConversationStorage(context.Background())
 }
 
-// Save 写入或更新 Agent 全量消息快照。
+// Save writes runtime metadata only. Message payloads are intentionally ignored;
+// transcript changes must use PersistRuntimeDelta with explicit item IDs.
 func (s *SQLiteStore) Save(ctx context.Context, rec Record) error {
+	_, err := s.PersistRuntimeDelta(ctx, rec, nil)
+	return err
+}
+
+// SaveConversationSnapshot is a one-shot legacy/import helper. Runtime code
+// must use Save for metadata or PersistRuntimeDelta for explicit content deltas.
+func (s *SQLiteStore) SaveConversationSnapshot(ctx context.Context, rec Record) error {
 	if strings.TrimSpace(rec.AgentID) == "" {
 		return fmt.Errorf("agent_id is required")
 	}
-	raw, err := json.Marshal(rec.Messages)
-	if err != nil {
-		return err
-	}
+	// messages_json is frozen migration input. From schema v1 onward, history
+	// records and the model checkpoint are committed together below.
 	skillsRaw, err := json.Marshal(rec.LoadedSkills)
 	if err != nil {
 		return err
@@ -129,18 +143,27 @@ func (s *SQLiteStore) Save(ctx context.Context, rec Record) error {
 	if first == "" {
 		first = firstUserMessage(rec.Messages)
 	}
-	_, err = s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `
 INSERT INTO agent_runtimes(agent_id, node_id, messages_json, loaded_skills_json, runtime_state_json, first_user_message, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, '[]', ?, ?, ?, ?, ?)
 ON CONFLICT(agent_id) DO UPDATE SET
   node_id=excluded.node_id,
-  messages_json=excluded.messages_json,
   loaded_skills_json=excluded.loaded_skills_json,
   runtime_state_json=excluded.runtime_state_json,
   first_user_message=CASE WHEN excluded.first_user_message != '' THEN excluded.first_user_message ELSE agent_runtimes.first_user_message END,
   updated_at=excluded.updated_at
-`, rec.AgentID, rec.NodeID, string(raw), string(skillsRaw), string(runtimeRaw), first, created.Format(time.RFC3339Nano), updated.Format(time.RFC3339Nano))
-	return err
+`, rec.AgentID, rec.NodeID, string(skillsRaw), string(runtimeRaw), first, created.Format(time.RFC3339Nano), updated.Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	if err := saveConversationSnapshotTx(ctx, tx, rec); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Load 读取 Agent 运行时；不存在时返回 nil, nil。
@@ -150,26 +173,35 @@ func (s *SQLiteStore) Load(ctx context.Context, agentID string) (*Record, error)
 		return nil, fmt.Errorf("agent_id is required")
 	}
 	row := s.db.QueryRowContext(ctx, `
-SELECT agent_id, node_id, messages_json, COALESCE(loaded_skills_json, '[]'), COALESCE(runtime_state_json, '{}'), first_user_message, created_at, updated_at
+SELECT agent_id, node_id, COALESCE(loaded_skills_json, '[]'), COALESCE(runtime_state_json, '{}'), first_user_message, created_at, updated_at
 FROM agent_runtimes WHERE agent_id = ?
 `, id)
 	var rec Record
-	var raw, skillsRaw, runtimeRaw string
+	var skillsRaw, runtimeRaw string
 	var created, updated string
-	if err := row.Scan(&rec.AgentID, &rec.NodeID, &raw, &skillsRaw, &runtimeRaw, &rec.FirstUserMessage, &created, &updated); err != nil {
+	if err := row.Scan(&rec.AgentID, &rec.NodeID, &skillsRaw, &runtimeRaw, &rec.FirstUserMessage, &created, &updated); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, err
 	}
-	if err := json.Unmarshal([]byte(raw), &rec.Messages); err != nil {
-		return nil, err
-	}
+	// The checkpoint, not the frozen messages_json migration source, is the
+	// authoritative model working set after conversation schema v1.
 	_ = json.Unmarshal([]byte(skillsRaw), &rec.LoadedSkills)
 	if rec.LoadedSkills == nil {
 		rec.LoadedSkills = []skills.LoadedSkill{}
 	}
 	_ = json.Unmarshal([]byte(runtimeRaw), &rec.RuntimeState)
+	checkpoint, err := loadConversationCheckpointTx(ctx, s.db, id)
+	if err != nil {
+		return nil, err
+	}
+	if checkpoint != nil {
+		rec.Messages = checkpoint.Messages
+		rec.RuntimeState.ContextCheckpointRevision = checkpoint.Revision
+		rec.RuntimeState.ActiveContextStart = 0
+	}
+	_ = s.db.QueryRowContext(ctx, `SELECT revision FROM conversations WHERE conversation_id=?`, id).Scan(&rec.RuntimeState.ConversationRevision)
 	rec.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
 	rec.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
 	return &rec, nil
@@ -178,8 +210,8 @@ FROM agent_runtimes WHERE agent_id = ?
 // List 返回全部持久化 Agent 摘要（按 updated_at 降序）。
 func (s *SQLiteStore) List(ctx context.Context) ([]Summary, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT agent_id, node_id, messages_json, first_user_message, updated_at
-FROM agent_runtimes ORDER BY updated_at DESC
+SELECT r.agent_id, r.node_id, (SELECT COUNT(*) FROM conversation_records c WHERE c.conversation_id=r.agent_id), r.first_user_message, r.updated_at
+FROM agent_runtimes r ORDER BY r.updated_at DESC
 `)
 	if err != nil {
 		return nil, err
@@ -188,13 +220,10 @@ FROM agent_runtimes ORDER BY updated_at DESC
 	var out []Summary
 	for rows.Next() {
 		var sum Summary
-		var raw, updated string
-		if err := rows.Scan(&sum.AgentID, &sum.NodeID, &raw, &sum.FirstUserMessage, &updated); err != nil {
+		var updated string
+		if err := rows.Scan(&sum.AgentID, &sum.NodeID, &sum.MessageCount, &sum.FirstUserMessage, &updated); err != nil {
 			return nil, err
 		}
-		var msgs []llm.Message
-		_ = json.Unmarshal([]byte(raw), &msgs)
-		sum.MessageCount = len(msgs)
 		sum.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
 		out = append(out, sum)
 	}
@@ -203,11 +232,25 @@ FROM agent_runtimes ORDER BY updated_at DESC
 
 // Delete 删除 Agent 运行时行；返回是否删除成功。
 func (s *SQLiteStore) Delete(ctx context.Context, agentID string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM agent_runtimes WHERE agent_id = ?`, strings.TrimSpace(agentID))
+	id := strings.TrimSpace(agentID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, table := range []string{"conversation_input_queue", "conversation_inputs", "conversation_records", "context_checkpoints", "conversation_rounds", "conversations"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE conversation_id=?`, id); err != nil {
+			return false, err
+		}
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM agent_runtimes WHERE agent_id = ?`, id)
 	if err != nil {
 		return false, err
 	}
 	n, _ := res.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
 	return n > 0, nil
 }
 
@@ -222,21 +265,56 @@ func (s *SQLiteStore) ClearMessagesWithRuntimeState(ctx context.Context, agentID
 	if strings.TrimSpace(agentID) == "" {
 		return fmt.Errorf("agent_id is required")
 	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	id := strings.TrimSpace(agentID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_records WHERE conversation_id=?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_inputs WHERE conversation_id=?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_input_queue WHERE conversation_id=?`, id); err != nil {
+		return err
+	}
+	var revision uint64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision),0)+1 FROM context_checkpoints WHERE conversation_id=?`, id).Scan(&revision); err != nil {
+		return err
+	}
+	var nodeID string
+	if err := tx.QueryRowContext(ctx, `SELECT node_id FROM agent_runtimes WHERE agent_id=?`, id).Scan(&nodeID); err != nil {
+		return err
+	}
+	state.ContextCheckpointRevision = revision
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT revision FROM conversations WHERE conversation_id=?),0)+1`, id).Scan(&state.ConversationRevision); err != nil {
+		return err
+	}
 	runtimeRaw, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := s.db.ExecContext(ctx, `
-UPDATE agent_runtimes SET messages_json = '[]', runtime_state_json = ?, loaded_skills_json = '[]', updated_at = ? WHERE agent_id = ?
-`, string(runtimeRaw), now, strings.TrimSpace(agentID))
+	res, err := tx.ExecContext(ctx, `UPDATE agent_runtimes SET runtime_state_json = ?, loaded_skills_json = '[]', first_user_message = '', updated_at = ? WHERE agent_id = ?`, string(runtimeRaw), now, id)
 	if err != nil {
 		return err
 	}
 	if count, _ := res.RowsAffected(); count == 0 {
 		return sql.ErrNoRows
 	}
-	return nil
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO context_checkpoints(conversation_id,revision,messages_json,lineage,lifecycle_covered_seq,created_at) VALUES(?,?,'[]','clear',0,?)`, id, revision, stamp); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM context_checkpoints WHERE conversation_id=? AND revision<>?`, id, revision); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO conversations(conversation_id,node_id,revision,current_checkpoint_revision,lifecycle_covered_seq,created_at,updated_at) VALUES(?,?,?,?,0,?,?) ON CONFLICT(conversation_id) DO UPDATE SET revision=excluded.revision,current_checkpoint_revision=excluded.current_checkpoint_revision,lifecycle_covered_seq=0,updated_at=excluded.updated_at`, id, nodeID, state.ConversationRevision, revision, stamp, stamp); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // BackdateUpdatedAt 显式设置 Agent updated_at（测试与 idle 自动压缩扫描）。
