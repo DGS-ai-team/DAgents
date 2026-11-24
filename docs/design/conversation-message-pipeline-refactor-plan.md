@@ -1,5 +1,7 @@
 # Desktop / Node 会话消息链路改造方案
 
+2026-11-25 PR 检查修复：#391 / #392 描述已补齐仓库要求的四个中文章节。#391 的 Staticcheck S1017 已改为无条件 `TrimSuffix`，五个 Go 模块 Staticcheck 通过；RustSec 最新日志发现 `cookie 0.18.1` 与 `url 2.5.8` 两项新公告，锁定升级至 `cookie 0.18.3`、`url 2.5.9`。更新后 `cargo test --locked --lib` 77 项通过，缓存 advisory DB 离线扫描无漏洞、仅余 3 项允许提示；CI 的新一轮在线安全扫描正在运行。该锁文件更新在 #391 基底分支，并已合并进 #392 的测试分支。
+
 2026-11-25 PR 整理：Web Search / Fetch 独立功能以 PR #391 提交；消息链路重构以 PR #392 单独提交，基于 #391 形成 stacked PR，避免把两类功能揉进同一评审。#392 已包含本轮旧流事件别名清理与对应测试；CI、机器人评审和人工合并尚未完成。已知 Native 压力 / 多媒体边界、P1c 人工混合审批和历史事故取证缺口已在 PR 描述中披露。
 
 2026-11-25 流式快照协议清理：生产端仅发布 `conversation_delta`，但 Hub 草稿快照投影仍兼容旧 `assistant` / `reasoning` 事件名，且测试继续用旧可重放事件模拟增量文本。现已移除该旧投影分支，将快照生命周期测试改为真实 ephemeral delta，并增加旧事件不会进入 assistant 草稿快照的回归；`go test ./internal/stream -count=1` 通过。通用事件 Hub 仍可按原契约分发 `assistant` 事件，这次只移除其对新草稿快照协议的过时兼容。
