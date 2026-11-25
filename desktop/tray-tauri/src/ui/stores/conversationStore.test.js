@@ -235,6 +235,27 @@ describe("conversation store ownership", () => {
     expect(store.hydrate.value.queue_control_revision).toBe(2);
   });
 
+  it("removes the prior selected round revision when a replacement patch arrives before hydrate", () => {
+    const store = createConversationStore();
+    store.setActiveScope("agent-a", 1);
+    const oldHuman = { item_id: "old-human", id: "old-human", detail_item_id: "old-human-record", round_id: "round-1", round_revision_id: "revision-1", conversation_ordinal: 1, kind: "user", text: "old input" };
+    const oldAssistant = { item_id: "old-answer", id: "old-answer", detail_item_id: "old-answer-record", round_id: "round-1", round_revision_id: "revision-1", conversation_ordinal: 2, kind: "assistant", text: "old answer" };
+    store.replaceHydrateSnapshot({ conversation_epoch: 1, conversation_revision: 3, history_revision: 3, transcript: [oldHuman, oldAssistant] });
+    store.replaceTranscriptReferences("agent-a", 1, [oldHuman, oldAssistant]);
+    store.items.replaceSnapshot([oldHuman, oldAssistant]);
+
+    const replacement = { item_id: "new-human", id: "new-human", detail_item_id: "new-human-record", round_id: "round-1", round_revision_id: "revision-2", conversation_ordinal: 1, kind: "user", text: "edited input" };
+    const result = store.applyConversationPatch({
+      agent_id: "agent-a",
+      event_type: "conversation_patch",
+      data: { conversation_id: "agent-a", conversation_revision: 4, history_revision: 4, upsert_items: [replacement], remove_item_ids: [] },
+    }, { agentId: "agent-a", generation: 1 });
+
+    expect(result.accepted).toBe(true);
+    expect(store.hydrate.value.transcript.map(item => item.item_id)).toEqual(["new-human"]);
+    expect(store.items.entries.map(item => item.item_id)).toEqual(["new-human"]);
+  });
+
   it("projects authoritative hydrate HITL into one ordered conversation queue", () => {
     const store = createConversationStore();
     expect(store.pendingHitl.value).toBeNull();
@@ -908,6 +929,33 @@ describe("conversation store ownership", () => {
       transcript: [{ item_id: "old-epoch" }],
     })).toBe(false);
     expect(store.hydrate.value).toEqual(current);
+  });
+
+  it("applies restored media to a committed patch while retaining the complete latest transcript", () => {
+    const store = createConversationStore();
+    store.setActiveScope("agent-a", 2);
+    const first = { item_id: "user-1", kind: "user", text: "first", images: [], data: {} };
+    const second = { item_id: "user-2", kind: "user", text: "second", images: ["dagents-media://media-2"], data: {} };
+    store.replaceHydrateSnapshot({
+      conversation_epoch: 3,
+      conversation_revision: 7,
+      history_revision: 9,
+      transcript: [first, second],
+    });
+    store.setLatestHydrateTranscript("agent-a", 2, 3, [first, second]);
+
+    const restored = { ...second, images: ["blob:desktop/media-2"] };
+    const latest = store.latestTranscriptFor("agent-a", 3).transcript;
+    expect(store.applyMediaTranscript("agent-a", 2, {
+      conversationEpoch: 3,
+      historyRevision: 9,
+      expectedConversationRevision: 7,
+      transcript: latest.map(entry => entry.item_id === "user-2" ? restored : entry),
+    })).toBe(true);
+
+    expect(store.hydrate.value.transcript.map(entry => entry.item_id)).toEqual(["user-1", "user-2"]);
+    expect(store.hydrate.value.transcript[1].images).toEqual(["blob:desktop/media-2"]);
+    expect(store.latestTranscriptFor("agent-a", 3).transcript).toHaveLength(2);
   });
 
   it("applies stream deltas and draft retirement through the conversation store", () => {

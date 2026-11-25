@@ -82,18 +82,19 @@ func TestConversationHistoryCursorBecomesStaleAfterClear(t *testing.T) {
 	}
 	defer st.Close()
 	seedConversationHistory(t, st, "agent-clear", 2)
+	if err := st.Save(context.Background(), Record{AgentID: "agent-clear", NodeID: "node"}); err != nil {
+		t.Fatal(err)
+	}
 	page, err := st.LoadConversationRoundPage(context.Background(), "agent-clear", "", 1)
 	if err != nil || page.NextBeforeRoundID != "round-2" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
-	if _, err := st.db.Exec(`DELETE FROM conversation_round_revisions WHERE conversation_id=?`, "agent-clear"); err != nil {
+	if err := st.ClearMessages(context.Background(), "agent-clear"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.db.Exec(`DELETE FROM conversation_rounds WHERE conversation_id=?`, "agent-clear"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.db.Exec(`DELETE FROM conversation_records WHERE conversation_id=?`, "agent-clear"); err != nil {
-		t.Fatal(err)
+	cleared, err := st.LoadConversationRoundPage(context.Background(), "agent-clear", "", 10)
+	if err != nil || len(cleared.Rounds) != 0 {
+		t.Fatalf("cleared history page=%+v err=%v", cleared, err)
 	}
 	if _, err := st.LoadConversationRoundPage(context.Background(), "agent-clear", page.NextBeforeRoundID, 1); !errors.Is(err, ErrConversationHistoryCursor) {
 		t.Fatalf("cleared conversation cursor error=%v", err)

@@ -19,7 +19,7 @@ func (r *runtime) publishConversationPatch(result store.ConversationCommitResult
 		return
 	}
 	entries, removedIDs := committedTranscriptPatchItems(result)
-	if len(entries) == 0 && len(removedIDs) == 0 && result.ConversationRevision == 0 && result.CheckpointRevision == 0 && terminal == nil {
+	if len(entries) == 0 && len(removedIDs) == 0 && result.ConversationRevision == 0 && result.CheckpointRevision == 0 && terminal == nil && len(inputBoxState) == 0 {
 		return
 	}
 	data := map[string]any{
@@ -64,6 +64,25 @@ func (r *runtime) publishConversationPatch(result store.ConversationCommitResult
 		data["pending_hitl"] = turn.BuildHITLRequiredSnapshot(pendingFromLifecycleSnapshot(*terminal))
 	}
 	r.publisher.Publish(r.session.ID, "conversation_patch", data)
+}
+
+// publishInputQueueSnapshot notifies other connected clients after a durable
+// queue-only change. Queue mutations do not advance transcript revisions, so
+// they still need an event that the Desktop can apply without a hydrate poll.
+func (r *runtime) publishInputQueueSnapshot() {
+	if r == nil || r.inputBox == nil {
+		return
+	}
+	state, rows, _, _ := r.inputBox.PersistenceState()
+	r.mu.Lock()
+	conversationRevision := r.conversationRevision
+	checkpointRevision := r.contextCheckpointRevision
+	historyRevision := r.historyRevision
+	r.mu.Unlock()
+	r.publishConversationPatch(store.ConversationCommitResult{
+		ConversationRevision: conversationRevision,
+		CheckpointRevision:   checkpointRevision,
+	}, historyRevision, "", nil, "", "", state, rows)
 }
 
 func committedTranscriptPatchItems(result store.ConversationCommitResult) ([]TranscriptEntry, []string) {

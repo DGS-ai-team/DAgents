@@ -8,7 +8,7 @@ import { useResourceRenderContext } from "../utils/resourceContext.js";
 import { openLightbox, closeLightbox, lightboxStore } from "../stores/lightbox.js";
 import UiIcon from "./UiIcon.vue";
 
-const props = defineProps({ entry: { type: Object, required: true }, agentId: { type: String, default: "" }, source: { type: String, default: "main" } });
+const props = defineProps({ entry: { type: Object, required: true }, agentId: { type: String, default: "" }, source: { type: String, default: "main" }, referenceDefinitions: { type: String, default: "" } });
 const context = useResourceRenderContext();
 const root = ref(null);
 const resourceDomKey = ref(0);
@@ -17,7 +17,7 @@ const rendered = computed(() => {
   const kind = props.entry?.kind === "assistant" ? "assistant" : "plain";
   const text = String(props.entry?.text || "");
   return measureSync("markdown.parse", () => kind === "assistant"
-    ? renderResourceMarkdown(text)
+    ? renderResourceMarkdown(text, { referenceDefinitions: props.referenceDefinitions })
     : { html: renderMarkdown(text), resources: [] }, { kind, characters: text.length });
 });
 const html = computed(() => rendered.value.html);

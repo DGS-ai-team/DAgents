@@ -143,6 +143,35 @@ func TestRuntimePersistReportsStoreErrors(t *testing.T) {
 	}
 }
 
+func TestRoundStartRuntimeStateIncludesHookStoreWithInputBox(t *testing.T) {
+	orch := turn.NewOrchestrator("agent-1", "", nil, &llm.MockClient{}, nil, nil, turn.SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, nil)
+	orch.SetHookStore(map[string]json.RawMessage{"cross-turn": json.RawMessage(`{"value":"kept"}`)})
+	r := &runtime{session: Session{ID: "session-1", AgentID: "agent-1"}, orch: orch, inputBox: NewInputBox()}
+
+	state, _ := r.roundStartRuntimeState()
+	if string(state.HookStore["cross-turn"]) != `{"value":"kept"}` {
+		t.Fatalf("round-start hook store = %s, want persisted cross-turn value", state.HookStore["cross-turn"])
+	}
+}
+
+func TestHistoryMutationScopesReusedToolCallIDsToModelSteps(t *testing.T) {
+	first := newLifecycleTestRuntime()
+	if err := first.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	firstResult := first.trackHistoryMutation(turn.HistoryMutationAppend, 0, llm.ToolResultMessage("reused-call", "read_file", "first"))
+
+	second := newLifecycleTestRuntime()
+	if err := second.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	secondResult := second.trackHistoryMutation(turn.HistoryMutationAppend, 0, llm.ToolResultMessage("reused-call", "read_file", "second"))
+
+	if firstResult.RecordID == "" || secondResult.RecordID == "" || firstResult.RecordID == secondResult.RecordID {
+		t.Fatalf("reused provider call ID produced duplicate durable identities: first=%q second=%q", firstResult.RecordID, secondResult.RecordID)
+	}
+}
+
 func setTestPendingHITL(t *testing.T, r *runtime, pending *turn.PendingHITL) {
 	t.Helper()
 	if err := r.lifecycleBeginHumanTurn(); err != nil {

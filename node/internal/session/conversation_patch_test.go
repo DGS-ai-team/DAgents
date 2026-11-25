@@ -119,3 +119,27 @@ func TestPublishConversationPatchCarriesCommittedQueueProjection(t *testing.T) {
 		t.Fatalf("patch data is not JSON serializable: %v", err)
 	}
 }
+
+func TestQueueOnlyChangePublishesWithoutTranscriptRevisionChange(t *testing.T) {
+	box := NewInputBox()
+	if _, err := box.Append(InputKindUser, queue.Envelope{RequestType: queue.RequestTypeMessage, Content: "queued message"}); err != nil {
+		t.Fatal(err)
+	}
+	publisher := &conversationPatchRecorder{}
+	runtime := &runtime{
+		session: Session{ID: "agent-1"}, publisher: publisher, inputBox: box,
+		conversationRevision: 7, historyRevision: 9, contextCheckpointRevision: 4,
+	}
+	runtime.publishInputQueueSnapshot()
+	if len(publisher.events) != 1 {
+		t.Fatalf("published events=%+v, want one queue patch", publisher.events)
+	}
+	data := publisher.events[0].Data
+	if data["conversation_revision"] != uint64(7) || data["history_revision"] != uint64(9) || data["context_revision"] != uint64(4) {
+		t.Fatalf("queue-only patch advanced or lost transcript watermarks: %+v", data)
+	}
+	updates, ok := data["input_updates"].([]PendingInputView)
+	if !ok || len(updates) != 1 || updates[0].Content != "queued message" {
+		t.Fatalf("queue-only patch missing pending input: %#v", data["input_updates"])
+	}
+}

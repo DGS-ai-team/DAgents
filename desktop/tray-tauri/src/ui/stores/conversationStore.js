@@ -84,6 +84,27 @@ function mergeCommittedTranscript(current = [], upserts = [], removeIds = [], in
   return { rows, rowsVisited };
 }
 
+function supersededRevisionItemIds(current = [], upserts = []) {
+  const selectedRevisionByRound = new Map();
+  for (const entry of Array.isArray(upserts) ? upserts : []) {
+    const roundId = String(entry?.round_id || "").trim();
+    const revisionId = String(entry?.round_revision_id || "").trim();
+    if (roundId && revisionId) selectedRevisionByRound.set(roundId, revisionId);
+  }
+  if (!selectedRevisionByRound.size) return [];
+  const removeIds = new Set();
+  for (const entry of Array.isArray(current) ? current : []) {
+    const roundId = String(entry?.round_id || "").trim();
+    const selectedRevision = selectedRevisionByRound.get(roundId);
+    if (!selectedRevision || String(entry?.round_revision_id || "").trim() === selectedRevision) continue;
+    for (const id of [entry?.item_id, entry?.id, entry?.detail_item_id]) {
+      const value = String(id || "").trim();
+      if (value) removeIds.add(value);
+    }
+  }
+  return [...removeIds];
+}
+
 /** Own the active conversation projection and its per-Agent read cursors. */
 export function createConversationStore() {
   const hydrate = ref(null);
@@ -339,7 +360,9 @@ export function createConversationStore() {
     const previousLatest = latestTranscriptFor(id, snapshot.conversation_epoch)?.transcript
       || (Array.isArray(snapshot.transcript) ? snapshot.transcript : []);
     const upsertItems = Array.isArray(data.upsert_items) ? data.upsert_items : [];
-    const removeItemIds = Array.isArray(data.remove_item_ids) ? data.remove_item_ids : [];
+    const explicitRemoveIds = Array.isArray(data.remove_item_ids) ? data.remove_item_ids : [];
+    const revisionRemoveIds = supersededRevisionItemIds(previousLatest, upsertItems);
+    const removeItemIds = [...new Set([...explicitRemoveIds, ...revisionRemoveIds])];
     const indexById = transcriptIndexFor(id, generation, snapshot.conversation_epoch, previousLatest);
     const transcriptPatch = mergeCommittedTranscript(previousLatest, upsertItems, removeItemIds, indexById);
     const latest = transcriptPatch.rows;

@@ -92,6 +92,29 @@ describe("ResourceMarkdown", () => {
       vi.useRealTimers();
     }
   });
+  it("resolves reference links declared in a later segment after long-message segmentation", async () => {
+    vi.useFakeTimers();
+    const context = { agentId: ref("agent-a"), readImage: vi.fn(), openResource: vi.fn() };
+    const body = Array.from({ length: 520 }, (_, index) => `Paragraph ${index + 1} keeps this reference document long enough to cross several independent Markdown segments.`).join("\n\n");
+    const text = `[Read the report][report]\n\n${body}\n\n[report]: https://example.com/report "Annual report"`;
+    const wrapper = mount(ResourceMarkdown, {
+      props: { entry: { id: "long-reference-links", kind: "assistant", text }, agentId: "agent-a" },
+      attachTo: document.body,
+      global: { provide: { [ResourceRenderContextKey]: context } },
+    });
+    try {
+      await nextTick();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await flushPromises();
+      await nextTick();
+      expect(wrapper.findAll(".resource-markdown").length).toBeGreaterThan(1);
+      expect(wrapper.find('a[href="https://example.com/report"]').exists()).toBe(true);
+      expect(wrapper.text()).toContain("Read the report");
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
   it("coalesces streamed Markdown renders and flushes the final text immediately", async () => {
     vi.useFakeTimers();
     const context = { agentId: ref("agent-a"), readImage: vi.fn(), openResource: vi.fn() };

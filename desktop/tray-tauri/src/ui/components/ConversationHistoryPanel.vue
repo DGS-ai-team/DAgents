@@ -54,6 +54,20 @@ function selectedKey(row) {
   return row?.type === 'legacy' ? 'legacy' : String(row?.round_id || '')
 }
 
+function mergeRoundHistoryPage(current, incoming) {
+  const combined = [...(Array.isArray(current) ? current : []), ...(Array.isArray(incoming) ? incoming : [])]
+  const visibleCallIds = new Set(combined
+    .filter(entry => entry?.kind === 'tool_call')
+    .map(entry => String(entry?.data?.tool_call_id || entry?.blockId || '').trim())
+    .filter(Boolean))
+  // Tool summaries are paged at the message-record boundary, so one assistant
+  // record with many calls can be separated from its later result records.
+  // Keep result rows only when their visible call is in this loaded window;
+  // expanding a call fetches its authoritative full result on demand.
+  return combined.filter(entry => entry?.kind !== 'tool_result'
+    || visibleCallIds.has(String(entry?.data?.tool_call_id || entry?.blockId || '').trim()))
+}
+
 async function loadRoundItems(row, { append = false, generation = requestGeneration.value } = {}) {
   if (!props.agentId || !row?.round_id || loadingItems.value) return
   loadingItems.value = true
@@ -65,7 +79,7 @@ async function loadRoundItems(row, { append = false, generation = requestGenerat
       limit: 50,
     })
     if (generation !== requestGeneration.value || selectedKey(selected.value) !== row.round_id) return
-    entries.value = append ? [...entries.value, ...(page.items || [])] : [...(page.items || [])]
+    entries.value = mergeRoundHistoryPage(append ? entries.value : [], page.items || [])
     entriesRevision.value += 1
     hasMoreItems.value = Boolean(page.has_more)
     nextAfterItemId.value = String(page.next_after_item_id || '')
@@ -171,7 +185,7 @@ async function selectRound(round) {
   entriesRevision.value += 1
   hasMoreItems.value = false
   nextAfterItemId.value = ''
-  if (!round) return
+  if (round === null || typeof round !== 'object') return
   loadingItems.value = true
   error.value = ''
   try {

@@ -1631,7 +1631,10 @@ func (m *Manager) EditQueuedMessage(
 		return InputRecord{}, err
 	}
 	if contentParts == nil {
-		contentParts = previous.Env.ContentParts
+		// An omitted parts field means preserve attachments, but the edited
+		// `content` string is authoritative. Carrying the old text part would
+		// make NormalizeUserInput prefer the stale text over this edit.
+		contentParts = retainedQueuedAttachments(previous.Env.ContentParts)
 	}
 	if fileReferences == nil {
 		fileReferences = previous.Env.FileReferences
@@ -1657,6 +1660,23 @@ func (m *Manager) EditQueuedMessage(
 		ConversationResubmit: previous.Env.ConversationResubmit,
 	}
 	return rt.editQueuedInput(inputSeq, expectedRevision, env)
+}
+
+func retainedQueuedAttachments(parts []llm.ContentPart) []llm.ContentPart {
+	if len(parts) == 0 {
+		return nil
+	}
+	attachments := make([]llm.ContentPart, 0, len(parts))
+	for _, part := range parts {
+		if strings.EqualFold(strings.TrimSpace(part.Type), "text") {
+			continue
+		}
+		attachments = append(attachments, part)
+	}
+	if len(attachments) == 0 {
+		return nil
+	}
+	return attachments
 }
 
 // DeleteQueuedMessage withdraws an unclaimed human input at its expected

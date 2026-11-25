@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, useAttrs, watch } from "vue";
 import { advanceMarkdownBoundaryScanner, createMarkdownBoundaryScanner } from "../utils/markdownStream.js";
+import { collectMarkdownReferenceDefinitions } from "../utils/markdown.js";
 import ResourceMarkdownContent from "./ResourceMarkdownContent.vue";
 
 const props = defineProps({
@@ -20,9 +21,11 @@ const STATIC_RENDER_BATCH_CHAR_LIMIT = 16_384;
 const STATIC_RENDER_INTERVAL_MS = 16;
 const segmented = ref(false);
 const stableSegments = ref([]);
+const referenceDefinitions = ref("");
 const tailText = ref("");
 const tailBaseEntry = ref({ ...props.entry, text: "" });
 const generation = ref(0);
+let referenceDefinitionSet = new Set();
 let scanner = createMarkdownBoundaryScanner();
 let committedOffset = 0;
 let committedRevision = 0;
@@ -61,6 +64,8 @@ function resetSegments() {
   generation.value += 1;
   segmented.value = false;
   stableSegments.value = [];
+  referenceDefinitions.value = "";
+  referenceDefinitionSet = new Set();
   tailText.value = "";
   scanner = createMarkdownBoundaryScanner();
   committedOffset = 0;
@@ -70,6 +75,13 @@ function resetSegments() {
   staticScannedOffset = 0;
 }
 
+function updateReferenceDefinitions(source, { replace = false } = {}) {
+  const definitions = collectMarkdownReferenceDefinitions(source).split("\n").filter(Boolean);
+  if (replace) referenceDefinitionSet = new Set(definitions);
+  else for (const definition of definitions) referenceDefinitionSet.add(definition);
+  referenceDefinitions.value = [...referenceDefinitionSet].join("\n");
+}
+
 function appendStableSegment(text) {
   if (!text) return;
   segmentSequence += 1;
@@ -77,6 +89,10 @@ function appendStableSegment(text) {
     key: `${generation.value}:${segmentSequence}`,
     entry: { ...normalizedEntry.value, text },
   });
+  // Stable Markdown segments already contain any complete definitions they
+  // own. Parse only this new segment; the completed snapshot is parsed once
+  // at finalization to include definitions still in the active tail.
+  updateReferenceDefinitions(text);
 }
 
 function renderStreamSource(text, { final = false } = {}) {
@@ -106,6 +122,7 @@ function renderStreamSource(text, { final = false } = {}) {
     committedRevision = stableRevision;
   }
   tailText.value = source.slice(committedOffset);
+  if (final) updateReferenceDefinitions(source, { replace: true });
   if (final && stableSegments.value.length === 0) {
     // Small answers need no segmented wrapper: render their final Markdown once.
     segmented.value = false;
@@ -156,6 +173,7 @@ function advanceStaticRender(expectedGeneration) {
 
   const final = staticScannedOffset >= staticSource.length;
   if (final) {
+    updateReferenceDefinitions(staticSource, { replace: true });
     const remainder = staticSource.slice(committedOffset);
     if (remainder && stableSegments.value.length === 0) {
       // A single huge Markdown block has no safe split point. Render it once
@@ -251,6 +269,7 @@ const tailEntry = computed(() => ({ ...tailBaseEntry.value, text: tailText.value
       :key="segment.key"
       v-bind="attrs"
       :entry="segment.entry"
+      :reference-definitions="referenceDefinitions"
       :agent-id="agentId"
       :source="source"
     />
@@ -259,6 +278,7 @@ const tailEntry = computed(() => ({ ...tailBaseEntry.value, text: tailText.value
       :key="`${generation}:tail`"
       v-bind="attrs"
       :entry="tailEntry"
+      :reference-definitions="referenceDefinitions"
       :agent-id="agentId"
       :source="source"
     />
@@ -268,6 +288,7 @@ const tailEntry = computed(() => ({ ...tailBaseEntry.value, text: tailText.value
       :key="staticKey"
       v-bind="attrs"
       :entry="normalizedEntry"
+      :reference-definitions="referenceDefinitions"
       :agent-id="agentId"
       :source="source"
     />

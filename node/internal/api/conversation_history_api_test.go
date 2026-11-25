@@ -3,18 +3,22 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
+	"github.com/DGS-ai-team/DAgents/node/internal/media"
 	"github.com/DGS-ai-team/DAgents/node/internal/policy"
+	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/shared/config"
@@ -62,6 +66,39 @@ func (c *conversationHistoryToolLLM) StreamChat(_ context.Context, req llm.ChatR
 		ID: "history-api-write-call", Type: "function",
 		Function: llm.ToolCallFunction{Name: "write_file", Arguments: string(args)},
 	}}, FinishReason: "tool_calls"}, nil
+}
+
+func TestConversationHistoryProjectionRestoresUserAndToolMedia(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "chart.png"), []byte{0x89, 0x50, 0x4e, 0x47}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manager := session.NewManager("node", nil, &llm.MockClient{}, nil, nil, nil, session.TurnOptions{WorkspaceRoot: workspace}, nil)
+	defer manager.Stop()
+	registry := manager.SessionMediaRegistry("agent-media")
+	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte{0x89, 0x50, 0x4e, 0x47})
+	storedUser, err := media.PersistUserMessageImages(registry, llm.Message{Role: "user", Content: "inspect image", ContentParts: []llm.ContentPart{{Type: "image_url", ImageURL: &llm.ImageURLPart{URL: dataURL}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	userEntries := conversationHistoryEntries([]store.ConversationRoundItem{{ItemID: "user-record", Role: "user", Payload: storedUser}}, "round-1", "revision-1", "agent-media", manager)
+	if len(userEntries) != 1 || len(userEntries[0]["images"].([]string)) != 1 || userEntries[0]["images"].([]string)[0] == storedUser.ContentParts[0].ImageURL.URL {
+		t.Fatalf("history user image was not resolved to its Desktop media URL: %#v", userEntries)
+	}
+
+	call := llm.ToolCall{ID: "image-call", Type: "function", Function: llm.ToolCallFunction{Name: "show_image", Arguments: `{"path":"chart.png"}`}}
+	result := llm.Message{Role: "tool", Name: "show_image", ToolCallID: call.ID, Content: "[SHOW_IMAGE]\npath=chart.png\nstatus=ok"}
+	steps := projectConversationToolSteps(store.ConversationToolStepsPage{
+		ConversationID: "agent-media", RoundID: "round-1", RevisionID: "revision-1", RevisionStatus: "completed",
+		Steps: []store.ConversationToolStep{{ToolCallID: call.ID, SourceItemID: "assistant-record", Call: call, Result: &result}},
+	}, true, manager)
+	if len(steps) != 1 {
+		t.Fatalf("tool history steps = %#v", steps)
+	}
+	mediaItems, ok := steps[0].ResultEntry["data"].(map[string]any)["media"].([]map[string]any)
+	if !ok || len(mediaItems) != 1 || mediaItems[0]["url"] == "" {
+		t.Fatalf("tool result media was not restored: %#v", steps[0].ResultEntry)
+	}
 }
 
 func (*conversationHistoryToolLLM) CompleteText(context.Context, llm.CompleteRequest) (string, error) {

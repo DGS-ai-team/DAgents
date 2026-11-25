@@ -53,6 +53,19 @@ func ToolResultRecordID(toolCallID string) string {
 	return "tool-result/" + toolCallID
 }
 
+// ToolResultRecordIDForExecution scopes a provider call ID to the model step
+// that proposed it. Providers are allowed to reuse call IDs in later steps;
+// the call ID remains the protocol join key, while this durable ID identifies
+// one logical execution in conversation history.
+func ToolResultRecordIDForExecution(toolCallID, executionScope string) string {
+	toolCallID = strings.TrimSpace(toolCallID)
+	executionScope = strings.TrimSpace(executionScope)
+	if toolCallID == "" || executionScope == "" {
+		return ToolResultRecordID(toolCallID)
+	}
+	return "tool-result/" + executionScope + "/" + toolCallID
+}
+
 // StoredRecordID returns an identity that can be proven from existing message
 // facts. It intentionally does not derive identity from content or position.
 func StoredRecordID(message Message) string {

@@ -435,6 +435,44 @@ func TestConversationDeltaTouchesOnlyNamedItemsAndCheckpointIsOptional(t *testin
 	}
 }
 
+func TestConversationDeltaAcceptsReusedToolCallIDAcrossExecutions(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "reused-tool-call.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.SaveConversationSnapshot(ctx, Record{
+		AgentID: "reused-tool", NodeID: "node", Messages: []llm.Message{{Role: "user", Content: "start", RecordID: "input/1"}},
+		RuntimeState: RuntimeState{HistoryRevision: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for index, scope := range []string{"turn-one/step-one", "turn-two/step-one"} {
+		recordID := llm.ToolResultRecordIDForExecution("provider-reused-id", scope)
+		result, err := st.PersistRuntimeDelta(ctx,
+			Record{AgentID: "reused-tool", NodeID: "node", RuntimeState: RuntimeState{HistoryRevision: uint64(index + 2)}},
+			&ConversationDelta{
+				ConversationID: "reused-tool", NodeID: "node", ExpectedRevision: uint64(index + 1), HistoryRevision: uint64(index + 2),
+				Upserts: []llm.Message{{Role: "tool", Name: "read_file", ToolCallID: "provider-reused-id", RecordID: recordID, Content: scope}},
+			},
+		)
+		if err != nil {
+			t.Fatalf("persist execution %q: %v", scope, err)
+		}
+		if len(result.ChangedItems) != 1 || result.ChangedItems[0].ItemID != recordID {
+			t.Fatalf("execution %q changed items=%+v", scope, result.ChangedItems)
+		}
+	}
+	var count int
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM conversation_records WHERE conversation_id=? AND role='tool' AND tool_call_id=?`, "reused-tool", "provider-reused-id").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("stored tool result records=%d, want 2 independent executions", count)
+	}
+}
+
 func TestConversationCheckpointDeltaRoundTripsAndRetainsBaseChain(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "checkpoint-delta.db"))
 	if err != nil {

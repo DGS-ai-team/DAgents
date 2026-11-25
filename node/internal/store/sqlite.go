@@ -275,6 +275,12 @@ func (s *SQLiteStore) ClearMessagesWithRuntimeState(ctx context.Context, agentID
 	if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_records WHERE conversation_id=?`, id); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_round_revisions WHERE conversation_id=?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_rounds WHERE conversation_id=?`, id); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_inputs WHERE conversation_id=?`, id); err != nil {
 		return err
 	}

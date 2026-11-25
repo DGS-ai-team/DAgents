@@ -28,6 +28,12 @@ type pendingCheckpointMutation struct {
 }
 
 func (r *runtime) trackHistoryMutation(kind turn.HistoryMutationKind, index int, message llm.Message) llm.Message {
+	if strings.EqualFold(strings.TrimSpace(message.Role), "tool") && strings.TrimSpace(message.ToolCallID) != "" && r.turnCoordinator != nil {
+		lifecycle := r.turnCoordinator.Snapshot()
+		if lifecycle.TurnID != "" && lifecycle.StepID != "" {
+			message.RecordID = llm.ToolResultRecordIDForExecution(message.ToolCallID, lifecycle.TurnID+"/"+lifecycle.StepID)
+		}
+	}
 	r.deltaMu.Lock()
 	defer r.deltaMu.Unlock()
 	if r.historyMutationTurnEpoch != r.historyMutationSessionEpoch {
@@ -286,12 +292,10 @@ func (r *runtime) persistLockedWithInputReceiptAndResubmit(ctx context.Context, 
 	var delta *store.ConversationDelta
 	if len(upserts) > 0 || len(deleteIDs) > 0 || checkpoint != nil {
 		delta = &store.ConversationDelta{ConversationID: r.session.ID, NodeID: r.session.AgentID, ExpectedRevision: conversationRevision, HistoryRevision: historyRevision, Upserts: upserts, RecordOwners: recordOwners, DeleteIDs: deleteIDs, Checkpoint: checkpoint}
-		if activeRoundID != "" && activeRevisionID != "" && r.turnCoordinator != nil {
-			lifecycle := r.turnCoordinator.Snapshot()
-			if lifecycle.HasActiveTurn && !lifecycle.TurnStatus.Terminal() {
-				delta.RoundRevision = &store.RoundRevision{ConversationID: r.session.ID, RoundID: activeRoundID, RevisionID: activeRevisionID, TurnID: lifecycle.TurnID, Source: string(lifecycle.Source), Generation: lifecycle.Generation, Status: "active"}
-			}
-		}
+		// The active revision is created atomically with AppendTurnStartBoundary
+		// and finalized by the terminal transaction. Ordinary persistence must
+		// not acquire the coordinator lock while holding persistMu: terminal
+		// persistence takes those locks in the opposite direction.
 	}
 	result, err := r.store.PersistRuntimeDelta(ctx, rec, delta)
 	if err != nil && r.logger != nil {

@@ -745,13 +745,13 @@ func (r *runtime) roundStartRuntimeState() (store.RuntimeState, []store.InputQue
 	}
 	r.deltaMu.Unlock()
 	r.mu.Unlock()
+	if r.orch != nil {
+		state.HookStore = hooks.CloneSessionStore(r.orch.HookStoreSnapshot())
+	}
 	if r.inputBox != nil {
 		inputState, inputQueueRows, _, _ := r.inputBox.PersistenceState()
 		state.InputBoxState = inputState
 		return state, inputQueueRows
-	}
-	if r.orch != nil {
-		state.HookStore = hooks.CloneSessionStore(r.orch.HookStoreSnapshot())
 	}
 	return state, nil
 }
@@ -2313,6 +2313,9 @@ func (r *runtime) reconcileToolExecution(ctx context.Context, turnID, stepID, ex
 		}
 	}
 	reconciledMessage := llm.ToolResultMessageWithMetadata(toolCallID, toolName, content, reconciledMetadata)
+	if lifecycle := r.turnCoordinator.Snapshot(); lifecycle.TurnID != "" && lifecycle.StepID != "" {
+		reconciledMessage.RecordID = llm.ToolResultRecordIDForExecution(toolCallID, lifecycle.TurnID+"/"+lifecycle.StepID)
+	}
 	r.mu.Lock()
 	resultExists := false
 	for index, message := range r.messages {
@@ -2321,7 +2324,6 @@ func (r *runtime) reconcileToolExecution(ctx context.Context, turnID, stepID, ex
 		}
 		resultExists = true
 		if llm.IsRecoveryPlaceholderToolResult(message) {
-			reconciledMessage.RecordID = llm.ToolResultRecordID(toolCallID)
 			r.messages[index] = reconciledMessage
 			r.historyRevision++
 			r.noteRecordUpsertLocked(reconciledMessage)
@@ -2330,7 +2332,6 @@ func (r *runtime) reconcileToolExecution(ctx context.Context, turnID, stepID, ex
 		break
 	}
 	if !resultExists {
-		reconciledMessage.RecordID = llm.ToolResultRecordID(toolCallID)
 		r.messages = append(r.messages, reconciledMessage)
 		r.historyRevision++
 		r.noteRecordUpsertLocked(reconciledMessage)

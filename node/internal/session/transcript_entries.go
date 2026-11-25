@@ -36,6 +36,24 @@ func MessagesToTranscriptEntriesWithItemVersions(messages []llm.Message, version
 	return entries
 }
 
+// MessagesToTranscriptEntriesWithMediaAndItemVersions is the history-page
+// projection used by the API. It preserves the hydrate media contract while
+// assigning durable item versions to the generated display rows.
+func MessagesToTranscriptEntriesWithMediaAndItemVersions(messages []llm.Message, reg *media.Registry, versions map[string]uint64) []TranscriptEntry {
+	entries := messagesToTranscriptEntries(messages, reg)
+	applyTranscriptItemVersions(entries, versions)
+	return entries
+}
+
+// EnrichTranscriptMediaFromMessages restores tool-produced media references
+// from durable tool results, matching the active hydrate projection.
+func EnrichTranscriptMediaFromMessages(entries []TranscriptEntry, messages []llm.Message, reg *media.Registry) {
+	if reg == nil || len(entries) == 0 || len(messages) == 0 {
+		return
+	}
+	EnrichTranscriptMedia(entries, media.RehydrateFromMessages(reg, messages, buildToolCallIndex(messages)))
+}
+
 func messagesToTranscriptEntries(messages []llm.Message, reg *media.Registry) []TranscriptEntry {
 	if len(messages) == 0 {
 		return []TranscriptEntry{}

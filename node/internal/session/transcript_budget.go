@@ -235,22 +235,91 @@ func enforceInitialTranscriptByteBudget(entries []TranscriptEntry) []TranscriptE
 				largestIndex, largestSize = index, len(text)
 			}
 		}
-		if largestIndex < 0 {
-			break
+		if largestIndex >= 0 {
+			entry := entries[largestIndex]
+			text := entry["text"].(string)
+			target := len([]byte(text)) / 2
+			if target < 1 {
+				target = 0
+			}
+			if _, exists := entry["text_bytes"]; !exists {
+				entry["text_bytes"] = len([]byte(text))
+			}
+			entry["details_available"] = true
+			preview := utf8BytePrefix(text, target)
+			if preview == text {
+				preview = ""
+			}
+			entry["text"] = preview
+			continue
 		}
-		entry := entries[largestIndex]
-		text := entry["text"].(string)
-		target := len(text) / 2
-		if target < 96 {
-			target = 96
+		if compactOversizedImagePayloads(entries) || compactLargestOptionalTranscriptField(entries) {
+			continue
 		}
-		if _, exists := entry["text_bytes"]; !exists {
-			entry["text_bytes"] = len([]byte(text))
-		}
-		entry["details_available"] = true
-		entry["text"] = utf8BytePrefix(text, target) + " …"
+		// The projection contains only required identity fields now. Stop rather
+		// than risking a persistence or hydration hang on an irreducible payload.
+		break
 	}
 	return entries
+}
+
+func compactOversizedImagePayloads(entries []TranscriptEntry) bool {
+	changed := false
+	for _, entry := range entries {
+		if entry == nil {
+			continue
+		}
+		images, ok := entry["images"].([]string)
+		if !ok || len(images) == 0 {
+			continue
+		}
+		kept := make([]string, 0, len(images))
+		for _, image := range images {
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(image)), "data:") || len([]byte(image)) > 4096 {
+				changed = true
+				entry["images_omitted"] = true
+				entry["details_available"] = true
+				continue
+			}
+			kept = append(kept, image)
+		}
+		if changed {
+			entry["images"] = kept
+		}
+	}
+	return changed
+}
+
+func compactLargestOptionalTranscriptField(entries []TranscriptEntry) bool {
+	protected := map[string]struct{}{
+		"kind": {}, "id": {}, "item_id": {}, "detail_item_id": {}, "round_id": {},
+		"round_revision_id": {}, "conversation_ordinal": {}, "item_version": {}, "text": {},
+	}
+	largestEntry, largestKey, largestSize := -1, "", 0
+	for entryIndex, entry := range entries {
+		if entry == nil || transcriptString(entry["detail_item_id"]) == "" {
+			continue
+		}
+		for key, value := range entry {
+			if _, keep := protected[key]; keep || key == "details_available" {
+				continue
+			}
+			encoded, err := json.Marshal(value)
+			if err == nil && len(encoded) > largestSize {
+				largestEntry, largestKey, largestSize = entryIndex, key, len(encoded)
+			}
+		}
+	}
+	if largestEntry < 0 || largestSize == 0 {
+		return false
+	}
+	entry := entries[largestEntry]
+	delete(entry, largestKey)
+	entry["details_available"] = true
+	if largestKey == "images" {
+		entry["images_omitted"] = true
+	}
+	return true
 }
 
 func utf8BytePrefix(value string, maxBytes int) string {

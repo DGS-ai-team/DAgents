@@ -48,6 +48,38 @@ describe('ConversationHistoryPanel', () => {
     expect(wrapper.text()).toContain('第 1 轮 · 对话')
   })
 
+  it('keeps paged tool results attached to calls visible earlier in the history window', async () => {
+    listConversationRounds.mockResolvedValue({ rounds: [round('r1', 1)], has_more: false, history_completeness: 'complete' })
+    listConversationRoundRevisions.mockResolvedValue({ selected_revision_id: 'r1-revision', revisions: [{ revision_id: 'r1-revision', selected: true, status: 'completed' }] })
+    listConversationLegacyItems.mockResolvedValue({ item_count: 0, items: [], history_completeness: 'complete' })
+    const calls = Array.from({ length: 50 }, (_, index) => {
+      const id = `call-${String(index + 1).padStart(2, '0')}`
+      return { id: `tool-call/${id}`, item_id: `tool-call/${id}`, kind: 'tool_call', blockId: id, data: { tool_call_id: id } }
+    })
+    listConversationRoundItems.mockResolvedValueOnce({ items: [
+      ...calls,
+      { id: 'more', item_id: 'more', kind: 'tool_group_more', text: 'more' },
+    ], has_more: true, next_after_item_id: 'assistant-tools' }).mockResolvedValueOnce({ items: [
+      { id: 'visible-result-50', item_id: 'visible-result-50', kind: 'tool_result', data: { tool_call_id: 'call-50' }, text: 'visible result' },
+      { id: 'orphan-result-51', item_id: 'orphan-result-51', kind: 'tool_result', data: { tool_call_id: 'call-51' }, text: 'orphan result' },
+    ], has_more: false })
+
+    wrapper = mount(ConversationHistoryPanel, {
+      props: { agentId: 'agent-a', agentName: 'Helper' },
+      global: { stubs: {
+        UiIcon: { template: '<i />' },
+        MainChatPanel: { props: ['entries'], template: '<div data-test="transcript">{{ entries.map(item => item.text || item.data?.tool_call_id || item.id).join(" | ") }}</div>' },
+      } },
+    })
+    await flushPromises()
+    await wrapper.get('.conversation-history-panel__load-more').trigger('click')
+    await flushPromises()
+
+    const transcript = wrapper.get('[data-test="transcript"]').text()
+    expect(transcript).toContain('visible result')
+    expect(transcript).not.toContain('orphan result')
+  })
+
   it('keeps the selected latest transcript stable while paging through 100 history rounds', async () => {
     const pageFor = (start) => Array.from({ length: 10 }, (_, index) => {
       const ordinal = start + index

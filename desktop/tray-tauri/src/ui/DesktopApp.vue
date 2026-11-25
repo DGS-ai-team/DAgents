@@ -749,6 +749,7 @@ function processDesktopNodeEvent(event) {
       if (reduction.kind === 'ignored') return
       if (reduction.kind === 'patch') {
         if (reduction.accepted) {
+          restoreCommittedPatchMedia(activeId.value, activeHydrationSequence, reduction.snapshot, event.data?.upsert_items)
           conversationController.coverWithPatch(
             activeId.value,
             activeHydrationSequence,
@@ -985,6 +986,49 @@ async function restoreAgentMedia(snapshot, agentId) {
     mediaUrlRegistry.discard(lease)
     throw cause
   }
+}
+function restoreCommittedPatchMedia(agentId, generation, patchSnapshot, upsertItems) {
+  if (!agentId || !Array.isArray(upsertItems) || upsertItems.length === 0) return
+  const hasNodeMedia = source => Boolean(agentMediaId(source, agentId))
+  const hasRestorableMedia = upsertItems.some(entry =>
+    (Array.isArray(entry?.images) && entry.images.some(hasNodeMedia))
+    || (Array.isArray(entry?.media) && entry.media.some(item => hasNodeMedia(item?.url)))
+    || (Array.isArray(entry?.data?.media) && entry.data.media.some(item => hasNodeMedia(item?.url))),
+  )
+  if (!hasRestorableMedia) return
+
+  const patchMediaSnapshot = { transcript: upsertItems }
+  void restoreAgentMedia(patchMediaSnapshot, agentId).then(restored => {
+    if (restored.snapshot === patchMediaSnapshot) {
+      mediaUrlRegistry.discard(restored.lease)
+      return
+    }
+    if (activeId.value !== agentId || activeHydrationSequence !== generation || !hydrate.value) {
+      mediaUrlRegistry.discard(restored.lease)
+      return
+    }
+
+    const restoredById = new Map(restored.snapshot.transcript
+      .map(entry => [String(entry?.item_id || entry?.id || '').trim(), entry])
+      .filter(([itemId]) => itemId))
+    const conversationEpoch = Number(patchSnapshot?.conversation_epoch) || 0
+    const currentLatest = conversationStore.latestTranscriptFor(agentId, conversationEpoch)?.transcript
+      || hydrate.value.transcript
+      || []
+    const transcript = currentLatest.map(entry => restoredById.get(String(entry?.item_id || entry?.id || '').trim()) || entry)
+    const applied = conversationStore.applyMediaTranscript(agentId, generation, {
+      conversationEpoch,
+      historyRevision: Number(patchSnapshot?.history_revision) || 0,
+      expectedConversationRevision: Number(patchSnapshot?.conversation_revision) || 0,
+      transcript,
+    })
+    if (applied) mediaUrlRegistry.commit(restored.lease)
+    else mediaUrlRegistry.discard(restored.lease)
+  }).catch(cause => {
+    if (activeId.value === agentId && activeHydrationSequence === generation) {
+      error.value = `无法读取会话图片：${String(cause?.message || cause)}`
+    }
+  })
 }
 function hydrateAgentSnapshot(id, ownerSequence = activeHydrationSequence) {
   if (!id || activeId.value !== id || ownerSequence !== activeHydrationSequence) return Promise.resolve()

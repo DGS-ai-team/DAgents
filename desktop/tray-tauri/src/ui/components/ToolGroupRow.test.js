@@ -184,4 +184,34 @@ describe("ToolGroupRow", () => {
     wrapper.unmount();
     request.mockRestore();
   });
+
+  it("reloads expanded tool details when the committed result revision arrives", async () => {
+    const request = vi.spyOn(nodeApi, "getConversationRoundToolStep")
+      .mockResolvedValueOnce({ steps: [{
+        tool_call_id: "live-call",
+        call_entry: { kind: "tool_call", id: "tool-call/live-call", item_version: 1, detail_item_id: "call-record", data: { tool_call_id: "live-call", tool_name: "read_file", arguments: { path: "probe.txt" } } },
+      }] })
+      .mockResolvedValueOnce({ steps: [{
+        tool_call_id: "live-call",
+        call_entry: { kind: "tool_call", id: "tool-call/live-call", item_version: 1, detail_item_id: "call-record", data: { tool_call_id: "live-call", tool_name: "read_file", arguments: { path: "probe.txt" } } },
+        result_entry: { kind: "tool_result", id: "result-live-call", item_version: 2, data: { tool_call_id: "live-call", content: "committed result" } },
+      }] });
+    const running = step("live-call", "read_file", "读取测试文件");
+    Object.assign(running.callEntry, { id: "tool-call/live-call", item_version: 1, detail_item_id: "call-record", round_id: "round-live", round_revision_id: "revision-live", details_available: true });
+    const wrapper = mount(ToolGroupRow, { props: { agentId: "agent-live", steps: [running] } });
+    await wrapper.get(".tool-group-row__head").trigger("click");
+    await wrapper.get(".tool-summary-row__head").trigger("click");
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+
+    const completed = {
+      ...running,
+      phase: "completed",
+      resultEntry: { id: "result-live-call", item_id: "result-live-call", item_version: 2, detail_item_id: "result-record", round_id: "round-live", round_revision_id: "revision-live", details_available: true, kind: "tool_result", data: { tool_call_id: "live-call", content_bytes: 18 } },
+    };
+    await wrapper.setProps({ steps: [completed] });
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(wrapper.findComponent(ToolExecBubble).props("resultEntry").data.content).toBe("committed result"));
+    wrapper.unmount();
+    request.mockRestore();
+  });
 });

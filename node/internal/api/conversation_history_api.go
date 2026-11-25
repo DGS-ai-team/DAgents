@@ -127,7 +127,7 @@ func (s *Server) handleConversationRoundItems(w http.ResponseWriter, r *http.Req
 		ConversationRevision: page.ConversationRevision, RoundID: page.RoundID,
 		RevisionID: page.RevisionID, RevisionStatus: page.RevisionStatus,
 		Selected: page.Selected,
-		Items:    conversationHistoryEntries(page.Items, page.RoundID, page.RevisionID),
+		Items:    conversationHistoryEntries(page.Items, page.RoundID, page.RevisionID, conversationID, s.sessions),
 		HasMore:  page.HasMore, NextAfterItemID: page.NextAfterItemID,
 	})
 }
@@ -192,7 +192,7 @@ func (s *Server) handleConversationToolSteps(w http.ResponseWriter, r *http.Requ
 		AgentID: agentID, ConversationID: page.ConversationID, ConversationRevision: page.ConversationRevision,
 		RoundID: page.RoundID, RevisionID: page.RevisionID, RevisionStatus: page.RevisionStatus,
 		Selected: page.Selected, SourceItemID: page.SourceItemID, TotalCount: page.TotalCount,
-		Steps: projectConversationToolSteps(page, false), HasMore: page.HasMore,
+		Steps: projectConversationToolSteps(page, false, s.sessions), HasMore: page.HasMore,
 		NextAfterToolCallID: page.NextAfterToolCallID,
 	})
 }
@@ -225,7 +225,7 @@ func (s *Server) handleConversationToolStep(w http.ResponseWriter, r *http.Reque
 		AgentID: agentID, ConversationID: page.ConversationID, ConversationRevision: page.ConversationRevision,
 		RoundID: page.RoundID, RevisionID: page.RevisionID, RevisionStatus: page.RevisionStatus,
 		Selected: page.Selected, SourceItemID: page.SourceItemID, TotalCount: page.TotalCount,
-		Steps: projectConversationToolSteps(page, true),
+		Steps: projectConversationToolSteps(page, true, s.sessions),
 	})
 }
 
@@ -264,7 +264,7 @@ func (s *Server) handleConversationItemContent(w http.ResponseWriter, r *http.Re
 	})
 }
 
-func projectConversationToolSteps(page store.ConversationToolStepsPage, includeResult bool) []conversationToolStepView {
+func projectConversationToolSteps(page store.ConversationToolStepsPage, includeResult bool, mediaManagers ...*session.Manager) []conversationToolStepView {
 	out := make([]conversationToolStepView, 0, len(page.Steps))
 	for _, step := range page.Steps {
 		callMessage := llm.Message{Role: "assistant", RecordID: step.SourceItemID, ToolCalls: []llm.ToolCall{step.Call}}
@@ -277,6 +277,10 @@ func projectConversationToolSteps(page store.ConversationToolStepsPage, includeR
 		var resultEntry session.TranscriptEntry
 		if step.Result != nil {
 			resultEntries := session.MessagesToTranscriptEntries([]llm.Message{callMessage, *step.Result})
+			mediaManager := firstMediaManager(mediaManagers)
+			if mediaManager != nil {
+				session.EnrichTranscriptMediaFromMessages(resultEntries, []llm.Message{callMessage, *step.Result}, mediaManager.SessionMediaRegistry(page.ConversationID))
+			}
 			for _, entry := range resultEntries {
 				if entry["kind"] != "tool_result" {
 					continue
@@ -347,12 +351,12 @@ func (s *Server) handleConversationLegacyItems(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, conversationLegacyItemsResponse{
 		AgentID: agentID, ConversationID: page.ConversationID,
 		ConversationRevision: page.ConversationRevision, HistoryCompleteness: page.HistoryCompleteness, ItemCount: page.ItemCount,
-		Items:   conversationHistoryEntries(page.Items, "", ""),
+		Items:   conversationHistoryEntries(page.Items, "", "", conversationID, s.sessions),
 		HasMore: page.HasMore, NextAfterItemID: page.NextAfterItemID,
 	})
 }
 
-func conversationHistoryEntries(items []store.ConversationRoundItem, roundID, revisionID string) []session.TranscriptEntry {
+func conversationHistoryEntries(items []store.ConversationRoundItem, roundID, revisionID, conversationID string, mediaManagers ...*session.Manager) []session.TranscriptEntry {
 	messages := make([]llm.Message, 0, len(items))
 	versions := make(map[string]uint64, len(items)*2)
 	for _, item := range items {
@@ -374,7 +378,15 @@ func conversationHistoryEntries(items []store.ConversationRoundItem, roundID, re
 			}
 		}
 	}
-	entries := session.MessagesToTranscriptEntriesWithItemVersions(messages, versions)
+	var registryManager = firstMediaManager(mediaManagers)
+	var entries []session.TranscriptEntry
+	if registryManager != nil {
+		registry := registryManager.SessionMediaRegistry(conversationID)
+		entries = session.MessagesToTranscriptEntriesWithMediaAndItemVersions(messages, registry, versions)
+		session.EnrichTranscriptMediaFromMessages(entries, messages, registry)
+	} else {
+		entries = session.MessagesToTranscriptEntriesWithItemVersions(messages, versions)
+	}
 	orders := make(map[string]store.ConversationRoundItem, len(items)*3)
 	for _, item := range items {
 		orders[item.ItemID] = item
@@ -400,6 +412,13 @@ func conversationHistoryEntries(items []store.ConversationRoundItem, roundID, re
 		return entries
 	}
 	return session.BoundTranscriptDetails(entries)
+}
+
+func firstMediaManager(managers []*session.Manager) *session.Manager {
+	if len(managers) == 0 {
+		return nil
+	}
+	return managers[0]
 }
 
 func historyPageLimit(r *http.Request, defaultLimit, maximum int) (int, error) {

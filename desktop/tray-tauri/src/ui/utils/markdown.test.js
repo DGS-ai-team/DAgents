@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderMarkdown } from "./markdown.js";
+import { collectMarkdownReferenceDefinitions, renderMarkdown, renderResourceMarkdown } from "./markdown.js";
 
 describe("renderMarkdown", () => {
   it("renders headings and inline formatting", () => {
@@ -105,5 +105,13 @@ describe("renderMarkdown", () => {
     expect(html).toContain("<h2>Summary</h2>");
     expect(html).toContain("<table>");
     expect(html).toContain("<td>foo</td>");
+  });
+
+  it("carries reference-style definitions into independently rendered segments", () => {
+    const definition = "[report]: https://example.com/report \"Annual report\"";
+    const definitions = collectMarkdownReferenceDefinitions(`[Read the report][report]\n\n${definition}`);
+    const rendered = renderResourceMarkdown("[Read the report][report]", { referenceDefinitions: definitions });
+    expect(rendered.html).toContain('href="https://example.com/report"');
+    expect(rendered.html).toContain(">Read the report</a>");
   });
 });

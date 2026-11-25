@@ -1893,6 +1893,7 @@ func (r *runtime) appendInput(kind InputKind, env queue.Envelope) (uint64, error
 	}
 	r.inputBox.CommitDeferred(seq)
 	r.persistMu.Unlock()
+	r.publishInputQueueSnapshot()
 	if r.executionGate != nil {
 		r.executionGate.notifyInput()
 	}
@@ -1950,6 +1951,7 @@ func (r *runtime) appendInputWithReceipt(kind InputKind, env queue.Envelope, rec
 	}
 	r.inputBox.CommitDeferred(receipt.InputSeq)
 	r.persistMu.Unlock()
+	r.publishInputQueueSnapshot()
 	if r.executionGate != nil {
 		r.executionGate.notifyInput()
 	}
@@ -2079,6 +2081,7 @@ func (r *runtime) mutateQueuedInput(seq, expectedRevision uint64, replacement *q
 	}
 	r.inputBox.CommitMutation(mutation)
 	r.persistMu.Unlock()
+	r.publishInputQueueSnapshot()
 	if r.executionGate != nil {
 		r.executionGate.notifyInput()
 	}

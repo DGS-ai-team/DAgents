@@ -20,19 +20,22 @@ func (r *runtime) setInputQueuePaused(paused bool, expectedRevision uint64) (uin
 		defer gate.mu.Unlock()
 	}
 	r.persistMu.Lock()
-	defer r.persistMu.Unlock()
 
 	previousPaused, previousRevision := r.inputBox.QueueControlState()
 	revision, changed, err := r.inputBox.SetQueuePaused(paused, expectedRevision)
 	if err != nil || !changed {
+		r.persistMu.Unlock()
 		return revision, false, err
 	}
 	if r.store != nil && !r.isChildSession() {
 		if err := r.persistLocked(context.Background()); err != nil {
 			r.inputBox.RestoreQueueControl(previousPaused, previousRevision)
+			r.persistMu.Unlock()
 			return previousRevision, false, fmt.Errorf("persist input queue control: %w", err)
 		}
 	}
+	r.persistMu.Unlock()
+	r.publishInputQueueSnapshot()
 	if gate != nil {
 		gate.notify()
 	}

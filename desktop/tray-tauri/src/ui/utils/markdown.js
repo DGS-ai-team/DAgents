@@ -90,6 +90,21 @@ export function renderMarkdownUncached(text) {
   return renderMarkdownSource(source);
 }
 
+// Returns a parser-only copy of document-wide reference links. Long assistant
+// messages are rendered in independent stable segments; carrying these
+// definitions into each segment preserves links declared elsewhere without
+// reparsing or replacing the whole committed transcript.
+export function collectMarkdownReferenceDefinitions(text) {
+  const source = String(text || "").replace(/\r\n?/g, "\n");
+  const links = marked.lexer(source).links || {};
+  return Object.entries(links).map(([label, link]) => {
+    const safeLabel = String(label).replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+    const href = String(link?.href || "").replace(/>/g, "%3E");
+    const title = String(link?.title || "").replace(/[\r\n]+/g, " ").replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+    return `[${safeLabel}]: <${href}>${title ? ` "${title}"` : ""}`;
+  }).join("\n");
+}
+
 function renderMarkdownSource(source) {
   const html = marked.parse(source);
   return sanitizer ? sanitizer.sanitize(html, { ADD_ATTR: ["target", "rel"] }) : html;
@@ -144,6 +159,8 @@ export function renderResourceMarkdown(text, options = {}) {
   const previewLimit = Number.isInteger(options.previewLimit) ? Math.max(0, options.previewLimit) : MAX_PREVIEWS_PER_MESSAGE;
   const renderKeyPrefix = String(options.renderKeyPrefix || "");
   const source = String(text || "").replace(/\r\n?/g, "\n");
+  const referenceDefinitions = String(options.referenceDefinitions || "").trim();
+  const parseSource = referenceDefinitions ? `${source}\n\n${referenceDefinitions}` : source;
   const resourceRenderer = new marked.Renderer();
   Object.assign(resourceRenderer, renderer);
   resourceRenderer.link = function ({ href, title, tokens }) {
@@ -193,7 +210,7 @@ export function renderResourceMarkdown(text, options = {}) {
     },
   };
   const resourceParser = new Marked({ gfm: true, breaks: true, renderer: resourceRenderer, extensions: [renderExtension] });
-  const html = resourceParser.parse(source);
+  const html = resourceParser.parse(parseSource);
   const safe = sanitizer
     ? sanitizer.sanitize(html, {
       ADD_ATTR: ["target", "rel", "data-resource-index", "data-resource-kind", "data-markdown-preview-index", "data-render-key", "data-markdown-action", "data-render-mode", "aria-label"],

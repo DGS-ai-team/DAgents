@@ -133,3 +133,26 @@ func TestBoundTranscriptDetailsEnforcesCombinedByteBudgetForMediumBodies(t *test
 		t.Fatalf("expected budget enforcement to preserve some complete bodies and expose details for shortened older bodies; shortened=%d intact=%d", shortened, intact)
 	}
 }
+
+func TestBoundTranscriptDetailsTerminatesAndDropsOversizedInlineImagePayload(t *testing.T) {
+	image := "data:image/png;base64," + strings.Repeat("A", MaxInitialTranscriptBytes+64*1024)
+	entry := TranscriptEntry{
+		"kind": "user", "id": "user-1", "item_id": "user-1", "detail_item_id": "user-record-1",
+		"round_id": "round-1", "round_revision_id": "revision-1", "text": strings.Repeat("x", 200),
+		"images": []string{image},
+	}
+	bounded := BoundTranscriptDetails([]TranscriptEntry{entry})
+	encoded, err := json.Marshal(bounded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > MaxInitialTranscriptBytes {
+		t.Fatalf("projection with an inline image is %d bytes, limit %d", len(encoded), MaxInitialTranscriptBytes)
+	}
+	if strings.Contains(string(encoded), "data:image/png;base64") {
+		t.Fatal("oversized inline image payload leaked into the summary projection")
+	}
+	if bounded[0]["details_available"] != true || bounded[0]["images_omitted"] != true {
+		t.Fatalf("omitted image lost its detail affordance: %#v", bounded[0])
+	}
+}

@@ -36,6 +36,8 @@ const loadedCallEntry = ref(null);
 const loadedResultEntry = ref(null);
 const detailsLoading = ref(false);
 const detailsError = ref("");
+let detailLoadGeneration = 0;
+let detailLoadKey = "";
 
 const stepArgs = computed(() => ({
   callEntry: props.callEntry,
@@ -51,6 +53,20 @@ const visual = computed(() => resolveToolVisual(props.callEntry || props.resultE
 const toolCallId = computed(
   () => toolCallIdFromEntry(props.callEntry) || toolCallIdFromEntry(props.resultEntry),
 );
+const detailRequestKey = computed(() => [
+  props.agentId,
+  props.callEntry?.round_id || props.resultEntry?.round_id || "",
+  props.callEntry?.round_revision_id || props.resultEntry?.round_revision_id || "",
+  props.callEntry?.detail_item_id || props.resultEntry?.detail_item_id || "",
+  toolCallId.value,
+  props.callEntry?.item_version ?? "",
+  props.resultEntry?.item_version ?? "",
+  props.callEntry?.id || "",
+  props.resultEntry?.id || "",
+].join("\0"));
+const needsDetails = computed(() => Boolean(
+  props.callEntry?.details_available || props.resultEntry?.details_available,
+));
 const toolName = computed(() => toolNameFromEntry(props.callEntry) || toolNameFromEntry(props.resultEntry));
 const childAgentIds = computed(() =>
   childAgentIdsFromResult(toolName.value, props.resultEntry?.data?.content),
@@ -74,19 +90,27 @@ async function loadDetails() {
   const roundId = String(props.callEntry?.round_id || props.resultEntry?.round_id || "").trim();
   const revisionId = String(props.callEntry?.round_revision_id || props.resultEntry?.round_revision_id || "").trim();
   const callId = toolCallId.value;
-  if (!props.agentId || !sourceItemId || !roundId || !revisionId || !callId || detailsLoading.value) return;
+  const requestKey = detailRequestKey.value;
+  if (!props.agentId || !sourceItemId || !roundId || !revisionId || !callId || !needsDetails.value || detailLoadKey === requestKey) return;
+  const generation = ++detailLoadGeneration;
+  detailLoadKey = requestKey;
   detailsLoading.value = true;
   detailsError.value = "";
   try {
     const response = await getConversationRoundToolStep(props.agentId, props.agentId, roundId, callId, { revisionId, sourceItemId });
+    if (generation !== detailLoadGeneration || requestKey !== detailRequestKey.value) return;
     const step = response?.steps?.find(item => String(item?.tool_call_id || "") === callId);
     if (!step?.call_entry) throw new Error("工具详情暂不可用");
     loadedCallEntry.value = step.call_entry;
     loadedResultEntry.value = step.result_entry || null;
   } catch (cause) {
+    if (generation !== detailLoadGeneration || requestKey !== detailRequestKey.value) return;
     detailsError.value = String(cause?.message || "读取工具详情失败");
   } finally {
-    detailsLoading.value = false;
+    if (generation === detailLoadGeneration) {
+      detailsLoading.value = false;
+      detailLoadKey = "";
+    }
   }
 }
 
@@ -97,14 +121,18 @@ function toggle() {
 }
 
 watch(isExpanded, (value) => {
-  if (value && !loadedCallEntry.value && (props.callEntry?.details_available || props.resultEntry?.details_available)) void loadDetails();
+  if (value && !loadedCallEntry.value && needsDetails.value) void loadDetails();
 }, { immediate: true });
 
-watch(() => [props.callEntry?.id, props.resultEntry?.id], () => {
+watch(detailRequestKey, () => {
+  detailLoadGeneration += 1;
+  detailLoadKey = "";
   loadedCallEntry.value = null;
   loadedResultEntry.value = null;
+  detailsLoading.value = false;
   detailsError.value = "";
-});
+  if (isExpanded.value && needsDetails.value) void loadDetails();
+}, { flush: "sync" });
 
 </script>
 
