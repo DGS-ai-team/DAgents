@@ -139,8 +139,8 @@ func TestBoundTranscriptDetailsScopesHiddenCallsToSourceAssistant(t *testing.T) 
 		entries = append(entries, TranscriptEntry{
 			"kind": "tool_result", "id": "result-" + fmt.Sprintf("%02d", index), "item_id": "result-" + fmt.Sprintf("%02d", index),
 			"detail_item_id": "result-record-" + fmt.Sprintf("%02d", index),
-			"round_id": "round-1", "round_revision_id": "revision-1",
-			"data":           map[string]any{"tool_call_id": callID, "tool_call_item_id": itemID, "tool_name": "read_file", "content": "done"},
+			"round_id":       "round-1", "round_revision_id": "revision-1",
+			"data": map[string]any{"tool_call_id": callID, "tool_call_item_id": itemID, "tool_name": "read_file", "content": "done"},
 		})
 	}
 
