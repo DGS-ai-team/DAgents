@@ -103,6 +103,50 @@ func TestBoundTranscriptDetailsCapsWholeVisualGroupAcrossSourceRecords(t *testin
 	}
 }
 
+func TestBoundTranscriptDetailsScopesHiddenCallsToSourceAssistant(t *testing.T) {
+	entries := make([]TranscriptEntry, 0, 102)
+	callItemIDs := make([]string, 51)
+	for index := 0; index < 51; index++ {
+		callID := fmt.Sprintf("call-%02d", index)
+		if index == 0 || index == 50 {
+			callID = "reused-call-id"
+		}
+		sourceID := fmt.Sprintf("assistant-step-%02d", index)
+		itemID := ToolCallTranscriptItemID(sourceID, callID)
+		callItemIDs[index] = itemID
+		entries = append(entries, TranscriptEntry{
+			"kind": "tool_call", "id": itemID, "item_id": itemID, "detail_item_id": sourceID,
+			"data": map[string]any{"tool_call_id": callID, "tool_name": "read_file", "arguments": map[string]any{"path": "/tmp/probe"}},
+		})
+		entries = append(entries, TranscriptEntry{
+			"kind": "tool_result", "id": "result-" + fmt.Sprintf("%02d", index), "item_id": "result-" + fmt.Sprintf("%02d", index),
+			"detail_item_id": "result-record-" + fmt.Sprintf("%02d", index),
+			"data":           map[string]any{"tool_call_id": callID, "tool_call_item_id": itemID, "tool_name": "read_file", "content": "done"},
+		})
+	}
+
+	bounded := BoundTranscriptDetails(entries)
+	var firstCallVisible, firstResultVisible, hiddenCallVisible, hiddenResultVisible bool
+	for _, entry := range bounded {
+		switch entry["kind"] {
+		case "tool_call":
+			id := transcriptCallItemID(entry)
+			firstCallVisible = firstCallVisible || id == callItemIDs[0]
+			hiddenCallVisible = hiddenCallVisible || id == callItemIDs[50]
+		case "tool_result":
+			id := transcriptCallItemID(entry)
+			firstResultVisible = firstResultVisible || id == callItemIDs[0]
+			hiddenResultVisible = hiddenResultVisible || id == callItemIDs[50]
+		}
+	}
+	if !firstCallVisible || !firstResultVisible {
+		t.Fatalf("visible call was hidden with a later reused provider ID: call=%v result=%v", firstCallVisible, firstResultVisible)
+	}
+	if hiddenCallVisible || hiddenResultVisible {
+		t.Fatalf("hidden call/result leaked into initial summary: call=%v result=%v", hiddenCallVisible, hiddenResultVisible)
+	}
+}
+
 func TestBoundTranscriptDetailsEnforcesCombinedByteBudgetForMediumBodies(t *testing.T) {
 	entries := make([]TranscriptEntry, 100)
 	body := strings.Repeat("body ", 1800)

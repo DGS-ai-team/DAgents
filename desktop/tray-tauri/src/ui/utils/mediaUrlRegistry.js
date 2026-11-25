@@ -85,11 +85,19 @@ export function createMediaUrlRegistry({
     return loading;
   }
 
-  function commit(lease) {
+  function commit(lease, retainedUrls = []) {
     if (!lease || lease.closed || leases.get(lease.id) !== lease) return false;
     const previous = activeByOwner.get(lease.owner) || new Set();
     removePendingLease(lease);
     const next = new Set(lease.keys);
+    const retained = new Set((Array.isArray(retainedUrls) ? retainedUrls : [])
+      .map(url => String(url || "").trim())
+      .filter(Boolean));
+    if (retained.size) {
+      for (const key of previous) {
+        if (retained.has(urls.get(key))) next.add(key);
+      }
+    }
     activeByOwner.set(lease.owner, next);
     for (const key of previous) {
       if (next.has(key)) continue;

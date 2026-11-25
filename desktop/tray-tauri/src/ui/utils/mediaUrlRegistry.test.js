@@ -69,6 +69,31 @@ describe("media URL ownership", () => {
     expect(revoke).toHaveBeenCalledOnce();
   });
 
+  it("retains existing media URLs still referenced by the transcript during a partial update", async () => {
+    const revoke = vi.fn();
+    let sequence = 0;
+    const registry = createMediaUrlRegistry({
+      createObjectURL: () => `blob:partial-${++sequence}`,
+      revokeObjectURL: revoke,
+    });
+    const initial = registry.begin("agent-a");
+    const first = await registry.acquire(initial, "media-1", async () => new Blob(["one"]));
+    registry.commit(initial);
+
+    const partial = registry.begin("agent-a");
+    const second = await registry.acquire(partial, "media-2", async () => new Blob(["two"]));
+    registry.commit(partial, [first, second]);
+    expect(revoke).not.toHaveBeenCalled();
+
+    const fullRefresh = registry.begin("agent-a");
+    await expect(registry.acquire(fullRefresh, "media-2", async () => new Blob(["duplicate"]))).resolves.toBe(second);
+    registry.commit(fullRefresh);
+    expect(revoke).toHaveBeenCalledExactlyOnceWith(first);
+    registry.release("agent-a");
+    expect(revoke).toHaveBeenCalledTimes(2);
+    expect(revoke).toHaveBeenLastCalledWith(second);
+  });
+
   it("keeps identical media IDs isolated across Agent owners", async () => {
     let sequence = 0;
     const revoke = vi.fn();

@@ -48,7 +48,7 @@ describe('ConversationHistoryPanel', () => {
     expect(wrapper.text()).toContain('第 1 轮 · 对话')
   })
 
-  it('keeps paged tool results attached to calls visible earlier in the history window', async () => {
+  it('keeps paged tool results attached to source-scoped calls visible earlier in the history window', async () => {
     listConversationRounds.mockResolvedValue({ rounds: [round('r1', 1)], has_more: false, history_completeness: 'complete' })
     listConversationRoundRevisions.mockResolvedValue({ selected_revision_id: 'r1-revision', revisions: [{ revision_id: 'r1-revision', selected: true, status: 'completed' }] })
     listConversationLegacyItems.mockResolvedValue({ item_count: 0, items: [], history_completeness: 'complete' })
@@ -60,8 +60,8 @@ describe('ConversationHistoryPanel', () => {
       ...calls,
       { id: 'more', item_id: 'more', kind: 'tool_group_more', text: 'more' },
     ], has_more: true, next_after_item_id: 'assistant-tools' }).mockResolvedValueOnce({ items: [
-      { id: 'visible-result-50', item_id: 'visible-result-50', kind: 'tool_result', data: { tool_call_id: 'call-50' }, text: 'visible result' },
-      { id: 'orphan-result-51', item_id: 'orphan-result-51', kind: 'tool_result', data: { tool_call_id: 'call-51' }, text: 'orphan result' },
+      { id: 'visible-result-50', item_id: 'visible-result-50', kind: 'tool_result', data: { tool_call_id: 'call-50', tool_call_item_id: calls[49].item_id }, text: 'visible result' },
+      { id: 'orphan-result-51', item_id: 'orphan-result-51', kind: 'tool_result', data: { tool_call_id: 'call-50', tool_call_item_id: 'tool-call/hidden-assistant/call-50' }, text: 'orphan result' },
     ], has_more: false })
 
     wrapper = mount(ConversationHistoryPanel, {

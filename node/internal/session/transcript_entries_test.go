@@ -94,6 +94,23 @@ func TestMessagesToTranscriptEntriesScopesReusedToolCallIDsByAssistantRecord(t *
 	}
 }
 
+func TestMessagesToTranscriptEntriesPreservesSourceIdentityForResultOnlyPatch(t *testing.T) {
+	result := llm.Message{
+		Role: "tool", RecordID: "tool-result/turn-1/step-1/reused-call",
+		ToolCallID: "reused-call", ToolCallSourceID: "turn-1-step-1/assistant",
+		Name: "read_file", Content: "done",
+	}
+	entries := MessagesToTranscriptEntries([]llm.Message{result})
+	if len(entries) != 1 || entries[0]["kind"] != "tool_result" {
+		t.Fatalf("result-only projection = %#v", entries)
+	}
+	data, _ := entries[0]["data"].(map[string]any)
+	want := ToolCallTranscriptItemID(result.ToolCallSourceID, result.ToolCallID)
+	if data["tool_call_item_id"] != want {
+		t.Fatalf("result source identity = %#v, want %q", data["tool_call_item_id"], want)
+	}
+}
+
 func TestMessagesToTranscriptEntries_userFileReferences(t *testing.T) {
 	t.Parallel()
 	messages := []llm.Message{{

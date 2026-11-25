@@ -83,7 +83,7 @@ func TestConversationToolStepsPageKeepsCallResultPairsAndStableCursor(t *testing
 		t.Fatal(err)
 	}
 	for index, call := range calls {
-		result := llm.Message{Role: "tool", Name: "read_file", ToolCallID: call.ID, Content: fmt.Sprintf("full result for %s", call.ID), ToolResultMetadata: &llm.ToolResultMetadata{Status: "succeeded"}, RecordID: fmt.Sprintf("round-1/result-%03d", index+1)}
+		result := llm.Message{Role: "tool", Name: "read_file", ToolCallID: call.ID, ToolCallSourceID: callMessage.RecordID, Content: fmt.Sprintf("full result for %s", call.ID), ToolResultMetadata: &llm.ToolResultMetadata{Status: "succeeded"}, RecordID: fmt.Sprintf("round-1/result-%03d", index+1)}
 		raw, err := json.Marshal(result)
 		if err != nil {
 			t.Fatal(err)
@@ -136,7 +136,7 @@ func TestConversationToolStepDetailLoadsOnlyRequestedPair(t *testing.T) {
 	if _, err := st.db.Exec(`INSERT INTO conversation_records(conversation_id,item_id,ordinal,round_id,revision_id,role,payload_json,tool_call_id,revision,legacy_kind,created_at,updated_at) VALUES(?,?,?,?,?,'assistant',?,'',1,'',?,?)`, "agent-tool-detail", callMessage.RecordID, 20, "round-1", "revision-1", string(callRaw), now, now); err != nil {
 		t.Fatal(err)
 	}
-	result := llm.Message{Role: "tool", Name: "read_file", ToolCallID: call.ID, Content: "full detail body", RecordID: "round-1/result"}
+	result := llm.Message{Role: "tool", Name: "read_file", ToolCallID: call.ID, ToolCallSourceID: callMessage.RecordID, Content: "full detail body", RecordID: "round-1/result"}
 	raw, _ := json.Marshal(result)
 	if _, err := st.db.Exec(`INSERT INTO conversation_records(conversation_id,item_id,ordinal,round_id,revision_id,role,payload_json,tool_call_id,revision,legacy_kind,created_at,updated_at) VALUES(?,?,?,?,?,'tool',?,?,1,'',?,?)`, "agent-tool-detail", result.RecordID, 21, "round-1", "revision-1", string(raw), call.ID, now, now); err != nil {
 		t.Fatal(err)
@@ -154,5 +154,44 @@ func TestConversationToolStepDetailLoadsOnlyRequestedPair(t *testing.T) {
 	}
 	if content != "response 1" || version != 1 || !selected {
 		t.Fatalf("unexpected item detail: text=%q version=%d selected=%v", content, version, selected)
+	}
+}
+
+func TestConversationToolStepDetailScopesRepeatedCallIDsToSourceAssistant(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "tool-step-source.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	seedConversationHistory(t, st, "agent-tool-source", 1)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	const callID = "provider-reused"
+	for index, itemID := range []string{"round-1/assistant-first", "round-1/assistant-second"} {
+		call := llm.ToolCall{ID: callID, Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: fmt.Sprintf(`{"path":"file-%d.txt"}`, index+1)}}
+		assistant := llm.Message{Role: "assistant", RecordID: itemID, ToolCalls: []llm.ToolCall{call}}
+		assistantRaw, err := json.Marshal(assistant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.db.Exec(`INSERT INTO conversation_records(conversation_id,item_id,ordinal,round_id,revision_id,role,payload_json,tool_call_id,revision,legacy_kind,created_at,updated_at) VALUES(?,?,?,?,?,'assistant',?,'',1,'',?,?)`, "agent-tool-source", itemID, 20+int64(index*2), "round-1", "revision-1", string(assistantRaw), now, now); err != nil {
+			t.Fatal(err)
+		}
+		result := llm.Message{Role: "tool", Name: "read_file", ToolCallID: callID, ToolCallSourceID: itemID, Content: fmt.Sprintf("result-%d", index+1), RecordID: fmt.Sprintf("round-1/result-%d", index+1)}
+		resultRaw, err := json.Marshal(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.db.Exec(`INSERT INTO conversation_records(conversation_id,item_id,ordinal,round_id,revision_id,role,payload_json,tool_call_id,revision,legacy_kind,created_at,updated_at) VALUES(?,?,?,?,?,'tool',?,?,1,'',?,?)`, "agent-tool-source", result.RecordID, 21+int64(index*2), "round-1", "revision-1", string(resultRaw), callID, now, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index, itemID := range []string{"round-1/assistant-first", "round-1/assistant-second"} {
+		page, err := st.LoadConversationToolStep(context.Background(), "agent-tool-source", "round-1", "revision-1", itemID, callID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Steps) != 1 || page.Steps[0].Result == nil || page.Steps[0].Result.Content != fmt.Sprintf("result-%d", index+1) {
+			t.Fatalf("detail for %s returned wrong repeated call result: %+v", itemID, page.Steps)
+		}
 	}
 }

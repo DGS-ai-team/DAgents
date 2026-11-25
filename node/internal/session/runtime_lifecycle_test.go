@@ -170,6 +170,11 @@ func TestHistoryMutationScopesReusedToolCallIDsToModelSteps(t *testing.T) {
 	if firstResult.RecordID == "" || secondResult.RecordID == "" || firstResult.RecordID == secondResult.RecordID {
 		t.Fatalf("reused provider call ID produced duplicate durable identities: first=%q second=%q", firstResult.RecordID, secondResult.RecordID)
 	}
+	if firstResult.ToolCallSourceID != llm.AssistantMessageIDForStep(first.turnCoordinator.Snapshot().StepID) ||
+		secondResult.ToolCallSourceID != llm.AssistantMessageIDForStep(second.turnCoordinator.Snapshot().StepID) ||
+		firstResult.ToolCallSourceID == secondResult.ToolCallSourceID {
+		t.Fatalf("reused provider call ID lost its source assistant identity: first=%q second=%q", firstResult.ToolCallSourceID, secondResult.ToolCallSourceID)
+	}
 }
 
 func setTestPendingHITL(t *testing.T, r *runtime, pending *turn.PendingHITL) {

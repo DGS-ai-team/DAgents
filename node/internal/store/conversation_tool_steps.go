@@ -245,12 +245,13 @@ func loadConversationToolResultsTx(ctx context.Context, tx *sql.Tx, conversation
 		return steps, nil
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(callIDs)), ",")
-	args := make([]any, 0, 3+len(callIDs))
+	args := make([]any, 0, 4+len(callIDs))
 	args = append(args, conversationID, roundID, revisionID)
 	for id := range callIDs {
 		args = append(args, id)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT item_id,payload_json FROM conversation_records WHERE conversation_id=? AND round_id=? AND revision_id=? AND role='tool' AND tool_call_id IN (`+placeholders+`) ORDER BY ordinal`, args...)
+	args = append(args, sourceItemID)
+	rows, err := tx.QueryContext(ctx, `SELECT item_id,payload_json FROM conversation_records WHERE conversation_id=? AND round_id=? AND revision_id=? AND role='tool' AND tool_call_id IN (`+placeholders+`) AND json_extract(payload_json,'$.tool_call_source_id')=? ORDER BY ordinal`, args...)
 	if err != nil {
 		return nil, err
 	}

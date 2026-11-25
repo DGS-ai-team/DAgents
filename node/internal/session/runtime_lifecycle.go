@@ -2315,6 +2315,7 @@ func (r *runtime) reconcileToolExecution(ctx context.Context, turnID, stepID, ex
 	reconciledMessage := llm.ToolResultMessageWithMetadata(toolCallID, toolName, content, reconciledMetadata)
 	if lifecycle := r.turnCoordinator.Snapshot(); lifecycle.TurnID != "" && lifecycle.StepID != "" {
 		reconciledMessage.RecordID = llm.ToolResultRecordIDForExecution(toolCallID, lifecycle.TurnID+"/"+lifecycle.StepID)
+		reconciledMessage.ToolCallSourceID = llm.AssistantMessageIDForStep(lifecycle.StepID)
 	}
 	r.mu.Lock()
 	resultExists := false

@@ -404,6 +404,8 @@ func toolResultEntry(msg llm.Message, callIndex map[string]llm.ToolCall, project
 	}
 	if projection.itemID != "" {
 		data["tool_call_item_id"] = projection.itemID
+	} else if sourceID := strings.TrimSpace(msg.ToolCallSourceID); sourceID != "" {
+		data["tool_call_item_id"] = ToolCallTranscriptItemID(sourceID, callID)
 	} else {
 		data["tool_call_item_id"] = ToolCallTranscriptItemID("", callID)
 	}

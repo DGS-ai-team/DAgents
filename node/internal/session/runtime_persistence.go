@@ -32,6 +32,9 @@ func (r *runtime) trackHistoryMutation(kind turn.HistoryMutationKind, index int,
 		lifecycle := r.turnCoordinator.Snapshot()
 		if lifecycle.TurnID != "" && lifecycle.StepID != "" {
 			message.RecordID = llm.ToolResultRecordIDForExecution(message.ToolCallID, lifecycle.TurnID+"/"+lifecycle.StepID)
+			if strings.TrimSpace(message.ToolCallSourceID) == "" {
+				message.ToolCallSourceID = llm.AssistantMessageIDForStep(lifecycle.StepID)
+			}
 		}
 	}
 	r.deltaMu.Lock()

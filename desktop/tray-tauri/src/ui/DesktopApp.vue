@@ -987,6 +987,21 @@ async function restoreAgentMedia(snapshot, agentId) {
     throw cause
   }
 }
+
+function transcriptObjectUrls(entries) {
+  const found = new Set()
+  const add = value => {
+    const url = String(value || '').trim()
+    if (url.startsWith('blob:')) found.add(url)
+  }
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    for (const image of Array.isArray(entry?.images) ? entry.images : []) add(image)
+    for (const item of Array.isArray(entry?.media) ? entry.media : []) add(item?.url)
+    for (const item of Array.isArray(entry?.data?.media) ? entry.data.media : []) add(item?.url)
+  }
+  return [...found]
+}
+
 function restoreCommittedPatchMedia(agentId, generation, patchSnapshot, upsertItems) {
   if (!agentId || !Array.isArray(upsertItems) || upsertItems.length === 0) return
   const hasNodeMedia = source => Boolean(agentMediaId(source, agentId))
@@ -1022,7 +1037,7 @@ function restoreCommittedPatchMedia(agentId, generation, patchSnapshot, upsertIt
       expectedConversationRevision: Number(patchSnapshot?.conversation_revision) || 0,
       transcript,
     })
-    if (applied) mediaUrlRegistry.commit(restored.lease)
+    if (applied) mediaUrlRegistry.commit(restored.lease, transcriptObjectUrls(hydrate.value?.transcript))
     else mediaUrlRegistry.discard(restored.lease)
   }).catch(cause => {
     if (activeId.value === agentId && activeHydrationSequence === generation) {

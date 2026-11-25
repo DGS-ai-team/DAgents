@@ -18,7 +18,12 @@ type Message struct {
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
 	ToolCalls        []ToolCall      `json:"tool_calls,omitempty"`
 	ToolCallID       string          `json:"tool_call_id,omitempty"`
-	Name             string          `json:"name,omitempty"`
+	// ToolCallSourceID links a persisted result to the assistant record that
+	// proposed it. Provider call IDs are protocol-local and may be reused by a
+	// later model step, so transcript projections must not join results on the
+	// provider ID alone.
+	ToolCallSourceID string `json:"tool_call_source_id,omitempty"`
+	Name             string `json:"name,omitempty"`
 	// Source and Provenance are internal durable metadata. Provider adapters
 	// deliberately omit them from outbound API payloads.
 	Source     *MessageSource     `json:"source,omitempty"`

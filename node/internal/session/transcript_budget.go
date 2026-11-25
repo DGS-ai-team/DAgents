@@ -15,7 +15,8 @@ const (
 )
 
 // BoundTranscriptDetails keeps the first-render projection small without
-// changing durable records. Tool results/arguments are fetched by call ID;
+// changing durable records. Tool results/arguments are fetched by source
+// assistant record and provider call ID;
 // oversized user/assistant text is represented by an explicit detail link.
 func BoundTranscriptDetails(entries []TranscriptEntry) []TranscriptEntry {
 	if len(entries) == 0 {
@@ -33,6 +34,7 @@ func BoundTranscriptDetails(entries []TranscriptEntry) []TranscriptEntry {
 	}
 	sources := map[string]*toolSource{}
 	hiddenCalls := map[string]struct{}{}
+	hiddenCallIDs := map[string]struct{}{}
 	groupEnds := map[int]int{}
 	groupVisible := map[int]int{}
 	groupID := -1
@@ -73,7 +75,10 @@ func BoundTranscriptDetails(entries []TranscriptEntry) []TranscriptEntry {
 			groupVisible[groupID]++
 			source.lastVisible = callID
 		} else {
-			hiddenCalls[callID] = struct{}{}
+			hiddenCallIDs[callID] = struct{}{}
+			if itemID := transcriptCallItemID(entry); itemID != "" {
+				hiddenCalls[itemID] = struct{}{}
+			}
 		}
 	}
 
@@ -118,13 +123,25 @@ func BoundTranscriptDetails(entries []TranscriptEntry) []TranscriptEntry {
 		}
 		include := true
 		if entry["kind"] == "tool_call" {
-			if _, hidden := hiddenCalls[transcriptCallID(entry)]; hidden {
+			itemID := transcriptCallItemID(entry)
+			_, hidden := hiddenCalls[itemID]
+			if itemID == "" {
+				_, hidden = hiddenCallIDs[transcriptCallID(entry)]
+			}
+			if hidden {
 				include = false
 			} else if transcriptString(entry["detail_item_id"]) != "" {
 				compactToolCallEntry(entry)
 			}
 		} else if entry["kind"] == "tool_result" {
-			if _, hidden := hiddenCalls[transcriptCallID(entry)]; hidden {
+			if itemID := transcriptCallItemID(entry); itemID != "" {
+				_, hidden := hiddenCalls[itemID]
+				if hidden {
+					include = false
+				} else if transcriptString(entry["detail_item_id"]) != "" {
+					compactToolResultEntry(entry)
+				}
+			} else if _, hidden := hiddenCallIDs[transcriptCallID(entry)]; hidden {
 				include = false
 			} else if transcriptString(entry["detail_item_id"]) != "" {
 				compactToolResultEntry(entry)
@@ -346,4 +363,15 @@ func transcriptString(value any) string {
 func transcriptCallID(entry TranscriptEntry) string {
 	data, _ := entry["data"].(map[string]any)
 	return transcriptString(data["tool_call_id"])
+}
+
+func transcriptCallItemID(entry TranscriptEntry) string {
+	data, _ := entry["data"].(map[string]any)
+	if transcriptString(entry["kind"]) == "tool_result" {
+		return transcriptString(data["tool_call_item_id"])
+	}
+	if itemID := transcriptString(entry["item_id"]); itemID != "" {
+		return itemID
+	}
+	return transcriptString(entry["id"])
 }
