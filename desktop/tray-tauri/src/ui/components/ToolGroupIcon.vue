@@ -24,6 +24,8 @@ const iconName = computed(() => {
     skills: "skills",
     triggers: "clock",
     wecom: "wecom",
+    web_search: "search",
+    web_fetch: "file",
     wrench: "wrench",
   };
   return aliases[props.name] || props.name || "info";

@@ -137,6 +137,14 @@ function sanitizeInline(text) {
 export function toolDisplayName(name, args = {}) {
   const n = String(name || "unknown").trim() || "unknown";
   if (n === USER_INFORMATION_TOOL) return "Agent 询问";
+  if (n === "web_search") {
+    const query = sanitizeInline(args.call_purpose || args.query || args.q);
+    return query ? `网页搜索(${query.length > 48 ? truncateGraphemes(query, 48) : query})` : "网页搜索";
+  }
+  if (n === "web_fetch") {
+    const url = sanitizeInline(args.call_purpose || args.url);
+    return url ? `抓取网页(${url.length > 48 ? truncateGraphemes(url, 48) : url})` : "抓取网页";
+  }
   const purpose = toolCallPurpose(args);
   const base = n === "bash_run" ? "bash" : n;
   if (purpose) return `${base}(${purpose})`;

@@ -14,6 +14,7 @@ const emptyForm = () => ({
   child_agents: {},
   browser: {},
   wecom: {},
+  web: { base_url: "https://api.deepseek.com", has_api_key: false, api_key: "", clear_api_key: false },
   tools: {},
   hooks: {},
 });
@@ -59,6 +60,10 @@ export function useSetupConfig() {
     Object.assign(form.wecom, data.wecom || {});
     form.wecom.webhook_key = "";
     form.wecom.clear_webhook_key = false;
+    Object.assign(form.web, data.web || {});
+    form.web.base_url = form.web.base_url || "https://api.deepseek.com";
+    form.web.api_key = "";
+    form.web.clear_api_key = false;
     Object.assign(form.tools, data.tools || {});
     Object.assign(form.hooks, data.hooks || {});
     savedSnapshot.value = snapshot();

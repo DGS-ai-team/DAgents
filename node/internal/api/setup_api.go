@@ -93,6 +93,20 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusBadRequest, "invalid_setup_config", err.Error(), nil)
 		return
 	}
+	if key := strings.TrimSpace(updated.Web.APIKey); key != "" {
+		box, boxErr := store.OpenSecretBox(updated.RuntimeDir())
+		if boxErr != nil {
+			writeAPIError(w, http.StatusInternalServerError, "web_key_encrypt_failed", "无法保护网页服务 API Key", nil)
+			return
+		}
+		ciphertext, encryptErr := box.Encrypt(key)
+		if encryptErr != nil {
+			writeAPIError(w, http.StatusInternalServerError, "web_key_encrypt_failed", "无法保护网页服务 API Key", nil)
+			return
+		}
+		updated.Web.APIKey = ""
+		updated.Web.APIKeyCiphertext = ciphertext
+	}
 
 	// BrowserManager is a live process dependency rather than a passive config
 	// value. Prepare and ping the replacement before persisting browser enable
@@ -205,6 +219,13 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	llmRuntimeApplied := s.syncLLMRuntimeFromStore(r.Context())
 	s.applyMultimodalRuntime(s.cfg.MultimodalEnabled())
 	s.attachNodeRuntimeDeps(s.tools, s.cfg.NodeID)
+	webRuntimeChange := !reflect.DeepEqual(before.Web, updated.Web)
+	if webRuntimeChange {
+		s.refreshWebToolRuntimes(r.Context())
+		if s.workgroupAgents != nil {
+			s.workgroupAgents.markWebRefreshPending()
+		}
+	}
 	s.maybeStartManageSidecars()
 	view := setup.ViewFromConfig(s.cfg)
 	s.enrichLLMSettingsView(&view.LLM)
@@ -212,6 +233,28 @@ func (s *Server) handlePatchSetupConfig(w http.ResponseWriter, r *http.Request) 
 	view.ConfigWritable = s.setupWritable()
 	view.RestartRequired = setupRestartRequired(&before, updated, browserRuntimeChange, llmRuntimeApplied)
 	writeJSON(w, http.StatusOK, view)
+}
+
+func (s *Server) refreshWebToolRuntimes(ctx context.Context) {
+	if s == nil || s.agents == nil {
+		return
+	}
+	records, err := s.agents.List(ctx)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("web tool runtime refresh could not list agents", "error", err)
+		}
+		return
+	}
+	for _, rec := range records {
+		if rec.Archived {
+			continue
+		}
+		if s.sessions == nil || s.sessions.Get(rec.AgentID) == nil {
+			continue
+		}
+		s.markRuntimeReloadPending(rec.AgentID, "web_tools")
+	}
 }
 
 func browserRuntimeSettingsEqual(a, b *config.Config) bool {

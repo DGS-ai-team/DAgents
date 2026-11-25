@@ -32,7 +32,9 @@ Node 首配维护单 owner 档案：`agent.name` 是完成 Node 初始化所必�
 
 `GET /v1/node/info` 返回 Node info DTO，字段包含 `node_id`、`manage_enabled`、`manage_url`、`manage_registered`，也提供 capabilities、LLM 与 compression 信息。`GET /v1/bootstrap` 为 Desktop WebView 首屏提供 `health`、`info`、`llm`、`user`、`onboarding`、`agent` 聚合；Node 不托管 Web UI；此聚合减少首屏往返，不取代原子 info/settings API。
 
-`GET /v1/settings` 返回 `SettingsView`；`PATCH /v1/settings` 顶层可省略不相关设置块。view 顶层包含 `node`、`llm`、`manage`、`features`、`compression`、`memory`、`runtime`、`agent`、`user`、`onboarding`、`child_agents`、`browser`、`wecom`、`tools`、`hooks`、`available_tool_groups`。`node` 仅含 listener 字段。除 `manage` 以字段 presence 合并外，大多数设置块按其 DTO 一次整体应用；发 patch 前先 GET 并合并该块，仅在客户端明确提供完整块或接口定义了专门的子字段合并时省略旧字段。`manage` 的字段是可选指针，未出现的字段保留现值；出现的字段按 presence 更新。Manage token GET 示例是 `{"has_node_token":true}`，不会有 `node_token` 明文。PATCH `node_token: ""` 保留原 token；`clear_node_token: true` 才清除。显式 `url: ""` 是清空 URL，若最终 `enabled: true` 会因缺 URL 而校验失败。Setup panel 加载时密码输入框始终空白，空值提交保持原 token，明确清除需勾选清除字段。首配完成只要求 Node 名；`preferred_name` 可空。完整 DTO/patch 合并逻辑见 `node/internal/setup/settings.go`。
+`GET /v1/settings` 返回 `SettingsView`；`PATCH /v1/settings` 顶层可省略不相关设置块。view 顶层包含 `node`、`llm`、`manage`、`features`、`compression`、`memory`、`runtime`、`agent`、`user`、`onboarding`、`child_agents`、`browser`、`wecom`、`web`、`tools`、`hooks`、`available_tool_groups`。`node` 仅含 listener 字段。除 `manage` 以字段 presence 合并外，大多数设置块按其 DTO 一次整体应用；发 patch 前先 GET 并合并该块，仅在客户端明确提供完整块或接口定义了专门的子字段合并时省略旧字段。`manage` 的字段是可选指针，未出现的字段保留现值；出现的字段按 presence 更新。Manage token GET 示例是 `{"has_node_token":true}`，不会有 `node_token` 明文。PATCH `node_token: ""` 保留原 token；`clear_node_token: true` 才清除。显式 `url: ""` 是清空 URL，若最终 `enabled: true` 会因缺 URL 而校验失败。Setup panel 加载时密码输入框始终空白，空值提交保持原 token，明确清除需勾选清除字段。首配完成只要求 Node 名；`preferred_name` 可空。完整 DTO/patch 合并逻辑见 `node/internal/setup/settings.go`。
+
+网页工具配置与 LLM 凭据独立，共用一个 Search/Fetch `base_url` 和 API key。GET `web` 仅返回 `{"base_url":"https://api.deepseek.com","has_api_key":false}`；PATCH 可用 `web.base_url` 更新代理地址，`web.api_key` 非空时替换密钥、空值保留，`web.clear_api_key: true` 明确删除。API key 使用 runtime 目录的 `.llm_secret_key` 通过 AES-256-GCM 加密后保存在 `node_settings.db`，GET 不回传明文。`features.web_search_enabled` 与 `features.web_fetch_enabled` 默认关闭且可分别控制；启用任一项前必须配置 HTTP(S) base URL 与 key。`available_tool_groups` 仅在对应开关开启后包含 `web_search` / `web_fetch`；Agent 还需在 `defaults.tools.enabled_groups` 单独选择同名组。修改后已加载 Agent 会在下一轮重建工具表。
 
 读取 Node 设置：
 
@@ -63,6 +65,16 @@ curl -X PATCH http://127.0.0.1:18765/v1/settings \
   -H 'Content-Type: application/json' \
   -d '{"manage":{"clear_node_token":true}}'
 ```
+
+配置独立网页 Search/Fetch 服务（以下 key 和地址均为本地测试占位值）：
+
+```sh
+curl -X PATCH http://127.0.0.1:18765/v1/settings \
+  -H 'Content-Type: application/json' \
+  -d '{"web":{"base_url":"https://api.deepseek.com","api_key":"REPLACE_WITH_WEB_KEY"},"features":{"web_search_enabled":true,"web_fetch_enabled":true}}'
+```
+
+Search 工具接受 `query`（1–128 Unicode 字符）、可选 `count`（1–50，默认 10）、`ori_question`（nullable，1–128 字符）、`localization`（IP 地址字符串）和 `need_content`（默认 false）。Fetch 接受 `url`（最多 8192 个字符的 HTTP(S) URL）。两个工具的 `call_purpose` 是项目级显示参数，不会转发给 provider。工具结果带网页来源 URL，并标明网页文字属于外部不可信内容。更多使用说明见[网页 Search 与 Fetch 工具](../user/web-tools.md)。
 
 ### LLM 配置与密钥保留
 

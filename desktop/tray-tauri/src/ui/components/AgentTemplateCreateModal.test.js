@@ -12,8 +12,9 @@ const { createAgentTemplate, getSetupConfig } = vi.hoisted(() => ({
 vi.mock("../api/node.js", () => ({ createAgentTemplate, getSetupConfig }));
 
 const AgentSettingsFormStub = {
+  props: ["availableToolGroups"],
   components: { UiSelect },
-  template: '<UiSelect :options="[{ value: \'profile\', label: \'Profile\' }]" />',
+  template: '<div><UiSelect :options="[{ value: \'profile\', label: \'Profile\' }]" /><button v-for="group in availableToolGroups" :key="group.name" type="button" :data-group="group.name">{{ group.label }}</button></div>',
 };
 
 let wrapper;
@@ -118,5 +119,20 @@ describe("AgentTemplateCreateModal focus and keyboard behavior", () => {
     finishCreate({ id: "template-id" });
     await flushPromises();
     expect(wrapper.emitted("close")).toHaveLength(1);
+  });
+
+  it("hides web groups when disabled and exposes only search when only search is available", async () => {
+    getSetupConfig.mockResolvedValue({ llm: { profiles: [] }, available_tool_groups: [] });
+    mountModal(true);
+    await flushPromises();
+    expect(document.body.querySelector('[data-group="web_search"]')).toBeNull();
+    expect(document.body.querySelector('[data-group="web_fetch"]')).toBeNull();
+    wrapper.unmount();
+
+    getSetupConfig.mockResolvedValue({ llm: { profiles: [] }, available_tool_groups: ["web_search"] });
+    mountModal(true);
+    await flushPromises();
+    expect(document.body.querySelector('[data-group="web_search"]')?.textContent).toBe("网页搜索");
+    expect(document.body.querySelector('[data-group="web_fetch"]')).toBeNull();
   });
 });

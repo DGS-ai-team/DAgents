@@ -28,6 +28,13 @@ describe("inferToolKind", () => {
     expect(inferToolKind("wecom_send_markdown")).toBe("wecom");
   });
 
+  it("maps web search and fetch to their independent groups", () => {
+    expect(inferToolKind("web_search")).toBe("web_search");
+    expect(inferToolKind("web_fetch")).toBe("web_fetch");
+    expect(resolveToolVisual({ data: { tool_name: "web_search" } })).toMatchObject({ kind: "web_search" });
+    expect(resolveToolVisual({ data: { tool_name: "web_fetch" } })).toMatchObject({ kind: "web_fetch" });
+  });
+
   it("falls back to tool instead of agent", () => {
     expect(inferToolKind("unknown_custom_tool")).toBe("tool");
     expect(inferToolKind("")).toBe("tool");

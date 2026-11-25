@@ -12,6 +12,8 @@ const setupConfig = () => ({
   features: {
     browser_enabled: true,
     wecom_enabled: false,
+    web_search_enabled: false,
+    web_fetch_enabled: false,
     raw_message_history_enabled: false,
     raw_message_history_source: "settings",
     skills_enabled: true,
@@ -29,6 +31,7 @@ const setupConfig = () => ({
     ignore_https_errors: false,
   },
   wecom: { webhook_url: "", api_base: "", has_webhook_key: false },
+  web: { base_url: "https://api.deepseek.com", has_api_key: false },
   child_agents: {
     default_ttl_seconds: 900,
     max_ttl_seconds: 3600,
@@ -357,5 +360,71 @@ describe("CapabilitiesConfigPanel advanced settings", () => {
       wecom: expect.objectContaining({ clear_webhook_key: true, webhook_key: "fixture-replacement-key" }),
     }));
     enabledWrapper.unmount();
+  });
+
+  it("saves shared web settings, preserves a saved key, and keeps the two feature switches independent", async () => {
+    const config = setupConfig();
+    config.web.has_api_key = true;
+    api.getSetupConfig.mockResolvedValue(config);
+    const wrapper = mount(CapabilitiesConfigPanel);
+    await flushPromises();
+    await wrapper.get('[aria-label="网页搜索"]').setValue(true);
+    await wrapper.get('[data-validation-field="web.base_url"]').setValue("https://proxy.example/v1");
+    await wrapper.get(".setup-config-panel__actions button").trigger("click");
+    await flushPromises();
+    expect(api.patchSetupConfig).toHaveBeenCalledWith(expect.objectContaining({
+      features: expect.objectContaining({ web_search_enabled: true, web_fetch_enabled: false }),
+      web: { base_url: "https://proxy.example/v1", clear_api_key: false },
+    }));
+    expect(api.patchSetupConfig.mock.calls[0][0].web).not.toHaveProperty("api_key");
+    wrapper.unmount();
+  });
+
+  it("validates enabled web tools and preserves a failed key draft", async () => {
+    const config = setupConfig();
+    api.getSetupConfig.mockResolvedValue(config);
+    const wrapper = mount(CapabilitiesConfigPanel);
+    await flushPromises();
+    await wrapper.get('[aria-label="网页抓取"]').setValue(true);
+    await wrapper.get(".setup-config-panel__actions button").trigger("click");
+    await flushPromises();
+    expect(api.patchSetupConfig).not.toHaveBeenCalled();
+    expect(wrapper.get('[data-validation-field="web.api_key"]').attributes("aria-invalid")).toBe("true");
+
+    await wrapper.get('[data-validation-field="web.api_key"]').setValue("fixture-web-key");
+    await wrapper.get('[data-validation-field="web.base_url"]').setValue("https://proxy.example/v1?token=unsafe");
+    await wrapper.get(".setup-config-panel__actions button").trigger("click");
+    await flushPromises();
+    expect(api.patchSetupConfig).not.toHaveBeenCalled();
+    expect(wrapper.get('[data-validation-field="web.base_url"]').attributes("aria-invalid")).toBe("true");
+
+    await wrapper.get('[data-validation-field="web.base_url"]').setValue("https://proxy.example/v1");
+    api.patchSetupConfig.mockRejectedValueOnce(new Error("保存失败"));
+    await wrapper.get(".setup-config-panel__actions button").trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-validation-field="web.api_key"]').element.value).toBe("fixture-web-key");
+    expect(api.patchSetupConfig.mock.calls[0][0].web).toMatchObject({ api_key: "fixture-web-key", clear_api_key: false });
+    wrapper.unmount();
+  });
+
+  it("supports explicit clearing and replacement of a saved web key", async () => {
+    const config = setupConfig();
+    config.web.has_api_key = true;
+    api.getSetupConfig.mockResolvedValue(config);
+    const wrapper = mount(CapabilitiesConfigPanel);
+    await flushPromises();
+    await wrapper.get(".capabilities-config__web-disclosure .settings-disclosure__trigger").trigger("click");
+    await wrapper.get('[aria-label="清除已保存的 API Key"]').trigger("click");
+    await wrapper.get(".setup-config-panel__actions button").trigger("click");
+    await flushPromises();
+    expect(api.patchSetupConfig.mock.calls[0][0].web).toMatchObject({ clear_api_key: true });
+
+    api.patchSetupConfig.mockClear().mockResolvedValue(setupConfig());
+    await wrapper.get('[data-validation-field="web.api_key"]').setValue("fixture-new-key");
+    await wrapper.get('[aria-label="网页搜索"]').setValue(true);
+    await wrapper.get(".setup-config-panel__actions button").trigger("click");
+    await flushPromises();
+    expect(api.patchSetupConfig.mock.calls[0][0].web).toMatchObject({ api_key: "fixture-new-key", clear_api_key: false });
+    wrapper.unmount();
   });
 });

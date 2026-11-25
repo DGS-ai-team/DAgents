@@ -21,5 +21,6 @@
 | `injectCallPurposeParam` | 注入 call_purpose（加入 required） |
 | `SetTriggerRuntime(store, sched, agentID)` | 注入触发器运行时 |
 | `SetWeComClient(client)` | 注入企业微信 webhook 客户端（暴露 wecom_*） |
+| `SetWebAPIClient(client, searchEnabled, fetchEnabled)` | 注入独立网页 API 客户端并按 Node 功能开关控制 `web_search` / `web_fetch` |
 | `execTriggerList` / `execTriggerGet` / `execTriggerCreate` / `execTriggerUpdate` / `execTriggerDelete` | 触发器工具 |
 | `fs_helpers.go` | `textSuffixes`、`isTextReadable`、`windowFromTotal`、`clipReadBodyToTokenBudget`、`mergeLineRanges` 等 |

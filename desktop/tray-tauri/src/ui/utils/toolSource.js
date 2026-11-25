@@ -30,6 +30,8 @@ const KIND_META = {
   browser: { label: "browser", short: "browser", icon: "◉" },
   computer: { label: "computer", short: "computer", icon: "▣" },
   wecom: { label: "wecom", short: "wecom", icon: "✉" },
+  web_search: { label: "网页搜索", short: "网页搜索", icon: "search" },
+  web_fetch: { label: "网页抓取", short: "网页抓取", icon: "file" },
   triggers: { label: "triggers", short: "triggers", icon: "⏱" },
   skills: { label: "skills", short: "skills", icon: "S" },
   child: { label: "child", short: "child", icon: "⎇" },
@@ -46,6 +48,8 @@ export function inferToolKind(name, data = {}) {
   if (n.startsWith("browser_")) return "browser";
   if (COMPUTER_TOOLS.has(n)) return "computer";
   if (n.startsWith("wecom_")) return "wecom";
+  if (n === "web_search") return "web_search";
+  if (n === "web_fetch") return "web_fetch";
   if (n.startsWith("trigger_")) return "triggers";
   if (n.startsWith("terminal_")) return "terminal";
   if (SKILLS_TOOLS.has(n)) return "skills";

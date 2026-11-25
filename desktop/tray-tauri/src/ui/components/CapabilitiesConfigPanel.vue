@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import ConfigPanelShell from "./ConfigPanelShell.vue";
 import SettingsDisclosure from "./SettingsDisclosure.vue";
+import UiIcon from "./UiIcon.vue";
 import { useSetupConfig } from "../composables/useSetupConfig.js";
 
 const { loading, saving, error, statusMessage, dirty, configPath, configWritable, form, load, save } =
@@ -13,9 +14,13 @@ const wecomKeyAvailable = computed(() => Boolean(
   || (form.wecom.has_webhook_key && !form.wecom.clear_webhook_key),
 ));
 const wecomApiBaseValid = computed(() => isValidWecomApiBase(form.wecom.api_base));
+const webServiceEnabled = computed(() => Boolean(form.features.web_search_enabled || form.features.web_fetch_enabled));
+const webKeyAvailable = computed(() => Boolean(form.web.api_key?.trim() || (form.web.has_api_key && !form.web.clear_api_key)));
+const webApiBaseValid = computed(() => isValidWebApiBase(form.web.base_url));
 const panel = ref(null);
 const browserSettingsDisclosure = ref(null);
 const wecomSettingsDisclosure = ref(null);
+const webSettingsDisclosure = ref(null);
 const runtimeDisclosure = ref(null);
 const diagnosticsDisclosure = ref(null);
 const exposeBrowserSettings = ref(false);
@@ -40,6 +45,7 @@ const numericFields = [
 const disclosureRefs = {
   browser: browserSettingsDisclosure,
   wecom: wecomSettingsDisclosure,
+  web: webSettingsDisclosure,
   runtime: runtimeDisclosure,
   diagnostics: diagnosticsDisclosure,
 };
@@ -70,6 +76,22 @@ function isValidWecomApiBase(value) {
   try {
     const parsed = new URL(raw);
     return ["http:", "https:"].includes(parsed.protocol) && Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isValidWebApiBase(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return true;
+  try {
+    const parsed = new URL(raw);
+    return ["http:", "https:"].includes(parsed.protocol)
+      && Boolean(parsed.hostname)
+      && !parsed.username
+      && !parsed.password
+      && !parsed.search
+      && !parsed.hash;
   } catch {
     return false;
   }
@@ -118,6 +140,18 @@ async function validateCapabilities() {
       return false;
     }
   }
+  if (webServiceEnabled.value) {
+    if (!webApiBaseValid.value) {
+      validationErrors["web.base_url"] = "请输入有效的 HTTP(S) 地址。";
+      await revealAndFocusField("web.base_url", "web");
+      return false;
+    }
+    if (!webKeyAvailable.value) {
+      validationErrors["web.api_key"] = "启用网页搜索或抓取前，请先配置 API Key。";
+      await revealAndFocusField("web.api_key", "web");
+      return false;
+    }
+  }
   return true;
 }
 
@@ -127,6 +161,8 @@ async function saveCapabilities() {
   const features = {
     browser_enabled: form.features.browser_enabled,
     wecom_enabled: form.features.wecom_enabled,
+    web_search_enabled: Boolean(form.features.web_search_enabled),
+    web_fetch_enabled: Boolean(form.features.web_fetch_enabled),
     skills_max_in_prompt: form.features.skills_max_in_prompt,
     triggers_poll_seconds: form.features.triggers_poll_seconds,
   };
@@ -141,10 +177,16 @@ async function saveCapabilities() {
   if (form.wecom.webhook_key) {
     wecom.webhook_key = form.wecom.webhook_key;
   }
+  const web = {
+    base_url: form.web.base_url?.trim() || "https://api.deepseek.com",
+    clear_api_key: Boolean(form.web.clear_api_key),
+  };
+  if (form.web.api_key) web.api_key = form.web.api_key;
   await save({
     features,
     browser: { ...form.browser },
     wecom,
+    web,
     child_agents: {
       default_ttl_seconds: form.child_agents.default_ttl_seconds,
       max_ttl_seconds: form.child_agents.max_ttl_seconds,
@@ -316,6 +358,40 @@ onMounted(load);
           </SettingsDisclosure>
         </div>
       </div>
+      <div class="capabilities-config__service">
+        <label class="settings-row">
+          <span class="settings-row__copy"><span class="settings-row__title">网页搜索</span><span class="settings-row__description">允许智能体搜索网页；仍需在智能体能力与角色中授予工具权限。</span></span>
+          <input v-model="form.features.web_search_enabled" class="settings-switch-input" type="checkbox" aria-label="网页搜索" />
+        </label>
+        <label class="settings-row">
+          <span class="settings-row__copy"><span class="settings-row__title">网页抓取</span><span class="settings-row__description">允许智能体提取网页内容；仍需在智能体能力与角色中授予工具权限。</span></span>
+          <input v-model="form.features.web_fetch_enabled" class="settings-switch-input" type="checkbox" aria-label="网页抓取" />
+        </label>
+        <SettingsDisclosure ref="webSettingsDisclosure" class="capabilities-config__web-disclosure" title="网页服务配置">
+          <p class="settings-section__desc">网页搜索与抓取共用此配置。可先保存凭据，再启用对应工具。Base URL 可填写服务根地址或带 /v1 的地址；留空会使用默认地址 https://api.deepseek.com。Key 留空会保留已保存的值，不会回填密钥。</p>
+          <div class="setup-config-panel__field-grid">
+            <label class="settings-field">
+              <span class="settings-field__label">Base URL</span>
+              <div class="capabilities-config__field-control">
+                <input v-model="form.web.base_url" class="settings-field__input" type="url" autocomplete="url" placeholder="https://api.deepseek.com 或 https://api.deepseek.com/v1" data-validation-field="web.base_url" :aria-invalid="fieldError('web.base_url') ? 'true' : undefined" @input="clearFieldError('web.base_url')" />
+                <small v-if="fieldError('web.base_url')" class="settings-field__error" role="alert">{{ fieldError('web.base_url') }}</small>
+              </div>
+            </label>
+            <label class="settings-field">
+              <span class="settings-field__label">API Key</span>
+              <div class="capabilities-config__field-control">
+                <div class="capabilities-config__key-control">
+                  <input v-model="form.web.api_key" class="settings-field__input" type="password" autocomplete="new-password" :placeholder="form.web.has_api_key && !form.web.clear_api_key ? '已保存，留空则保留' : '输入 API Key'" data-validation-field="web.api_key" :aria-invalid="fieldError('web.api_key') ? 'true' : undefined" @input="clearFieldError('web.api_key'); form.web.clear_api_key = false" />
+                  <button v-if="form.web.has_api_key && !form.web.clear_api_key" type="button" class="desktop-icon-button desktop-icon-button--toolbar" title="清除已保存的 API Key" aria-label="清除已保存的 API Key" @click="form.web.clear_api_key = true; form.web.api_key = ''; clearFieldError('web.api_key')"><UiIcon name="trash" :size="15" /></button>
+                  <span v-else-if="form.web.clear_api_key" class="capabilities-config__key-cleared" role="status">保存后清除</span>
+                </div>
+                <small v-if="fieldError('web.api_key')" class="settings-field__error" role="alert">{{ fieldError('web.api_key') }}</small>
+                <small v-else-if="form.web.has_api_key && !form.web.clear_api_key" class="settings-field__hint">已保存密钥；出于安全原因不会显示原值。</small>
+              </div>
+            </label>
+          </div>
+        </SettingsDisclosure>
+      </div>
     </section>
 
     <SettingsDisclosure
@@ -443,6 +519,15 @@ onMounted(load);
 .capabilities-config__service {
   padding: 0;
 }
+
+.capabilities-config__key-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.capabilities-config__key-control .settings-field__input { flex: 1; min-width: 0; }
+.capabilities-config__key-cleared { white-space: nowrap; }
 
 .capabilities-config__service:not(:last-child) {
   border-bottom: 1px solid var(--border-subtle);

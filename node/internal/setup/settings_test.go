@@ -491,3 +491,44 @@ func TestApplyPatch_completeNodeProfile(t *testing.T) {
 		t.Fatalf("view=%+v", view)
 	}
 }
+
+func TestWebSettingsRequireCredentialsWhenEnabledAndPreserveOrClearExplicitly(t *testing.T) {
+	cfg := testBaseConfig(t)
+	enabled := true
+	if _, err := ApplyPatch(cfg, SettingsPatch{Features: &FeatureSettingsPatch{WebSearchEnabled: &enabled}}); err == nil {
+		t.Fatal("enabling web search without a key should fail")
+	}
+	cfg.Web.APIKeyCiphertext = "encrypted-test-value"
+	updated, err := ApplyPatch(cfg, SettingsPatch{Features: &FeatureSettingsPatch{WebSearchEnabled: &enabled}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.Web.SearchEnabled || updated.Web.BaseURL != config.DefaultWebBaseURL {
+		t.Fatalf("web config = %+v", updated.Web)
+	}
+	view := ViewFromConfig(updated)
+	viewJSON, _ := json.Marshal(view)
+	if !view.Features.WebSearchEnabled || !view.Web.HasAPIKey || strings.Contains(string(viewJSON), "encrypted-test-value") {
+		t.Fatalf("web settings view leaked or omitted config: %+v", view)
+	}
+	base := "https://proxy.example/prefix/v1"
+	preserved, err := ApplyPatch(updated, SettingsPatch{Web: &WebSettingsPatch{BaseURL: &base}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preserved.Web.APIKeyCiphertext != "encrypted-test-value" {
+		t.Fatal("blank API key patch did not preserve encrypted key")
+	}
+	_, err = ApplyPatch(preserved, SettingsPatch{Web: &WebSettingsPatch{ClearAPIKey: true}})
+	if err == nil {
+		t.Fatal("clearing required key while enabled should fail")
+	}
+	disabled := false
+	cleared, err := ApplyPatch(preserved, SettingsPatch{Features: &FeatureSettingsPatch{WebSearchEnabled: &disabled}, Web: &WebSettingsPatch{ClearAPIKey: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.Web.APIKeyCiphertext != "" || cleared.Web.APIKey != "" || cleared.Web.SearchEnabled {
+		t.Fatalf("web key was not cleared: %+v", cleared.Web)
+	}
+}

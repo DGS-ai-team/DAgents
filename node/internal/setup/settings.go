@@ -72,6 +72,8 @@ type FeatureSettings struct {
 	BrowserEnabled           bool   `json:"browser_enabled"`
 	WeComEnabled             bool   `json:"wecom_enabled"`
 	MultimodalEnabled        bool   `json:"multimodal_enabled"`
+	WebSearchEnabled         bool   `json:"web_search_enabled"`
+	WebFetchEnabled          bool   `json:"web_fetch_enabled"`
 	SkillsMaxInPrompt        int    `json:"skills_max_in_prompt"`
 	TriggersPollSeconds      int    `json:"triggers_poll_seconds"`
 	RawMessageHistoryEnabled bool   `json:"raw_message_history_enabled"`
@@ -88,9 +90,22 @@ type FeatureSettingsPatch struct {
 	BrowserEnabled           *bool `json:"browser_enabled,omitempty"`
 	WeComEnabled             *bool `json:"wecom_enabled,omitempty"`
 	MultimodalEnabled        *bool `json:"multimodal_enabled,omitempty"`
+	WebSearchEnabled         *bool `json:"web_search_enabled,omitempty"`
+	WebFetchEnabled          *bool `json:"web_fetch_enabled,omitempty"`
 	SkillsMaxInPrompt        *int  `json:"skills_max_in_prompt,omitempty"`
 	TriggersPollSeconds      *int  `json:"triggers_poll_seconds,omitempty"`
 	RawMessageHistoryEnabled *bool `json:"raw_message_history_enabled,omitempty"`
+}
+
+type WebSettings struct {
+	BaseURL   string `json:"base_url"`
+	HasAPIKey bool   `json:"has_api_key"`
+}
+
+type WebSettingsPatch struct {
+	BaseURL     *string `json:"base_url,omitempty"`
+	APIKey      string  `json:"api_key,omitempty"`
+	ClearAPIKey bool    `json:"clear_api_key,omitempty"`
 }
 
 // CompressionSettings 上下文压缩阈值（config compression 块）。
@@ -223,6 +238,7 @@ type SettingsView struct {
 	ChildAgents     ChildAgentsLimits   `json:"child_agents"`
 	Browser         BrowserSettings     `json:"browser"`
 	WeCom           WeComSettings       `json:"wecom"`
+	Web             WebSettings         `json:"web"`
 	Tools           ToolsSettings       `json:"tools"`
 	Hooks           HooksSettings       `json:"hooks"`
 	// AvailableToolGroups 本 Node 当前可供 Agent 勾选的工具组（已按 browser/wecom 进程开关过滤）。
@@ -243,6 +259,7 @@ type SettingsPatch struct {
 	ChildAgents *ChildAgentsLimits    `json:"child_agents,omitempty"`
 	Browser     *BrowserSettings      `json:"browser,omitempty"`
 	WeCom       *WeComSettings        `json:"wecom,omitempty"`
+	Web         *WebSettingsPatch     `json:"web,omitempty"`
 	Tools       *ToolsSettingsPatch   `json:"tools,omitempty"`
 	Hooks       *HooksSettings        `json:"hooks,omitempty"`
 }
@@ -279,6 +296,8 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			BrowserEnabled:           cfg.BrowserEnabled(),
 			WeComEnabled:             cfg.WeComEnabled(),
 			MultimodalEnabled:        cfg.MultimodalEnabled(),
+			WebSearchEnabled:         cfg.Web.SearchEnabled,
+			WebFetchEnabled:          cfg.Web.FetchEnabled,
 			SkillsMaxInPrompt:        cfg.Skills.MaxInPrompt,
 			TriggersPollSeconds:      cfg.Triggers.PollSeconds,
 			RawMessageHistoryEnabled: cfg.RawMessageHistoryEnabled(),
@@ -324,6 +343,7 @@ func ViewFromConfig(cfg *config.Config) SettingsView {
 			ChromePath:        cfg.Browser.ChromePath,
 		},
 		WeCom: weComSettingsFromConfig(cfg),
+		Web:   WebSettings{BaseURL: cfg.Web.BaseURL, HasAPIKey: strings.TrimSpace(cfg.Web.APIKey) != "" || strings.TrimSpace(cfg.Web.APIKeyCiphertext) != ""},
 		Tools: ToolsSettings{
 			BashOutputEncoding:                cfg.Tools.BashOutputEncoding,
 			FileEncoding:                      cfg.Tools.FileEncoding,
@@ -422,6 +442,11 @@ func ApplyPatch(cfg *config.Config, patch SettingsPatch) (*config.Config, error)
 			return nil, err
 		}
 	}
+	if patch.Web != nil {
+		if err := applyWebPatch(&out, *patch.Web); err != nil {
+			return nil, err
+		}
+	}
 	if patch.Tools != nil {
 		if err := applyToolsPatch(&out, *patch.Tools); err != nil {
 			return nil, err
@@ -433,6 +458,15 @@ func ApplyPatch(cfg *config.Config, patch SettingsPatch) (*config.Config, error)
 		}
 	}
 	out.ApplyDefaults()
+	if out.Web.SearchEnabled || out.Web.FetchEnabled {
+		u, err := url.Parse(strings.TrimSpace(out.Web.BaseURL))
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return nil, fmt.Errorf("web.base_url must be a valid http(s) URL when web tools are enabled")
+		}
+		if strings.TrimSpace(out.Web.APIKey) == "" && strings.TrimSpace(out.Web.APIKeyCiphertext) == "" {
+			return nil, fmt.Errorf("web.api_key is required when web tools are enabled")
+		}
+	}
 	if err := out.Validate(); err != nil {
 		return nil, err
 	}
@@ -620,6 +654,12 @@ func applyFeaturesPatch(cfg *config.Config, p FeatureSettingsPatch) error {
 		cfg.Multimodal.Enabled = boolPtr(*p.MultimodalEnabled)
 		cfg.SyncActiveProfileMultimodalFromFlat()
 	}
+	if p.WebSearchEnabled != nil {
+		cfg.Web.SearchEnabled = *p.WebSearchEnabled
+	}
+	if p.WebFetchEnabled != nil {
+		cfg.Web.FetchEnabled = *p.WebFetchEnabled
+	}
 	if p.SkillsMaxInPrompt != nil {
 		if *p.SkillsMaxInPrompt <= 0 {
 			return fmt.Errorf("features.skills_max_in_prompt must be > 0")
@@ -634,6 +674,28 @@ func applyFeaturesPatch(cfg *config.Config, p FeatureSettingsPatch) error {
 	}
 	if p.RawMessageHistoryEnabled != nil {
 		cfg.RawMessageHistory.Enabled = boolPtr(*p.RawMessageHistoryEnabled)
+	}
+	return nil
+}
+
+func applyWebPatch(cfg *config.Config, p WebSettingsPatch) error {
+	if p.BaseURL != nil {
+		cfg.Web.BaseURL = strings.TrimSpace(*p.BaseURL)
+	}
+	if p.ClearAPIKey {
+		cfg.Web.APIKey = ""
+		cfg.Web.APIKeyCiphertext = ""
+	} else if key := strings.TrimSpace(p.APIKey); key != "" {
+		cfg.Web.APIKey = key
+	}
+	if cfg.Web.SearchEnabled || cfg.Web.FetchEnabled {
+		u, err := url.Parse(strings.TrimSpace(cfg.Web.BaseURL))
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("web.base_url must be an http(s) URL with a host and no credentials, query, or fragment when web tools are enabled")
+		}
+		if strings.TrimSpace(cfg.Web.APIKey) == "" && strings.TrimSpace(cfg.Web.APIKeyCiphertext) == "" {
+			return fmt.Errorf("web.api_key is required when web tools are enabled")
+		}
 	}
 	return nil
 }

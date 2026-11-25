@@ -3,7 +3,7 @@ import { nextTick, reactive, ref, watch } from "vue";
 import * as api from "../api/node.js";
 import AgentSettingsForm from "./AgentSettingsForm.vue";
 import UiIcon from "./UiIcon.vue";
-import { buildCreateTemplatePayload, draftFromBlank, emptyAgentDraft } from "../utils/agentTemplateForm.js";
+import { buildCreateTemplatePayload, draftFromBlank, emptyAgentDraft, toolGroupsFromSetup } from "../utils/agentTemplateForm.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -15,6 +15,7 @@ const saving = ref(false);
 const error = ref("");
 const showAdvanced = ref(false);
 const llmProfiles = ref([]);
+const availableToolGroups = ref([]);
 const dialogRoot = ref(null);
 const templateNameInput = ref(null);
 let openerElement = null;
@@ -46,6 +47,7 @@ function generateTemplateId(displayName) {
 async function loadProfiles() {
   try {
     const setup = await api.getSetupConfig().catch(() => null);
+    availableToolGroups.value = toolGroupsFromSetup(setup);
     llmProfiles.value = Array.isArray(setup?.llm?.profiles)
       ? setup.llm.profiles.map((p) => ({
           id: String(p.id || "").trim(),
@@ -55,6 +57,7 @@ async function loadProfiles() {
       : [];
   } catch {
     llmProfiles.value = [];
+    availableToolGroups.value = [];
   }
   Object.assign(draft, draftFromBlank(llmProfiles.value.map((p) => p.id)));
 }
@@ -192,6 +195,7 @@ watch(
             :draft="draft"
             @update:draft="updateDraft"
             :llm-profiles="llmProfiles"
+            :available-tool-groups="availableToolGroups"
             :show-workspace="false"
             v-model:show-advanced="showAdvanced"
           />

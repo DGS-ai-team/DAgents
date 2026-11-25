@@ -48,6 +48,50 @@ func TestNodeSettings_roundTrip(t *testing.T) {
 	}
 }
 
+func TestNodeSettingsPersistsEncryptedWebKeyAndRestoresIt(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	box, err := OpenSecretBox(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := box.Encrypt("synthetic-web-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenNodeSettings(filepath.Join(dir, "node_settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	cfg := ProductNodeSettingsSeed()
+	cfg.RuntimeRoot = dir
+	cfg.Web.APIKey = "synthetic-web-key"
+	cfg.Web.APIKeyCiphertext = ciphertext
+	if err := store.Save(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := store.db.QueryRowContext(ctx, `SELECT settings_json FROM node_settings WHERE id=1`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, "synthetic-web-key") {
+		t.Fatal("node settings stored web key in plaintext")
+	}
+	restored, err := store.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenSecretBox(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := reopened.Decrypt(restored.Web.APIKeyCiphertext)
+	if err != nil || key != "synthetic-web-key" {
+		t.Fatalf("decrypted key = %q, err=%v", key, err)
+	}
+}
+
 func TestBootstrapNodeSettings_seedsProductDefaults(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
