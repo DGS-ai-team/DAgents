@@ -178,14 +178,13 @@ async function selectRound(round) {
   const generation = ++requestGeneration.value
   loadingRounds.value = false
   loadingItems.value = false
-  selected.value = round ? { ...round, type: 'round' } : null
+  selected.value = { ...round, type: 'round' }
   revisions.value = []
   selectedRevisionID.value = ''
   entries.value = []
   entriesRevision.value += 1
   hasMoreItems.value = false
   nextAfterItemId.value = ''
-  if (round === null || typeof round !== 'object') return
   loadingItems.value = true
   error.value = ''
   try {
