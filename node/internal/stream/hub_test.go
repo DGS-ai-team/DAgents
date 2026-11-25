@@ -240,14 +240,54 @@ func TestCaptureAgentSyncSnapshotClearsDraftAtTerminalAndContextBoundary(t *test
 			h := NewHub(16, nil)
 			h.PublishEphemeral("agt-draft", "conversation_delta", map[string]any{
 				"display_type": "delta", "item_id": "step-1/assistant/content",
-				"attempt_id": "turn-1/step-1/attempt/1", "part": "content",
+				"attempt_id": "turn-1/step-1/attempt/1", "turn_id": "turn-1", "part": "content",
 				"chunk_seq": uint64(1), "content": "answer", "step_id": "step-1",
 			})
-			h.Publish("agt-draft", test.type_, test.data)
+			data := test.data
+			if test.type_ == "turn_state" || test.type_ == "turn_finished" {
+				data = make(map[string]any, len(test.data)+1)
+				for key, value := range test.data {
+					data[key] = value
+				}
+				data["turn_id"] = "turn-1"
+			}
+			h.Publish("agt-draft", test.type_, data)
 			if got := h.CaptureAgentSyncSnapshot("agt-draft"); len(got.AssistantDrafts) != 0 {
 				t.Fatalf("draft survived %s boundary: %+v", test.name, got.AssistantDrafts)
 			}
 		})
+	}
+}
+
+func TestTerminalChildTurnPreservesParentAssistantDraft(t *testing.T) {
+	h := NewHub(16, nil)
+	for _, item := range []struct {
+		turnID, stepID, attemptID, text string
+	}{
+		{turnID: "parent-turn", stepID: "parent-step", attemptID: "parent-attempt", text: "parent prefix"},
+		{turnID: "child-turn", stepID: "child-step", attemptID: "child-attempt", text: "child prefix"},
+	} {
+		h.Publish("agt-shared", "turn_state", map[string]any{
+			"command": "model_request_started", "turn_id": item.turnID, "step_id": item.stepID, "attempt_id": item.attemptID,
+		})
+		h.PublishEphemeral("agt-shared", "conversation_delta", map[string]any{
+			"display_type": "delta", "item_id": item.stepID + "/assistant/content", "attempt_id": item.attemptID,
+			"turn_id": item.turnID, "step_id": item.stepID, "part": "content", "chunk_seq": uint64(1), "content": item.text,
+		})
+	}
+	h.Publish("agt-shared", "turn_state", map[string]any{"terminal": true, "turn_id": "child-turn"})
+	h.PublishEphemeral("agt-shared", "conversation_delta", map[string]any{
+		"display_type": "delta", "item_id": "parent-step/assistant/content", "attempt_id": "parent-attempt",
+		"turn_id": "parent-turn", "step_id": "parent-step", "part": "content", "chunk_seq": uint64(2), "content": " continued",
+	})
+
+	snapshot := h.CaptureAgentSyncSnapshot("agt-shared")
+	if len(snapshot.AssistantDrafts) != 1 {
+		t.Fatalf("child completion cleared unrelated parent drafts: %+v", snapshot.AssistantDrafts)
+	}
+	draft := snapshot.AssistantDrafts[0]
+	if draft.TurnID != "parent-turn" || draft.ItemID != "parent-step/assistant/content" || draft.Text != "parent prefix continued" || draft.ThroughChunkSeq != 2 {
+		t.Fatalf("parent draft after child completion = %+v", draft)
 	}
 }
 

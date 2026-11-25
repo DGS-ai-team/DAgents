@@ -1657,6 +1657,7 @@ func (m *Manager) EditQueuedMessage(
 		ContentParts:         contentParts,
 		FileReferences:       fileReferences,
 		UserName:             userMessageName,
+		SessionEpoch:         previous.Env.SessionEpoch,
 		ConversationResubmit: previous.Env.ConversationResubmit,
 	}
 	return rt.editQueuedInput(inputSeq, expectedRevision, env)

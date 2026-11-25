@@ -60,7 +60,7 @@ func BoundTranscriptDetails(entries []TranscriptEntry) []TranscriptEntry {
 		}
 		sourceID := transcriptString(entry["detail_item_id"])
 		callID := transcriptCallID(entry)
-		if sourceID == "" || callID == "" {
+		if sourceID == "" || callID == "" || !hasTranscriptDetailEndpoint(entry) {
 			continue
 		}
 		sourceKey := fmt.Sprintf("%d\x00%s", groupID, sourceID)
@@ -130,7 +130,7 @@ func BoundTranscriptDetails(entries []TranscriptEntry) []TranscriptEntry {
 			}
 			if hidden {
 				include = false
-			} else if transcriptString(entry["detail_item_id"]) != "" {
+			} else if hasTranscriptDetailEndpoint(entry) {
 				compactToolCallEntry(entry)
 			}
 		} else if entry["kind"] == "tool_result" {
@@ -138,16 +138,16 @@ func BoundTranscriptDetails(entries []TranscriptEntry) []TranscriptEntry {
 				_, hidden := hiddenCalls[itemID]
 				if hidden {
 					include = false
-				} else if transcriptString(entry["detail_item_id"]) != "" {
+				} else if hasTranscriptDetailEndpoint(entry) {
 					compactToolResultEntry(entry)
 				}
 			} else if _, hidden := hiddenCallIDs[transcriptCallID(entry)]; hidden {
 				include = false
-			} else if transcriptString(entry["detail_item_id"]) != "" {
+			} else if hasTranscriptDetailEndpoint(entry) {
 				compactToolResultEntry(entry)
 			}
 		} else if entry["kind"] == "assistant" || entry["kind"] == "user" {
-			if transcriptString(entry["detail_item_id"]) != "" {
+			if hasTranscriptDetailEndpoint(entry) {
 				compactTranscriptBody(entry)
 			}
 		}
@@ -244,7 +244,7 @@ func enforceInitialTranscriptByteBudget(entries []TranscriptEntry) []TranscriptE
 	for marshalSize() > MaxInitialTranscriptBytes {
 		largestIndex, largestSize := -1, 0
 		for index, entry := range entries {
-			if entry == nil || transcriptString(entry["detail_item_id"]) == "" {
+			if entry == nil || !hasTranscriptDetailEndpoint(entry) {
 				continue
 			}
 			text, ok := entry["text"].(string)
@@ -314,7 +314,7 @@ func compactLargestOptionalTranscriptField(entries []TranscriptEntry) bool {
 	}
 	largestEntry, largestKey, largestSize := -1, "", 0
 	for entryIndex, entry := range entries {
-		if entry == nil || transcriptString(entry["detail_item_id"]) == "" {
+		if entry == nil || !hasTranscriptDetailEndpoint(entry) {
 			continue
 		}
 		for key, value := range entry {
@@ -337,6 +337,12 @@ func compactLargestOptionalTranscriptField(entries []TranscriptEntry) bool {
 		entry["images_omitted"] = true
 	}
 	return true
+}
+
+func hasTranscriptDetailEndpoint(entry TranscriptEntry) bool {
+	return transcriptString(entry["detail_item_id"]) != "" &&
+		transcriptString(entry["round_id"]) != "" &&
+		transcriptString(entry["round_revision_id"]) != ""
 }
 
 func utf8BytePrefix(value string, maxBytes int) string {

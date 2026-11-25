@@ -70,6 +70,23 @@ func TestBoundTranscriptDetailsCapsLargeMessagesWithExplicitReference(t *testing
 	}
 }
 
+func TestBoundTranscriptDetailsPreservesLegacyBodyWithoutRoundDetailEndpoint(t *testing.T) {
+	text := strings.Repeat("legacy body ", 2_000)
+	entry := TranscriptEntry{
+		"kind": "user", "id": "legacy-user", "item_id": "legacy-user", "detail_item_id": "legacy-user-record",
+		"text": text,
+	}
+
+	bounded := BoundTranscriptDetails([]TranscriptEntry{entry})
+
+	if len(bounded) != 1 || bounded[0]["text"] != text {
+		t.Fatalf("legacy body was truncated without a usable detail endpoint: entry=%#v", bounded)
+	}
+	if bounded[0]["details_available"] == true {
+		t.Fatalf("legacy entry advertised an unavailable detail endpoint: %#v", bounded[0])
+	}
+}
+
 func TestBoundTranscriptDetailsCapsWholeVisualGroupAcrossSourceRecords(t *testing.T) {
 	entries := make([]TranscriptEntry, 0, 120)
 	for sourceIndex, start := range []int{1, 31} {
@@ -116,11 +133,13 @@ func TestBoundTranscriptDetailsScopesHiddenCallsToSourceAssistant(t *testing.T) 
 		callItemIDs[index] = itemID
 		entries = append(entries, TranscriptEntry{
 			"kind": "tool_call", "id": itemID, "item_id": itemID, "detail_item_id": sourceID,
+			"round_id": "round-1", "round_revision_id": "revision-1",
 			"data": map[string]any{"tool_call_id": callID, "tool_name": "read_file", "arguments": map[string]any{"path": "/tmp/probe"}},
 		})
 		entries = append(entries, TranscriptEntry{
 			"kind": "tool_result", "id": "result-" + fmt.Sprintf("%02d", index), "item_id": "result-" + fmt.Sprintf("%02d", index),
 			"detail_item_id": "result-record-" + fmt.Sprintf("%02d", index),
+			"round_id": "round-1", "round_revision_id": "revision-1",
 			"data":           map[string]any{"tool_call_id": callID, "tool_call_item_id": itemID, "tool_name": "read_file", "content": "done"},
 		})
 	}

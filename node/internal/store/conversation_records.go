@@ -1023,8 +1023,29 @@ func importLegacyConversationTx(ctx context.Context, tx *sql.Tx, row struct {
 		return err
 	}
 	seen := make(map[string]bool, len(messages))
+	pendingToolCallSources := make(map[string][]string)
 	for ordinal := range messages {
 		message := &messages[ordinal]
+		if strings.EqualFold(strings.TrimSpace(message.Role), "tool") {
+			callID := strings.TrimSpace(message.ToolCallID)
+			sourceID := strings.TrimSpace(message.ToolCallSourceID)
+			pending := pendingToolCallSources[callID]
+			if sourceID == "" && len(pending) > 0 {
+				sourceID = pending[0]
+				pending = pending[1:]
+			} else if sourceID != "" {
+				for index, candidate := range pending {
+					if candidate == sourceID {
+						pending = append(pending[:index], pending[index+1:]...)
+						break
+					}
+				}
+			}
+			pendingToolCallSources[callID] = pending
+			if sourceID != "" {
+				message.ToolCallSourceID = sourceID
+			}
+		}
 		if strings.TrimSpace(message.RecordID) == "" {
 			message.RecordID = migratedMessageRecordID(*message)
 		}
@@ -1035,10 +1056,33 @@ func importLegacyConversationTx(ctx context.Context, tx *sql.Tx, row struct {
 			}
 			message.RecordID = id
 		}
+		if seen[message.RecordID] && strings.EqualFold(strings.TrimSpace(message.Role), "tool") {
+			if sourceID := strings.TrimSpace(message.ToolCallSourceID); sourceID != "" {
+				scopedID := llm.ToolResultRecordIDForExecution(message.ToolCallID, sourceID)
+				if scopedID != "" && !seen[scopedID] {
+					message.RecordID = scopedID
+				}
+			}
+			if seen[message.RecordID] {
+				id, err := llm.NewOpaqueRecordID()
+				if err != nil {
+					return fmt.Errorf("allocate duplicate legacy tool result identity: %w", err)
+				}
+				message.RecordID = id
+			}
+		}
 		if seen[message.RecordID] {
 			continue
 		}
 		seen[message.RecordID] = true
+		if strings.EqualFold(strings.TrimSpace(message.Role), "assistant") {
+			for _, call := range message.ToolCalls {
+				callID := strings.TrimSpace(call.ID)
+				if callID != "" {
+					pendingToolCallSources[callID] = append(pendingToolCallSources[callID], message.RecordID)
+				}
+			}
+		}
 		payload, err := json.Marshal(message)
 		if err != nil {
 			return err

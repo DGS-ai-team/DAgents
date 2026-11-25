@@ -80,7 +80,9 @@ func TestLegacyConversationMigrationBuildsToolCallLookupColumn(t *testing.T) {
 	}
 	messages := []llm.Message{
 		{Role: "assistant", RecordID: "source/tool-call-legacy", ToolCalls: []llm.ToolCall{{ID: "legacy-call-1", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"notes.txt"}`}}}},
-		{Role: "tool", Name: "read_file", ToolCallID: "legacy-call-1", Content: "legacy result", RecordID: llm.ToolResultRecordID("legacy-call-1")},
+		{Role: "tool", Name: "read_file", ToolCallID: "legacy-call-1", Content: "first legacy result"},
+		{Role: "assistant", RecordID: "source/tool-call-later", ToolCalls: []llm.ToolCall{{ID: "legacy-call-1", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"later.txt"}`}}}},
+		{Role: "tool", Name: "read_file", ToolCallID: "legacy-call-1", Content: "second legacy result"},
 	}
 	raw, err := json.Marshal(messages)
 	if err != nil {
@@ -99,12 +101,28 @@ func TestLegacyConversationMigrationBuildsToolCallLookupColumn(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	var got string
-	if err := st.db.QueryRow(`SELECT tool_call_id FROM conversation_records WHERE conversation_id='legacy-tools' AND item_id=?`, llm.ToolResultRecordID("legacy-call-1")).Scan(&got); err != nil {
+	records, err := st.LoadConversationRecords(context.Background(), "legacy-tools")
+	if err != nil || len(records) != 4 {
+		t.Fatalf("migrated records=%+v err=%v, want both tool executions", records, err)
+	}
+	var firstCallID, firstContent, secondCallID, secondContent, secondSource string
+	if err := st.db.QueryRow(`SELECT tool_call_id,payload_json FROM conversation_records WHERE conversation_id='legacy-tools' AND item_id=?`, llm.ToolResultRecordID("legacy-call-1")).Scan(&firstCallID, &firstContent); err != nil {
 		t.Fatal(err)
 	}
-	if got != "legacy-call-1" {
-		t.Fatalf("legacy tool result index=%q", got)
+	scopedID := llm.ToolResultRecordIDForExecution("legacy-call-1", "source/tool-call-later")
+	if err := st.db.QueryRow(`SELECT tool_call_id,payload_json FROM conversation_records WHERE conversation_id='legacy-tools' AND item_id=?`, scopedID).Scan(&secondCallID, &secondContent); err != nil {
+		t.Fatal(err)
+	}
+	var firstMessage, secondMessage llm.Message
+	if err := json.Unmarshal([]byte(firstContent), &firstMessage); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(secondContent), &secondMessage); err != nil {
+		t.Fatal(err)
+	}
+	secondSource = secondMessage.ToolCallSourceID
+	if firstCallID != "legacy-call-1" || secondCallID != "legacy-call-1" || firstMessage.Content != "first legacy result" || secondMessage.Content != "second legacy result" || secondSource != "source/tool-call-later" {
+		t.Fatalf("reused call ID migration lost or mislinked results: first=%+v second=%+v index=%q/%q", firstMessage, secondMessage, firstCallID, secondCallID)
 	}
 }
 

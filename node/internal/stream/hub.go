@@ -72,6 +72,11 @@ type assistantDraft struct {
 	chunks []string
 }
 
+type activeAssistantAttempt struct {
+	AttemptID string
+	TurnID    string
+}
+
 type subscriber struct {
 	ch          chan Event
 	agentFilter string // 空 = 接收全部（Shell 全局订阅）
@@ -83,7 +88,7 @@ type Hub struct {
 	seq                 int
 	agentSeq            map[string]int
 	drafts              map[string]map[string]assistantDraft
-	activeAttempts      map[string]map[string]string
+	activeAttempts      map[string]map[string]activeAssistantAttempt
 	retiredAttempts     map[string]map[string]struct{}
 	retiredAttemptOrder map[string][]string
 	closedTurns         map[string]map[string]struct{}
@@ -105,7 +110,7 @@ func NewHub(historyN int, logger *slog.Logger) *Hub {
 		historyN:            historyN,
 		agentSeq:            make(map[string]int),
 		drafts:              make(map[string]map[string]assistantDraft),
-		activeAttempts:      make(map[string]map[string]string),
+		activeAttempts:      make(map[string]map[string]activeAssistantAttempt),
 		retiredAttempts:     make(map[string]map[string]struct{}),
 		retiredAttemptOrder: make(map[string][]string),
 		closedTurns:         make(map[string]map[string]struct{}),
@@ -277,7 +282,7 @@ func (h *Hub) updateAssistantDraftsLocked(ev Event) {
 		}
 		stepID := strings.TrimSpace(stringValue(data["step_id"]))
 		if stepID != "" {
-			if active := h.activeAttempts[agentID][stepID]; active != "" && active != attemptID {
+			if active, ok := h.activeAttempts[agentID][stepID]; ok && active.AttemptID != attemptID {
 				return
 			}
 		}
@@ -308,9 +313,9 @@ func (h *Hub) updateAssistantDraftsLocked(ev Event) {
 			return
 		}
 		if boolValue(data["terminal"]) {
-			h.closeTurnLocked(agentID, strings.TrimSpace(stringValue(data["turn_id"])))
-			delete(h.drafts, agentID)
-			delete(h.activeAttempts, agentID)
+			turnID := strings.TrimSpace(stringValue(data["turn_id"]))
+			h.closeTurnLocked(agentID, turnID)
+			h.clearTurnDraftsLocked(agentID, turnID)
 			return
 		}
 		command := strings.TrimSpace(stringValue(data["command"]))
@@ -319,18 +324,21 @@ func (h *Hub) updateAssistantDraftsLocked(ev Event) {
 		if command == "model_request_started" {
 			if stepID != "" && attemptID != "" {
 				if h.activeAttempts[agentID] == nil {
-					h.activeAttempts[agentID] = make(map[string]string)
+					h.activeAttempts[agentID] = make(map[string]activeAssistantAttempt)
 				}
-				if previous := h.activeAttempts[agentID][stepID]; previous != "" && previous != attemptID {
+				previous := h.activeAttempts[agentID][stepID]
+				if previous.AttemptID != "" && previous.AttemptID != attemptID {
 					for _, itemID := range assistantIDsForStep(stepID) {
-						h.retireAttemptLocked(agentID, itemID, previous)
+						h.retireAttemptLocked(agentID, itemID, previous.AttemptID)
 					}
 				}
-				h.activeAttempts[agentID][stepID] = attemptID
+				h.activeAttempts[agentID][stepID] = activeAssistantAttempt{
+					AttemptID: attemptID, TurnID: strings.TrimSpace(stringValue(data["turn_id"])),
+				}
 			}
 		}
 		if command == "model_request_started" || command == "assistant_received" {
-			activeAttempt := h.activeAttempts[agentID][stepID]
+			activeAttempt := h.activeAttempts[agentID][stepID].AttemptID
 			if command == "assistant_received" && stepID != "" {
 				for _, itemID := range assistantIDsForStep(stepID) {
 					h.retireAttemptLocked(agentID, itemID, activeAttempt)
@@ -347,24 +355,48 @@ func (h *Hub) updateAssistantDraftsLocked(ev Event) {
 			}
 		}
 	case "turn_finished":
-		h.closeTurnLocked(agentID, strings.TrimSpace(stringValue(ev.Data["turn_id"])))
-		delete(h.drafts, agentID)
-		delete(h.activeAttempts, agentID)
+		turnID := strings.TrimSpace(stringValue(ev.Data["turn_id"]))
+		h.closeTurnLocked(agentID, turnID)
+		h.clearTurnDraftsLocked(agentID, turnID)
 	case "conversation_patch":
 		data := ev.Data
 		if data == nil {
 			return
 		}
 		if turnState, ok := data["turn_state"].(map[string]any); ok && boolValue(turnState["terminal"]) {
-			h.closeTurnLocked(agentID, strings.TrimSpace(stringValue(turnState["turn_id"])))
-			delete(h.drafts, agentID)
-			delete(h.activeAttempts, agentID)
+			turnID := strings.TrimSpace(stringValue(turnState["turn_id"]))
+			h.closeTurnLocked(agentID, turnID)
+			h.clearTurnDraftsLocked(agentID, turnID)
 		}
 	case "runtime/notice":
 		if strings.TrimSpace(stringValue(ev.Data["message_kind"])) == "context_boundary" {
 			delete(h.drafts, agentID)
 			delete(h.activeAttempts, agentID)
 		}
+	}
+}
+
+func (h *Hub) clearTurnDraftsLocked(agentID, turnID string) {
+	if turnID == "" {
+		delete(h.drafts, agentID)
+		delete(h.activeAttempts, agentID)
+		return
+	}
+	for key, draft := range h.drafts[agentID] {
+		if draft.TurnID == turnID {
+			delete(h.drafts[agentID], key)
+		}
+	}
+	if len(h.drafts[agentID]) == 0 {
+		delete(h.drafts, agentID)
+	}
+	for stepID, attempt := range h.activeAttempts[agentID] {
+		if attempt.TurnID == turnID {
+			delete(h.activeAttempts[agentID], stepID)
+		}
+	}
+	if len(h.activeAttempts[agentID]) == 0 {
+		delete(h.activeAttempts, agentID)
 	}
 }
 

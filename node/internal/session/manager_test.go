@@ -115,6 +115,47 @@ func TestEnqueueMessageTurn(t *testing.T) {
 	}
 }
 
+func TestEditQueuedMessagePreservesEpochAcrossClaimAndClear(t *testing.T) {
+	const sessionID = "edit-epoch"
+	hub := stream.NewHub(8, logx.Discard())
+	rt := &runtime{
+		session:      Session{ID: sessionID, AgentID: "agent-1"},
+		agentID:      "agent-1",
+		inputBox:     NewInputBox(),
+		publisher:    hub,
+		sessionEpoch: 1,
+	}
+	seq, err := rt.inputBox.Append(InputKindUser, queue.Envelope{
+		RequestType: queue.RequestTypeMessage, Content: "original", SessionEpoch: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := &Manager{
+		turn:     TurnOptions{MultimodalEnabled: true},
+		sessions: map[string]*runtime{sessionID: rt},
+	}
+
+	edited, err := mgr.EditQueuedMessage(sessionID, seq, 1, "edited", nil, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edited.Env.SessionEpoch != 1 {
+		t.Fatalf("edited queue epoch=%d, want original admission epoch 1", edited.Env.SessionEpoch)
+	}
+	claimed, ok := rt.inputBox.Pop()
+	if !ok || claimed.Env.Content != "edited" {
+		t.Fatalf("claimed input=%+v ok=%v", claimed, ok)
+	}
+	rt.mu.Lock()
+	rt.sessionEpoch = 2
+	rt.mu.Unlock()
+	rt.inputBox.DropStale(2)
+	if rt.sessionEpochCurrent(claimed.Env.SessionEpoch) {
+		t.Fatalf("claimed edited input from epoch %d remained dispatchable after clear advanced to epoch 2", claimed.Env.SessionEpoch)
+	}
+}
+
 func TestClearContextWhenRuntimeIsColdAdvancesInputConversationEpoch(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "cold-clear.db"))
 	if err != nil {
