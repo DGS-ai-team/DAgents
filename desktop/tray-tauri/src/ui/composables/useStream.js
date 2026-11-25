@@ -19,6 +19,10 @@ function entryBlockId(entry) {
   return String(entry?.blockId || entry?.data?.tool_call_id || entry?.data?.id || "").trim();
 }
 
+function entryItemId(entry) {
+  return String(entry?.item_id || entry?.id || "").trim();
+}
+
 function isSkippableBetweenTools(entry) {
   if (!entry) return true;
   if (entry.kind === "system") return true;
@@ -39,7 +43,8 @@ function buildToolResultMatches(entries) {
   const flushSegment = () => {
     for (const call of calls) {
       const blockId = entryBlockId(call.entry);
-      const resultIdx = blockId ? results.get(blockId) : undefined;
+      const itemId = entryItemId(call.entry);
+      const resultIdx = (itemId ? results.get(itemId) : undefined) ?? (blockId ? results.get(blockId) : undefined);
       if (resultIdx !== undefined && resultIdx > call.index) {
         matches.set(call.index, resultIdx);
       }
@@ -59,7 +64,9 @@ function buildToolResultMatches(entries) {
       calls.push({ entry, index });
     } else if (entry.kind === "tool_result") {
       const blockId = entryBlockId(entry);
-      if (blockId && !results.has(blockId)) results.set(blockId, index);
+      const itemId = String(entry?.data?.tool_call_item_id || "").trim();
+      const resultKey = itemId || blockId;
+      if (resultKey && !results.has(resultKey)) results.set(resultKey, index);
     }
   }
   flushSegment();
@@ -151,10 +158,11 @@ export function buildStream(entries, hitlQueue = [], authority = null) {
     if (entry.kind === "tool_call") {
       const blockId = entryBlockId(entry);
       const resultIdx = toolResultMatches.get(i) ?? -1;
+      const itemId = entryItemId(entry) || blockId;
       if (resultIdx >= 0) {
         mergedResultIndices.add(resultIdx);
         items.push({
-          key: `tool-step-${blockId || entry.id}`,
+          key: `tool-step-${itemId}`,
           kind: "tool_step",
           callEntry: entry,
           resultEntry: entries[resultIdx],
@@ -162,7 +170,7 @@ export function buildStream(entries, hitlQueue = [], authority = null) {
         continue;
       }
       items.push({
-        key: `tool-step-${blockId || entry.id}`,
+        key: `tool-step-${itemId}`,
         kind: "tool_step",
         callEntry: entry,
         resultEntry: null,
@@ -172,7 +180,7 @@ export function buildStream(entries, hitlQueue = [], authority = null) {
 
     if (entry.kind === "tool_result") {
       items.push({
-        key: `tool-result-${entryBlockId(entry) || entry.id}`,
+        key: `tool-result-${entryItemId(entry) || entryBlockId(entry)}`,
         kind: "tool_step",
         callEntry: null,
         resultEntry: entry,

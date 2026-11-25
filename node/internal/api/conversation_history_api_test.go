@@ -101,6 +101,36 @@ func TestConversationHistoryProjectionRestoresUserAndToolMedia(t *testing.T) {
 	}
 }
 
+func TestConversationHistoryProjectionScopesReusedToolCallIDs(t *testing.T) {
+	call := llm.ToolCall{ID: "provider-reused", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"same.txt"}`}}
+	entries := conversationHistoryEntries([]store.ConversationRoundItem{
+		{ItemID: "assistant-record-1", ItemVersion: 3, Ordinal: 4, Role: "assistant", Payload: llm.Message{Role: "assistant", RecordID: "assistant-record-1", ToolCalls: []llm.ToolCall{call}}},
+		{ItemID: "assistant-record-2", ItemVersion: 7, Ordinal: 9, Role: "assistant", Payload: llm.Message{Role: "assistant", RecordID: "assistant-record-2", ToolCalls: []llm.ToolCall{call}}},
+	}, "round-1", "revision-1", "agent-history")
+	if len(entries) != 2 {
+		t.Fatalf("history tool-call entries = %#v", entries)
+	}
+	want := map[string]struct {
+		detailID string
+		version  int
+		ordinal  int64
+	}{
+		session.ToolCallTranscriptItemID("assistant-record-1", call.ID): {detailID: "assistant-record-1", version: 3, ordinal: 4},
+		session.ToolCallTranscriptItemID("assistant-record-2", call.ID): {detailID: "assistant-record-2", version: 7, ordinal: 9},
+	}
+	for _, entry := range entries {
+		itemID, _ := entry["item_id"].(string)
+		expect, ok := want[itemID]
+		if !ok || entry["detail_item_id"] != expect.detailID || entry["item_version"] != expect.version || entry["conversation_ordinal"] != expect.ordinal {
+			t.Fatalf("history call projection=%#v expected=%#v", entry, expect)
+		}
+		delete(want, itemID)
+	}
+	if len(want) != 0 {
+		t.Fatalf("history omitted reused calls: %#v", want)
+	}
+}
+
 func (*conversationHistoryToolLLM) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
 	return "", nil
 }

@@ -52,6 +52,33 @@ describe("buildStream", () => {
     expect(items.filter((item) => item.kind === "tool_step").every((item) => item.resultEntry)).toBe(true);
   });
 
+  it("pairs repeated provider call IDs by the assistant record identity", () => {
+    const items = buildStream([
+      entry("call-record-1", "tool_call", {
+        item_id: "tool-call-record-1",
+        blockId: "reused-call",
+        data: { tool_call_id: "reused-call", tool_name: "read_file" },
+      }),
+      entry("result-record-1", "tool_result", {
+        blockId: "reused-call",
+        data: { tool_call_id: "reused-call", tool_call_item_id: "tool-call-record-1", content: "first result" },
+      }),
+      entry("call-record-2", "tool_call", {
+        item_id: "tool-call-record-2",
+        blockId: "reused-call",
+        data: { tool_call_id: "reused-call", tool_name: "read_file" },
+      }),
+      entry("result-record-2", "tool_result", {
+        blockId: "reused-call",
+        data: { tool_call_id: "reused-call", tool_call_item_id: "tool-call-record-2", content: "second result" },
+      }),
+    ]).filter((item) => item.kind === "tool_step");
+
+    expect(items).toHaveLength(2);
+    expect(items.map(item => item.key)).toEqual(["tool-step-tool-call-record-1", "tool-step-tool-call-record-2"]);
+    expect(items.map(item => item.resultEntry.data.content)).toEqual(["first result", "second result"]);
+  });
+
   it("keeps assistant and parallel tool rows in transcript order when results finish out of order", () => {
     const items = buildStream([
       entry("assistant-before", "assistant", { text: "开始检查。" }),

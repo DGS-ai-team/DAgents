@@ -49,7 +49,7 @@ func TestCommittedTranscriptPatchPreservesRecordOrderIdentityAndBoundsBodies(t *
 	if text, _ := entries[0]["text"].(string); len(text) > transcriptBodyPreviewBytes+8 || entries[0]["details_available"] != true {
 		t.Fatalf("assistant body was not bounded: text bytes=%d entry=%#v", len(text), entries[0])
 	}
-	if entries[1]["kind"] != "tool_call" || entries[1]["item_id"] != "tool-call/call-a" || entries[1]["detail_item_id"] != assistant.RecordID {
+	if entries[1]["kind"] != "tool_call" || entries[1]["item_id"] != ToolCallTranscriptItemID(assistant.RecordID, "call-a") || entries[1]["detail_item_id"] != assistant.RecordID {
 		t.Fatalf("tool call projection = %#v", entries[1])
 	}
 	if len(removed) != 2 || removed[0] != "record-old" || removed[1] != "old-content" {

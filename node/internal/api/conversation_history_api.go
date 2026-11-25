@@ -360,7 +360,11 @@ func conversationHistoryEntries(items []store.ConversationRoundItem, roundID, re
 	messages := make([]llm.Message, 0, len(items))
 	versions := make(map[string]uint64, len(items)*2)
 	for _, item := range items {
-		messages = append(messages, item.Payload)
+		message := item.Payload
+		if strings.TrimSpace(message.RecordID) == "" {
+			message.RecordID = item.ItemID
+		}
+		messages = append(messages, message)
 		versions[item.ItemID] = item.ItemVersion
 		if identity := item.Payload.DisplayIdentity; identity != nil {
 			if id := strings.TrimSpace(identity.ContentItemID); id != "" {
@@ -373,7 +377,7 @@ func conversationHistoryEntries(items []store.ConversationRoundItem, roundID, re
 		if strings.EqualFold(strings.TrimSpace(item.Payload.Role), "assistant") {
 			for _, call := range item.Payload.ToolCalls {
 				if id := strings.TrimSpace(call.ID); id != "" {
-					versions["tool-call/"+id] = item.ItemVersion
+					versions[session.ToolCallTranscriptItemID(message.RecordID, id)] = item.ItemVersion
 				}
 			}
 		}
@@ -395,7 +399,7 @@ func conversationHistoryEntries(items []store.ConversationRoundItem, roundID, re
 			orders[identity.ReasoningItemID] = item
 		}
 		for _, call := range item.Payload.ToolCalls {
-			orders["tool-call/"+call.ID] = item
+			orders[session.ToolCallTranscriptItemID(item.ItemID, call.ID)] = item
 		}
 	}
 	for _, entry := range entries {

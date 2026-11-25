@@ -59,11 +59,64 @@ func messagesToTranscriptEntries(messages []llm.Message, reg *media.Registry) []
 		return []TranscriptEntry{}
 	}
 	callIndex := buildToolCallIndex(messages)
+	resultCallIndex := buildToolResultProjectionIndex(messages)
 	out := make([]TranscriptEntry, 0, len(messages))
-	for _, msg := range messages {
-		out = append(out, messageToTranscriptEntries(msg, callIndex, reg)...)
+	for index, msg := range messages {
+		out = append(out, messageToTranscriptEntries(msg, callIndex, resultCallIndex[index], reg)...)
 	}
 	return out
+}
+
+type transcriptToolCallProjection struct {
+	call   llm.ToolCall
+	itemID string
+}
+
+func buildToolResultProjectionIndex(messages []llm.Message) map[int]transcriptToolCallProjection {
+	pending := make(map[string][]transcriptToolCallProjection)
+	results := make(map[int]transcriptToolCallProjection)
+	for index, msg := range messages {
+		switch strings.ToLower(strings.TrimSpace(msg.Role)) {
+		case "assistant":
+			for _, call := range msg.ToolCalls {
+				id := strings.TrimSpace(call.ID)
+				if id == "" {
+					continue
+				}
+				pending[id] = append(pending[id], transcriptToolCallProjection{
+					call: call, itemID: ToolCallTranscriptItemID(msg.RecordID, id),
+				})
+			}
+		case "tool":
+			id := strings.TrimSpace(msg.ToolCallID)
+			queued := pending[id]
+			if id == "" || len(queued) == 0 {
+				continue
+			}
+			results[index] = queued[0]
+			if len(queued) == 1 {
+				delete(pending, id)
+			} else {
+				pending[id] = queued[1:]
+			}
+		}
+	}
+	return results
+}
+
+// ToolCallTranscriptItemID scopes a UI row to both the source assistant record
+// and provider call ID. Providers may legally reuse call IDs in later steps.
+func ToolCallTranscriptItemID(sourceAssistantRecordID, toolCallID string) string {
+	callID := strings.TrimSpace(toolCallID)
+	if callID == "" {
+		return ""
+	}
+	sourceID := strings.TrimSpace(sourceAssistantRecordID)
+	if sourceID == "" {
+		return "tool-call/" + callID
+	}
+	digest := sha256.Sum256([]byte(sourceID + "\x00" + callID))
+	return "tool-call/" + hex.EncodeToString(digest[:])
 }
 
 func buildToolCallIndex(messages []llm.Message) map[string]llm.ToolCall {
@@ -82,7 +135,7 @@ func buildToolCallIndex(messages []llm.Message) map[string]llm.ToolCall {
 	return index
 }
 
-func messageToTranscriptEntries(msg llm.Message, callIndex map[string]llm.ToolCall, reg *media.Registry) []TranscriptEntry {
+func messageToTranscriptEntries(msg llm.Message, callIndex map[string]llm.ToolCall, resultCall transcriptToolCallProjection, reg *media.Registry) []TranscriptEntry {
 	switch strings.TrimSpace(msg.Role) {
 	case "user":
 		if isConversationBoundaryNotice(msg) {
@@ -99,7 +152,7 @@ func messageToTranscriptEntries(msg llm.Message, callIndex map[string]llm.ToolCa
 	case "assistant":
 		return assistantEntries(msg)
 	case "tool":
-		if entry := toolResultEntry(msg, callIndex); entry != nil {
+		if entry := toolResultEntry(msg, callIndex, resultCall); entry != nil {
 			return []TranscriptEntry{entry}
 		}
 	}
@@ -215,9 +268,9 @@ func assistantEntries(msg llm.Message) []TranscriptEntry {
 			continue
 		}
 		entry := toolCallEntryFromCall(tc, nil)
-		if strings.TrimSpace(tc.ID) != "" {
-			entry["item_id"] = "tool-call/" + tc.ID
-			entry["id"] = "tool-call/" + tc.ID
+		if id := ToolCallTranscriptItemID(msg.RecordID, tc.ID); id != "" {
+			entry["item_id"] = id
+			entry["id"] = id
 			entry["item_version"] = 1
 		}
 		out = append(out, entry)
@@ -325,14 +378,18 @@ func fmtToolName(data map[string]any) string {
 	return ""
 }
 
-func toolResultEntry(msg llm.Message, callIndex map[string]llm.ToolCall) TranscriptEntry {
+func toolResultEntry(msg llm.Message, callIndex map[string]llm.ToolCall, projection transcriptToolCallProjection) TranscriptEntry {
 	callID := strings.TrimSpace(msg.ToolCallID)
 	if callID == "" {
 		return nil
 	}
 	toolName := strings.TrimSpace(msg.Name)
 	var args map[string]any
-	if tc, ok := callIndex[callID]; ok {
+	tc, hasProjection := projection.call, projection.itemID != ""
+	if !hasProjection {
+		tc, hasProjection = callIndex[callID]
+	}
+	if hasProjection {
 		if toolName == "" {
 			toolName = strings.TrimSpace(tc.Function.Name)
 		}
@@ -344,6 +401,11 @@ func toolResultEntry(msg llm.Message, callIndex map[string]llm.ToolCall) Transcr
 		"tool_call_id": callID,
 		"id":           callID,
 		"content":      msg.Content,
+	}
+	if projection.itemID != "" {
+		data["tool_call_item_id"] = projection.itemID
+	} else {
+		data["tool_call_item_id"] = ToolCallTranscriptItemID("", callID)
 	}
 	if metadata := msg.ToolResultMetadata; metadata != nil {
 		data["status"] = metadata.Status

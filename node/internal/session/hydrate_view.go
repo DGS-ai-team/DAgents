@@ -467,7 +467,7 @@ func decorateTranscriptWithConversationOrder(entries []TranscriptEntry, records 
 		}
 		for _, call := range record.Payload.ToolCalls {
 			if call.ID != "" {
-				byItemID["tool-call/"+call.ID] = order
+				byItemID[ToolCallTranscriptItemID(record.Payload.RecordID, call.ID)] = order
 			}
 		}
 	}
@@ -514,7 +514,7 @@ func decorateTranscriptWithConversationOrder(entries []TranscriptEntry, records 
 			}
 			for _, call := range message.ToolCalls {
 				if id := strings.TrimSpace(call.ID); id != "" {
-					byItemID["tool-call/"+id] = order
+					byItemID[ToolCallTranscriptItemID(message.RecordID, id)] = order
 				}
 			}
 		}
@@ -642,7 +642,7 @@ func transcriptItemVersions(records []store.ConversationRecord) map[string]uint6
 		if strings.EqualFold(strings.TrimSpace(message.Role), "assistant") {
 			for _, call := range message.ToolCalls {
 				if id := strings.TrimSpace(call.ID); id != "" {
-					versions["tool-call/"+id] = record.Revision
+					versions[ToolCallTranscriptItemID(message.RecordID, id)] = record.Revision
 				}
 			}
 		}
@@ -677,7 +677,7 @@ func transcriptItemIDsForMessage(message llm.Message) []string {
 		}
 		for _, call := range message.ToolCalls {
 			if id := strings.TrimSpace(call.ID); id != "" {
-				ids = append(ids, "tool-call/"+id)
+				ids = append(ids, ToolCallTranscriptItemID(message.RecordID, id))
 			}
 		}
 	}
@@ -753,15 +753,24 @@ func mergeActiveToolCallsAtAnchor(transcript []TranscriptEntry, calls []turn.Too
 		if kind != "tool_call" {
 			continue
 		}
-		if id, ok := entry["blockId"].(string); ok && strings.TrimSpace(id) != "" {
-			seen[strings.TrimSpace(id)] = true
-		}
+		itemID, _ := entry["item_id"].(string)
 		data, _ := entry["data"].(map[string]any)
-		if id, ok := data["tool_call_id"].(string); ok && strings.TrimSpace(id) != "" {
-			seen[strings.TrimSpace(id)] = true
+		callID, _ := data["tool_call_id"].(string)
+		if strings.TrimSpace(callID) == "" {
+			callID, _ = entry["blockId"].(string)
+		}
+		if strings.TrimSpace(itemID) == "" {
+			sourceID, _ := entry["detail_item_id"].(string)
+			if strings.TrimSpace(sourceID) == "" {
+				sourceID, _ = entry["parent_item_id"].(string)
+			}
+			itemID = ToolCallTranscriptItemID(sourceID, callID)
+		}
+		if strings.TrimSpace(itemID) != "" {
+			seen[strings.TrimSpace(itemID)] = true
 		}
 	}
-	callIndexes := make(map[string]int, len(calls))
+	callIndexes := make(map[string]int, len(calls)*2)
 	for i, call := range calls {
 		id := strings.TrimSpace(call.ID)
 		if id == "" {
@@ -771,11 +780,14 @@ func mergeActiveToolCallsAtAnchor(transcript []TranscriptEntry, calls []turn.Too
 		if index < 0 {
 			index = i
 		}
-		callIndexes[id] = index
+		callIndexes[ToolCallTranscriptItemID(activeToolCallAssistantRecordID(call), id)] = index
+		if _, exists := callIndexes[id]; !exists {
+			callIndexes[id] = index
+		}
 	}
 	parentID := ""
 	for _, call := range calls {
-		if parentID = strings.TrimSpace(call.AssistantMessageID); parentID != "" {
+		if parentID = activeToolCallAssistantRecordID(call); parentID != "" {
 			break
 		}
 	}
@@ -790,7 +802,8 @@ func mergeActiveToolCallsAtAnchor(transcript []TranscriptEntry, calls []turn.Too
 	inserted := false
 	for _, call := range orderedCalls {
 		id := strings.TrimSpace(call.ID)
-		if id == "" || seen[id] || tools.IsAskUserInformation(call.ToolName) {
+		itemID := ToolCallTranscriptItemID(activeToolCallAssistantRecordID(call), id)
+		if id == "" || seen[itemID] || tools.IsAskUserInformation(call.ToolName) {
 			continue
 		}
 		entry := toolCallEntryFromCall(llm.ToolCall{
@@ -798,7 +811,6 @@ func mergeActiveToolCallsAtAnchor(transcript []TranscriptEntry, calls []turn.Too
 			Type:     "function",
 			Function: llm.ToolCallFunction{Name: call.ToolName, Arguments: string(call.Arguments)},
 		}, nil)
-		itemID := "tool-call/" + id
 		entry["item_id"] = itemID
 		entry["id"] = itemID
 		if parentID != "" {
@@ -814,13 +826,23 @@ func mergeActiveToolCallsAtAnchor(transcript []TranscriptEntry, calls []turn.Too
 		transcript = append(transcript, nil)
 		copy(transcript[insertAt+1:], transcript[insertAt:])
 		transcript[insertAt] = entry
-		seen[id] = true
+		seen[itemID] = true
 		inserted = true
 	}
 	if inserted {
 		reindexTranscriptEntries(transcript)
 	}
 	return transcript
+}
+
+func activeToolCallAssistantRecordID(call turn.ToolCallProjection) string {
+	if assistantID := strings.TrimSpace(call.AssistantMessageID); assistantID != "" {
+		return assistantID
+	}
+	if stepID := strings.TrimSpace(call.StepID); stepID != "" {
+		return strings.TrimSuffix(stepID, "/assistant") + "/assistant"
+	}
+	return ""
 }
 
 func activeToolCallInsertionIndex(entries []TranscriptEntry, callIndexes map[string]int, parentID, parentPrefix string, batchIndex int) int {
@@ -844,8 +866,19 @@ func activeToolCallInsertionIndex(entries []TranscriptEntry, callIndexes map[str
 			continue
 		}
 		data, _ := entry["data"].(map[string]any)
+		itemID, _ := entry["item_id"].(string)
 		id, _ := data["tool_call_id"].(string)
-		existingIndex, ok := callIndexes[strings.TrimSpace(id)]
+		if strings.TrimSpace(itemID) == "" {
+			sourceID, _ := entry["detail_item_id"].(string)
+			if strings.TrimSpace(sourceID) == "" {
+				sourceID, _ = entry["parent_item_id"].(string)
+			}
+			itemID = ToolCallTranscriptItemID(sourceID, id)
+		}
+		existingIndex, ok := callIndexes[strings.TrimSpace(itemID)]
+		if !ok {
+			existingIndex, ok = callIndexes[strings.TrimSpace(id)]
+		}
 		if !ok {
 			continue
 		}
@@ -874,7 +907,12 @@ func activeToolCallInsertionIndex(entries []TranscriptEntry, callIndexes map[str
 		}
 		data, _ := entry["data"].(map[string]any)
 		id, _ := data["tool_call_id"].(string)
-		if _, ok := callIndexes[strings.TrimSpace(id)]; ok {
+		itemID, _ := data["tool_call_item_id"].(string)
+		_, ok := callIndexes[strings.TrimSpace(itemID)]
+		if !ok {
+			_, ok = callIndexes[strings.TrimSpace(id)]
+		}
+		if ok {
 			if i < insertAt {
 				insertAt = i
 			}

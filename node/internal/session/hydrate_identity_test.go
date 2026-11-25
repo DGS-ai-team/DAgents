@@ -195,11 +195,11 @@ func TestHydrateProjectsPersistedItemRowRevisionsForVisibleKinds(t *testing.T) {
 		kind    string
 		version int
 	}{
-		"session-version/input/1":              {kind: "user", version: 1},
-		"step-version/assistant/reasoning":     {kind: "reasoning", version: 2},
-		"step-version/assistant/content":       {kind: "assistant", version: 2},
-		"tool-call/call-version":               {kind: "tool_call", version: 2},
-		llm.ToolResultRecordID("call-version"): {kind: "tool_result", version: 1},
+		"session-version/input/1":                                          {kind: "user", version: 1},
+		"step-version/assistant/reasoning":                                 {kind: "reasoning", version: 2},
+		"step-version/assistant/content":                                   {kind: "assistant", version: 2},
+		ToolCallTranscriptItemID("step-version/assistant", "call-version"): {kind: "tool_call", version: 2},
+		llm.ToolResultRecordID("call-version"):                             {kind: "tool_result", version: 1},
 	}
 	for _, entry := range view.Transcript {
 		id, _ := entry["item_id"].(string)
@@ -316,7 +316,7 @@ func TestDecorateHydrateAssignsProvisionalOrderOnlyToDirtyActiveRoundItems(t *te
 	entries := []TranscriptEntry{
 		{"item_id": identity.ReasoningItemID, "kind": "reasoning"},
 		{"item_id": identity.ContentItemID, "kind": "assistant"},
-		{"item_id": "tool-call/call-live-order", "kind": "tool_call"},
+		{"item_id": ToolCallTranscriptItemID(message.RecordID, "call-live-order"), "kind": "tool_call"},
 		{"item_id": "old-dirty/assistant/content", "kind": "assistant"},
 	}
 	dirty := map[string]store.RecordOwnership{

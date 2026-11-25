@@ -89,7 +89,8 @@ func TestHydrateProjectsActiveToolCallUntilTerminal(t *testing.T) {
 	if len(view.Transcript) != 2 || view.Transcript[0]["kind"] != "tool_call" || view.Transcript[1]["kind"] != "tool_result" {
 		t.Fatalf("committed call/result ordering or deduplication = %#v", view.Transcript)
 	}
-	if view.Transcript[0]["item_id"] != "tool-call/call-hydrate" || view.Transcript[0]["id"] != "tool-call/call-hydrate" {
+	wantCallItemID := ToolCallTranscriptItemID("step-hydrate/assistant", "call-hydrate")
+	if view.Transcript[0]["item_id"] != wantCallItemID || view.Transcript[0]["id"] != wantCallItemID {
 		t.Fatalf("persisted tool call lost active projection identity continuity: %#v", view.Transcript[0])
 	}
 	if view.Transcript[0]["item_version"] != 1 {
@@ -104,7 +105,7 @@ func assertSingleProjectedCall(t *testing.T, view *HydrateView, id, status strin
 	}
 	entry := view.Transcript[0]
 	data, _ := entry["data"].(map[string]any)
-	wantItemID := "tool-call/" + id
+	wantItemID := ToolCallTranscriptItemID("step-hydrate/assistant", id)
 	if entry["kind"] != "tool_call" || entry["blockId"] != id || data["tool_call_id"] != id || entry["item_id"] != wantItemID || entry["id"] != wantItemID {
 		t.Fatalf("projected tool call = %#v", entry)
 	}
@@ -125,7 +126,8 @@ func TestMergeActiveToolCallsUsesStableIDAndDeduplicates(t *testing.T) {
 		t.Fatalf("duplicate active projection entries=%#v, want one", entries)
 	}
 	entry := entries[0]
-	if entry["item_id"] != "tool-call/call-duplicate" || entry["id"] != "tool-call/call-duplicate" {
+	wantItemID := ToolCallTranscriptItemID("step-1/assistant", "call-duplicate")
+	if entry["item_id"] != wantItemID || entry["id"] != wantItemID {
 		t.Fatalf("active projection identity = %#v", entry)
 	}
 	if _, hasVersion := entry["item_version"]; hasVersion {
@@ -152,7 +154,8 @@ func TestMergeActiveToolCallUsesAssistantOrderAndDoesNotDisappearWhenResultLeads
 		t.Fatalf("active tool call was not placed after its assistant parent: %#v", merged)
 	}
 	call := merged[2]
-	if call["item_id"] != "tool-call/call-anchored" || call["parent_item_id"] != "step-anchored/assistant" || call["step_id"] != "step-anchored" || call["tool_batch_index"] != 0 {
+	wantItemID := ToolCallTranscriptItemID("step-anchored/assistant", "call-anchored")
+	if call["item_id"] != wantItemID || call["parent_item_id"] != "step-anchored/assistant" || call["step_id"] != "step-anchored" || call["tool_batch_index"] != 0 {
 		t.Fatalf("active call identity/anchor = %#v", call)
 	}
 	if call["conversation_ordinal"] != int64(5) || call["conversation_entry_index"] != 1 || call["round_id"] != "round-1" || call["round_revision_id"] != "revision-1" {

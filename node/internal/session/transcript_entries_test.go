@@ -54,7 +54,7 @@ func TestMessagesToTranscriptEntries_basicTurn(t *testing.T) {
 	if entries[3]["kind"] != "tool_call" || entries[3]["blockId"] != "call-1" {
 		t.Fatalf("tool_call entry = %#v", entries[3])
 	}
-	if entries[3]["item_id"] != "tool-call/call-1" {
+	if entries[3]["item_id"] != ToolCallTranscriptItemID("step-1/assistant", "call-1") {
 		t.Fatalf("tool_call item identity = %#v", entries[3]["item_id"])
 	}
 	if entries[4]["kind"] != "tool_result" || entries[4]["blockId"] != "call-1" {
@@ -62,6 +62,35 @@ func TestMessagesToTranscriptEntries_basicTurn(t *testing.T) {
 	}
 	if entries[4]["item_id"] != "tool-result-1" {
 		t.Fatalf("tool_result item identity = %#v", entries[4]["item_id"])
+	}
+}
+
+func TestMessagesToTranscriptEntriesScopesReusedToolCallIDsByAssistantRecord(t *testing.T) {
+	messages := []llm.Message{
+		{Role: "assistant", RecordID: "assistant-record-1", ToolCalls: []llm.ToolCall{{ID: "reused-call", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"first.txt"}`}}}},
+		{Role: "tool", RecordID: "tool-result/turn-1/step-1/reused-call", ToolCallID: "reused-call", Name: "read_file", Content: "first"},
+		{Role: "assistant", RecordID: "assistant-record-2", ToolCalls: []llm.ToolCall{{ID: "reused-call", Type: "function", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"second.txt"}`}}}},
+		{Role: "tool", RecordID: "tool-result/turn-1/step-2/reused-call", ToolCallID: "reused-call", Name: "read_file", Content: "second"},
+	}
+
+	entries := MessagesToTranscriptEntries(messages)
+	if len(entries) != 4 {
+		t.Fatalf("entries = %#v, want two call/result pairs", entries)
+	}
+	firstCallID := ToolCallTranscriptItemID("assistant-record-1", "reused-call")
+	secondCallID := ToolCallTranscriptItemID("assistant-record-2", "reused-call")
+	if firstCallID == secondCallID || entries[0]["item_id"] != firstCallID || entries[2]["item_id"] != secondCallID {
+		t.Fatalf("reused call identities = %#v / %#v, entries=%#v", firstCallID, secondCallID, entries)
+	}
+	firstResultData, _ := entries[1]["data"].(map[string]any)
+	secondResultData, _ := entries[3]["data"].(map[string]any)
+	if firstResultData["tool_call_item_id"] != firstCallID || secondResultData["tool_call_item_id"] != secondCallID {
+		t.Fatalf("result call associations = %#v / %#v", firstResultData, secondResultData)
+	}
+	firstArgs, _ := firstResultData["arguments"].(map[string]any)
+	secondArgs, _ := secondResultData["arguments"].(map[string]any)
+	if firstArgs["path"] != "first.txt" || secondArgs["path"] != "second.txt" {
+		t.Fatalf("reused call arguments were cross-associated: %#v / %#v", firstArgs, secondArgs)
 	}
 }
 

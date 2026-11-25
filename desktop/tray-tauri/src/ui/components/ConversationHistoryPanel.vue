@@ -56,16 +56,19 @@ function selectedKey(row) {
 
 function mergeRoundHistoryPage(current, incoming) {
   const combined = [...(Array.isArray(current) ? current : []), ...(Array.isArray(incoming) ? incoming : [])]
-  const visibleCallIds = new Set(combined
-    .filter(entry => entry?.kind === 'tool_call')
-    .map(entry => String(entry?.data?.tool_call_id || entry?.blockId || '').trim())
-    .filter(Boolean))
+  const callRows = combined.filter(entry => entry?.kind === 'tool_call')
+  const visibleCallItemIds = new Set(callRows.map(entry => String(entry?.item_id || entry?.id || '').trim()).filter(Boolean))
+  const visibleCallIds = new Set(callRows.map(entry => String(entry?.data?.tool_call_id || entry?.blockId || '').trim()).filter(Boolean))
   // Tool summaries are paged at the message-record boundary, so one assistant
   // record with many calls can be separated from its later result records.
   // Keep result rows only when their visible call is in this loaded window;
   // expanding a call fetches its authoritative full result on demand.
-  return combined.filter(entry => entry?.kind !== 'tool_result'
-    || visibleCallIds.has(String(entry?.data?.tool_call_id || entry?.blockId || '').trim()))
+  return combined.filter(entry => {
+    if (entry?.kind !== 'tool_result') return true
+    const sourceCallItemId = String(entry?.data?.tool_call_item_id || '').trim()
+    if (sourceCallItemId) return visibleCallItemIds.has(sourceCallItemId)
+    return visibleCallIds.has(String(entry?.data?.tool_call_id || entry?.blockId || '').trim())
+  })
 }
 
 async function loadRoundItems(row, { append = false, generation = requestGeneration.value } = {}) {
