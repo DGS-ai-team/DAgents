@@ -48,6 +48,38 @@ describe('ConversationHistoryPanel', () => {
     expect(wrapper.text()).toContain('第 1 轮 · 对话')
   })
 
+  it('restores Node media URLs before displaying history and releases them on unmount', async () => {
+    listConversationRounds.mockResolvedValue({ rounds: [round('r1', 1)], has_more: false, history_completeness: 'complete' })
+    listConversationRoundRevisions.mockResolvedValue({ selected_revision_id: 'r1-revision', revisions: [{ revision_id: 'r1-revision', selected: true, status: 'completed' }] })
+    listConversationLegacyItems.mockResolvedValue({ item_count: 0, items: [], history_completeness: 'complete' })
+    listConversationRoundItems.mockResolvedValue({ items: [
+      { ...entry('user-image', 'user', 'look at this'), images: ['/v1/agents/agent-a/media/media-1'] },
+    ], has_more: false })
+    const restoreMedia = vi.fn(async (items, isCurrent) => {
+      if (!isCurrent()) return null
+      return items.map(item => ({
+        ...item,
+        images: item.images?.map(() => 'blob:desktop/history-image') || item.images,
+      }))
+    })
+    const releaseMedia = vi.fn()
+
+    wrapper = mount(ConversationHistoryPanel, {
+      props: { agentId: 'agent-a', agentName: 'Helper', restoreMedia, releaseMedia },
+      global: { stubs: {
+        UiIcon: { template: '<i />' },
+        MainChatPanel: { props: ['entries'], template: '<div data-test="transcript">{{ JSON.stringify(entries) }}</div>' },
+      } },
+    })
+    await flushPromises()
+    expect(restoreMedia).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-test="transcript"]').text()).toContain('blob:desktop/history-image')
+
+    wrapper.unmount()
+    wrapper = null
+    expect(releaseMedia).toHaveBeenCalledWith('agent-a')
+  })
+
   it('keeps paged tool results attached to source-scoped calls visible earlier in the history window', async () => {
     listConversationRounds.mockResolvedValue({ rounds: [round('r1', 1)], has_more: false, history_completeness: 'complete' })
     listConversationRoundRevisions.mockResolvedValue({ selected_revision_id: 'r1-revision', revisions: [{ revision_id: 'r1-revision', selected: true, status: 'completed' }] })

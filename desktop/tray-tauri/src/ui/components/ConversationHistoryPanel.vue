@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import MainChatPanel from './MainChatPanel.vue'
 import UiIcon from './UiIcon.vue'
 import { getConversationResubmitTarget, listConversationLegacyItems, listConversationRoundItems, listConversationRoundRevisions, listConversationRounds, submitConversationResubmit } from '../api/node.js'
@@ -9,6 +9,8 @@ const emit = defineEmits(['resubmitted'])
 const props = defineProps({
   agentId: { type: String, required: true },
   agentName: { type: String, default: '' },
+  restoreMedia: { type: Function, default: null },
+  releaseMedia: { type: Function, default: null },
 })
 
 const rounds = ref([])
@@ -82,7 +84,13 @@ async function loadRoundItems(row, { append = false, generation = requestGenerat
       limit: 50,
     })
     if (generation !== requestGeneration.value || selectedKey(selected.value) !== row.round_id) return
-    entries.value = mergeRoundHistoryPage(append ? entries.value : [], page.items || [])
+    const nextEntries = mergeRoundHistoryPage(append ? entries.value : [], page.items || [])
+    const revisionID = selectedRevisionID.value || row.selected_revision_id || ''
+    const restoredEntries = typeof props.restoreMedia === 'function'
+      ? await props.restoreMedia(nextEntries, () => generation === requestGeneration.value && selectedKey(selected.value) === row.round_id && selectedRevisionID.value === revisionID)
+      : nextEntries
+    if (generation !== requestGeneration.value || selectedKey(selected.value) !== row.round_id || selectedRevisionID.value !== revisionID || !Array.isArray(restoredEntries)) return
+    entries.value = restoredEntries
     entriesRevision.value += 1
     hasMoreItems.value = Boolean(page.has_more)
     nextAfterItemId.value = String(page.next_after_item_id || '')
@@ -164,9 +172,14 @@ async function loadLegacyItems({ append = false, generation = requestGeneration.
       limit: 50,
     })
     if (generation !== requestGeneration.value || selectedKey(selected.value) !== 'legacy') return
+    const nextEntries = append ? [...entries.value, ...(page.items || [])] : [...(page.items || [])]
+    const restoredEntries = typeof props.restoreMedia === 'function'
+      ? await props.restoreMedia(nextEntries, () => generation === requestGeneration.value && selectedKey(selected.value) === 'legacy')
+      : nextEntries
+    if (generation !== requestGeneration.value || selectedKey(selected.value) !== 'legacy' || !Array.isArray(restoredEntries)) return
     historyCompleteness.value = String(page.history_completeness || 'complete')
     legacyItemCount.value = Number(page.item_count) || 0
-    entries.value = append ? [...entries.value, ...(page.items || [])] : [...(page.items || [])]
+    entries.value = restoredEntries
     entriesRevision.value += 1
     hasMoreItems.value = Boolean(page.has_more)
     nextAfterItemId.value = String(page.next_after_item_id || '')
@@ -179,6 +192,7 @@ async function loadLegacyItems({ append = false, generation = requestGeneration.
 
 async function selectRound(round) {
   const generation = ++requestGeneration.value
+  props.releaseMedia?.(props.agentId)
   loadingRounds.value = false
   loadingItems.value = false
   selected.value = { ...round, type: 'round' }
@@ -211,6 +225,7 @@ async function selectRevision(revisionID) {
   const row = selected.value
   if (!row || row.type !== 'round' || !revisions.value.some(revision => revision.revision_id === revisionID)) return
   const generation = ++requestGeneration.value
+  props.releaseMedia?.(props.agentId)
   selectedRevisionID.value = revisionID
   loadingItems.value = false
   entries.value = []
@@ -225,6 +240,7 @@ async function selectRevision(revisionID) {
 
 async function selectLegacy() {
   const generation = ++requestGeneration.value
+  props.releaseMedia?.(props.agentId)
   loadingRounds.value = false
   loadingItems.value = false
   selected.value = { type: 'legacy' }
@@ -266,6 +282,7 @@ async function loadOlderRounds() {
 async function refresh() {
   if (!props.agentId || loading.value) return
   const generation = ++requestGeneration.value
+  props.releaseMedia?.(props.agentId)
   loading.value = true
   loadingRounds.value = false
   loadingItems.value = false
@@ -298,6 +315,10 @@ async function refresh() {
 
 onMounted(refresh)
 watch(() => props.agentId, refresh)
+onBeforeUnmount(() => {
+  requestGeneration.value += 1
+  props.releaseMedia?.(props.agentId)
+})
 </script>
 
 <template>

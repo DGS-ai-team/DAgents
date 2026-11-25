@@ -971,8 +971,8 @@ async function refreshAgentModel(id) {
     if (activeId.value === id && requestSequence === modelRequestSequence) llmSettings.value = null
   }
 }
-async function restoreAgentMedia(snapshot, agentId) {
-  const lease = mediaUrlRegistry.begin(agentId)
+async function restoreAgentMedia(snapshot, agentId, owner = agentId) {
+  const lease = mediaUrlRegistry.begin(owner)
   const loadSource = async source => {
     const raw = String(source || '')
     if (raw.startsWith('data:') || raw.startsWith('blob:')) return raw
@@ -986,6 +986,23 @@ async function restoreAgentMedia(snapshot, agentId) {
     mediaUrlRegistry.discard(lease)
     throw cause
   }
+}
+
+async function restoreHistoryMedia(entries, isCurrent) {
+  const agentId = activeId.value
+  if (!agentId || !Array.isArray(entries)) return entries
+  const restored = await restoreAgentMedia({ transcript: entries }, agentId, 'conversation-history:' + agentId)
+  if (activeId.value !== agentId || (typeof isCurrent === 'function' && !isCurrent())) {
+    mediaUrlRegistry.discard(restored.lease)
+    return null
+  }
+  if (!mediaUrlRegistry.commit(restored.lease, transcriptObjectUrls(restored.snapshot?.transcript))) return null
+  return restored.snapshot?.transcript || entries
+}
+
+function releaseHistoryMedia(agentId) {
+  const id = String(agentId || '').trim()
+  if (id) mediaUrlRegistry.release('conversation-history:' + id)
 }
 
 function transcriptObjectUrls(entries) {
@@ -2865,7 +2882,7 @@ onUnmounted(() => {
       <section v-if="visitedTabs.has('browser') && (displayedTab === 'browser' || browserOpened)" v-show="composerPageVisible('browser')" data-composer-page="browser" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><BrowserViewer ref="browserViewerPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('browser')" @resource-name="browserName = $event" @open-connection-settings="openBrowserCapabilitySettings" /></section>
       </Transition>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('history')" @after-leave="onComposerPageAfterLeave('history', $event)" @after-enter="onComposerPageAfterEnter('history', $event)">
-      <section v-if="visitedTabs.has('history') && (displayedTab === 'history' || historyOpened)" v-show="composerPageVisible('history')" data-composer-page="history" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><ConversationHistoryPanel v-if="activeId && !isWorkgroupView" :key="activeId" :agent-id="activeId" :agent-name="activeAgent?.display_name || ''" @resubmitted="onConversationResubmitted" /></section>
+      <section v-if="visitedTabs.has('history') && (displayedTab === 'history' || historyOpened)" v-show="composerPageVisible('history')" data-composer-page="history" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><ConversationHistoryPanel v-if="activeId && !isWorkgroupView" :key="activeId" :agent-id="activeId" :agent-name="activeAgent?.display_name || ''" :restore-media="restoreHistoryMedia" :release-media="releaseHistoryMedia" @resubmitted="onConversationResubmitted" /></section>
       </Transition>
       <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @removed="onWorkgroupRemoved" @context-menu="openDelegatedContextMenu" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
       <ComposerSurface :mode="composerMode" @transition-start="onComposerTransitionStart" @transition-settled="onComposerTransitionSettled">
