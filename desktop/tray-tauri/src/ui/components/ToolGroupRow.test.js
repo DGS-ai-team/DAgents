@@ -185,6 +185,44 @@ describe("ToolGroupRow", () => {
     request.mockRestore();
   });
 
+  it("restores tool-result media from on-demand details and releases it with the row", async () => {
+    const request = vi.spyOn(nodeApi, "getConversationRoundToolStep").mockResolvedValue({
+      steps: [{
+        tool_call_id: "image-call",
+        call_entry: { kind: "tool_call", id: "tool-call/image-call", detail_item_id: "call-record", data: { tool_call_id: "image-call", tool_name: "browser_call", arguments: {} } },
+        result_entry: { kind: "tool_result", id: "result-image-call", data: { tool_call_id: "image-call", media: [{ id: "image-1", url: "dagents-media://image-1" }] } },
+      }],
+    });
+    const restoreToolMedia = vi.fn(async entries => entries.map(entry => ({
+      ...entry,
+      data: entry.data?.media ? { ...entry.data, media: entry.data.media.map(item => ({ ...item, url: "blob:tool-detail-image" })) } : entry.data,
+    })));
+    const releaseToolMedia = vi.fn();
+    const summarized = step("image-call", "browser_call", "截图页面");
+    Object.assign(summarized.callEntry, {
+      details_available: true,
+      detail_item_id: "call-record",
+      round_id: "round-image",
+      round_revision_id: "revision-image",
+    });
+    const wrapper = mount(ToolGroupRow, {
+      props: { agentId: "agent-image", steps: [summarized], restoreToolMedia, releaseToolMedia },
+    });
+
+    await wrapper.get(".tool-group-row__head").trigger("click");
+    await wrapper.get(".tool-summary-row__head").trigger("click");
+    await vi.waitFor(() => expect(restoreToolMedia).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(wrapper.findComponent(ToolExecBubble).props("resultEntry").data.media[0].url).toBe("blob:tool-detail-image"));
+    expect(restoreToolMedia.mock.calls[0][1]).toBe("agent-image");
+    expect(restoreToolMedia.mock.calls[0][2]).toBe("call-record\0image-call");
+    expect(restoreToolMedia.mock.calls[0][3]()).toBe(true);
+
+    await wrapper.get(".tool-group-row__head").trigger("click");
+    expect(releaseToolMedia).toHaveBeenCalledWith("agent-image", "call-record\0image-call");
+    wrapper.unmount();
+    request.mockRestore();
+  });
+
   it("reloads expanded tool details when the committed result revision arrives", async () => {
     const request = vi.spyOn(nodeApi, "getConversationRoundToolStep")
       .mockResolvedValueOnce({ steps: [{

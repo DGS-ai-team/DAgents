@@ -10,7 +10,7 @@ import { closeTerminalFlow } from './terminal-close.js'
 import { composerPageFadeOutCompletion, composerPageHandoffNeedsFade, composerPageHandoffReady, composerPageSettlementMatches, composerPageVisibility, createComposerPageHandoff } from './composer-surface-motion.js'
 import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, isWindowsPlatform, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
 import { agentMediaId, cancelWorkspaceAttachmentBatch, createWorkspaceAttachmentBatch, isWorkspaceAttachmentBatchCurrent, isWorkspaceRequestCurrent, shouldClearWorkspaceUploadError, workspaceImageBlob } from './workspace-files-state.js'
-import { restoreTranscriptMedia } from './utils/agentMediaRestore.js'
+import { mergeRestoredTranscriptMedia, restoreTranscriptMedia } from './utils/agentMediaRestore.js'
 import { createMediaUrlRegistry } from './utils/mediaUrlRegistry.js'
 import { onConfigurationChanged } from './utils/configurationEvents.js'
 import { createWorkspaceReference, dispatchWorkspaceMessage, hasWorkspaceMessageContent, settleWorkspaceReferences, workspaceReferencesForAgent } from './workspace-references.js'
@@ -1005,6 +1005,25 @@ function releaseHistoryMedia(agentId) {
   if (id) mediaUrlRegistry.release('conversation-history:' + id)
 }
 
+async function restoreToolDetailMedia(entries, agentId, ownerKey, isCurrent) {
+  const id = String(agentId || '').trim()
+  if (!id || !Array.isArray(entries)) return entries
+  const owner = `conversation-tool-detail:${id}:${String(ownerKey || '').trim()}`
+  const restored = await restoreAgentMedia({ transcript: entries }, id, owner)
+  if (activeId.value !== id || (typeof isCurrent === 'function' && !isCurrent())) {
+    mediaUrlRegistry.discard(restored.lease)
+    return null
+  }
+  if (!mediaUrlRegistry.commit(restored.lease, transcriptObjectUrls(restored.snapshot?.transcript))) return null
+  return restored.snapshot?.transcript || entries
+}
+
+function releaseToolDetailMedia(agentId, ownerKey) {
+  const id = String(agentId || '').trim()
+  const key = String(ownerKey || '').trim()
+  if (id && key) mediaUrlRegistry.release(`conversation-tool-detail:${id}:${key}`)
+}
+
 function transcriptObjectUrls(entries) {
   const found = new Set()
   const add = value => {
@@ -1040,18 +1059,20 @@ function restoreCommittedPatchMedia(agentId, generation, patchSnapshot, upsertIt
       return
     }
 
-    const restoredById = new Map(restored.snapshot.transcript
-      .map(entry => [String(entry?.item_id || entry?.id || '').trim(), entry])
-      .filter(([itemId]) => itemId))
     const conversationEpoch = Number(patchSnapshot?.conversation_epoch) || 0
     const currentLatest = conversationStore.latestTranscriptFor(agentId, conversationEpoch)?.transcript
       || hydrate.value.transcript
       || []
-    const transcript = currentLatest.map(entry => restoredById.get(String(entry?.item_id || entry?.id || '').trim()) || entry)
+    const transcript = mergeRestoredTranscriptMedia(currentLatest, restored.snapshot.transcript)
+    if (!transcript) {
+      mediaUrlRegistry.discard(restored.lease)
+      return
+    }
+    const currentConversationRevision = Number(hydrate.value.conversation_revision) || 0
     const applied = conversationStore.applyMediaTranscript(agentId, generation, {
       conversationEpoch,
-      historyRevision: Number(patchSnapshot?.history_revision) || 0,
-      expectedConversationRevision: Number(patchSnapshot?.conversation_revision) || 0,
+      historyRevision: Number(hydrate.value.history_revision) || 0,
+      expectedConversationRevision: currentConversationRevision,
       transcript,
     })
     if (applied) mediaUrlRegistry.commit(restored.lease, transcriptObjectUrls(hydrate.value?.transcript))
@@ -2857,7 +2878,7 @@ onUnmounted(() => {
         <template v-else>
           <div v-if="!chatEntries.length && !hitlQueue.length && !turnError" class="welcome"><div class="welcome-mark"><span class="icon-mask" :style="maskStyle(activeAgent?.agent_type === 'auto' ? autoAgentIcon : normalAgentIcon)"></span></div><h1>{{ activeAgent.display_name }}</h1><p>输入任务开始；也可以从资源菜单打开工作区、浏览器或终端。</p></div>
           <div v-else class="desktop-chat-wrapper app__body--chat-v61">
-            <MainChatPanel ref="chatPanel" :key="activeId" :agent-id="activeId" :entries="chatEntries" :entries-revision="chatItemsRevision" :entries-change="chatEntriesChange" :reading-window="activeReadingWindow" :turn-error="turnError" :has-earlier-history="Boolean(hydrate?.has_earlier_history)" :model-recovery-available="modelRecoveryAvailable" :model-name="llmSettings?.model || ''" :model-profile="llmSettings?.active_profile || agentActiveProfile(activeAgent)" :hitl-queue="hitlQueue" :turn-state="conversationStore.turnState" :agent-title="activeAgent.display_name" :show-workspace-switcher="false" :sending="busy || agentGenerating" :hitl-busy="busy" :hitl-busy-index="hitlBusyIndex" @approve-selection="approveSelection" @reject-all="rejectAll" @open-history="showConversationHistory" @reading-window-change="onChatReadingWindowChange" @open-model-picker="openModelPicker" @open-model-settings="openModelSettings(llmSettings?.active_profile || agentActiveProfile(activeAgent))" @user-info-submit="submitUserInfo" @user-info-selected="userInfoSelected = $event" @memory-conflict-decide="decideMemoryConflict" @memory-conflict-cancel="cancelMemoryConflict" @queued-input-context-menu="openQueuedInputContextMenu" />
+            <MainChatPanel ref="chatPanel" :key="activeId" :agent-id="activeId" :entries="chatEntries" :entries-revision="chatItemsRevision" :entries-change="chatEntriesChange" :reading-window="activeReadingWindow" :turn-error="turnError" :has-earlier-history="Boolean(hydrate?.has_earlier_history)" :model-recovery-available="modelRecoveryAvailable" :model-name="llmSettings?.model || ''" :model-profile="llmSettings?.active_profile || agentActiveProfile(activeAgent)" :hitl-queue="hitlQueue" :turn-state="conversationStore.turnState" :agent-title="activeAgent.display_name" :show-workspace-switcher="false" :sending="busy || agentGenerating" :hitl-busy="busy" :hitl-busy-index="hitlBusyIndex" :restore-tool-media="restoreToolDetailMedia" :release-tool-media="releaseToolDetailMedia" @approve-selection="approveSelection" @reject-all="rejectAll" @open-history="showConversationHistory" @reading-window-change="onChatReadingWindowChange" @open-model-picker="openModelPicker" @open-model-settings="openModelSettings(llmSettings?.active_profile || agentActiveProfile(activeAgent))" @user-info-submit="submitUserInfo" @user-info-selected="userInfoSelected = $event" @memory-conflict-decide="decideMemoryConflict" @memory-conflict-cancel="cancelMemoryConflict" @queued-input-context-menu="openQueuedInputContextMenu" />
           </div>
         </template>
         <div v-if="error && status.online && !status.setup_required" class="desktop-error-hint desktop-error-hint--visible" role="alert">
@@ -2882,7 +2903,7 @@ onUnmounted(() => {
       <section v-if="visitedTabs.has('browser') && (displayedTab === 'browser' || browserOpened)" v-show="composerPageVisible('browser')" data-composer-page="browser" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><BrowserViewer ref="browserViewerPanel" :key="activeId" :agent-id="activeId" :workspace-scope="workspaceScope" :request-generation="workspaceRequestGeneration" :active="resourcePageActive('browser')" @resource-name="browserName = $event" @open-connection-settings="openBrowserCapabilitySettings" /></section>
       </Transition>
       <Transition name="composer-page" :css="composerPageTransitionEnabled('history')" @after-leave="onComposerPageAfterLeave('history', $event)" @after-enter="onComposerPageAfterEnter('history', $event)">
-      <section v-if="visitedTabs.has('history') && (displayedTab === 'history' || historyOpened)" v-show="composerPageVisible('history')" data-composer-page="history" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><ConversationHistoryPanel v-if="activeId && !isWorkgroupView" :key="activeId" :agent-id="activeId" :agent-name="activeAgent?.display_name || ''" :restore-media="restoreHistoryMedia" :release-media="releaseHistoryMedia" @resubmitted="onConversationResubmitted" /></section>
+      <section v-if="visitedTabs.has('history') && (displayedTab === 'history' || historyOpened)" v-show="composerPageVisible('history')" data-composer-page="history" class="file-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><ConversationHistoryPanel v-if="activeId && !isWorkgroupView" :key="activeId" :agent-id="activeId" :agent-name="activeAgent?.display_name || ''" :restore-media="restoreHistoryMedia" :release-media="releaseHistoryMedia" :restore-tool-media="restoreToolDetailMedia" :release-tool-media="releaseToolDetailMedia" @resubmitted="onConversationResubmitted" /></section>
       </Transition>
       <section v-if="displayedTab === 'workgroups'" class="file-resource workgroup-resource" :inert="Boolean(pendingComposerPage)" :aria-hidden="Boolean(pendingComposerPage)"><button v-if="selectedWorkgroupId" class="workgroup-back" @click="selectedWorkgroupId = ''; selectedWorkgroupName = ''">返回工作组列表</button><WorkgroupWorkspace :workgroup-id="selectedWorkgroupId" @select="openWorkgroup" @list="workgroupList = $event" @name="selectedWorkgroupName = $event" @removed="onWorkgroupRemoved" @context-menu="openDelegatedContextMenu" @open-connection-settings="openWorkgroupConnectionSettings" /></section>
       <ComposerSurface :mode="composerMode" @transition-start="onComposerTransitionStart" @transition-settled="onComposerTransitionSettled">

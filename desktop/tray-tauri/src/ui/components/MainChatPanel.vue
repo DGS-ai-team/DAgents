@@ -43,6 +43,8 @@ const props = defineProps({
   workspaceView: { type: String, default: "messages" },
   showWorkspaceSwitcher: { type: Boolean, default: true },
   agentId: { type: String, default: "" },
+  restoreToolMedia: { type: Function, default: null },
+  releaseToolMedia: { type: Function, default: null },
 });
 
 const emit = defineEmits([
@@ -608,6 +610,8 @@ defineExpose({
           :stream-item-key="item.key"
           :verbose="toolVerbose"
           :agent-id="agentId"
+          :restore-tool-media="restoreToolMedia"
+          :release-tool-media="releaseToolMedia"
         />
         <ToolGroupRow
           v-else-if="item.kind === 'tool_group'"
@@ -616,6 +620,8 @@ defineExpose({
           :stream-item-key="item.key"
           :verbose="toolVerbose"
           :agent-id="agentId"
+          :restore-tool-media="restoreToolMedia"
+          :release-tool-media="releaseToolMedia"
         />
         <div v-else-if="item.kind === 'tool_group_more'" class="chat__tool-more-wrap" :data-conversation-ordinal="conversationOrdinalForStreamItem(item) || undefined" :data-stream-item-key="item.key">
           <button class="chat__tool-more" type="button" :disabled="loadingToolPageIDs.has(String(item.entry?.id || item.entry?.item_id || ''))" @click="loadMoreToolSteps(item.entry)">

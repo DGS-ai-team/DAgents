@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import {
   resolveToolStepPhase,
   toolStepStatusText,
@@ -27,6 +27,8 @@ const props = defineProps({
   verbose: { type: Boolean, default: false },
   embedded: { type: Boolean, default: false },
   agentId: { type: String, default: "" },
+  restoreToolMedia: { type: Function, default: null },
+  releaseToolMedia: { type: Function, default: null },
 });
 const emit = defineEmits(["expanded-change"]);
 
@@ -38,6 +40,7 @@ const detailsLoading = ref(false);
 const detailsError = ref("");
 let detailLoadGeneration = 0;
 let detailLoadKey = "";
+let detailMediaOwnerKey = "";
 
 const stepArgs = computed(() => ({
   callEntry: props.callEntry,
@@ -101,8 +104,15 @@ async function loadDetails() {
     if (generation !== detailLoadGeneration || requestKey !== detailRequestKey.value) return;
     const step = response?.steps?.find(item => String(item?.tool_call_id || "") === callId);
     if (!step?.call_entry) throw new Error("工具详情暂不可用");
-    loadedCallEntry.value = step.call_entry;
-    loadedResultEntry.value = step.result_entry || null;
+    let detailEntries = [step.call_entry, step.result_entry].filter(Boolean);
+    if (typeof props.restoreToolMedia === "function") {
+      detailMediaOwnerKey = `${sourceItemId}\0${callId}`;
+      const restored = await props.restoreToolMedia(detailEntries, props.agentId, detailMediaOwnerKey, () => generation === detailLoadGeneration && requestKey === detailRequestKey.value);
+      if (generation !== detailLoadGeneration || requestKey !== detailRequestKey.value || !Array.isArray(restored)) return;
+      detailEntries = restored;
+    }
+    loadedCallEntry.value = detailEntries[0] || step.call_entry;
+    loadedResultEntry.value = step.result_entry ? (detailEntries[1] || step.result_entry) : null;
   } catch (cause) {
     if (generation !== detailLoadGeneration || requestKey !== detailRequestKey.value) return;
     detailsError.value = String(cause?.message || "读取工具详情失败");
@@ -112,6 +122,12 @@ async function loadDetails() {
       detailLoadKey = "";
     }
   }
+}
+
+function releaseDetailMedia() {
+  if (!detailMediaOwnerKey) return;
+  props.releaseToolMedia?.(props.agentId, detailMediaOwnerKey);
+  detailMediaOwnerKey = "";
 }
 
 function toggle() {
@@ -125,6 +141,7 @@ watch(isExpanded, (value) => {
 }, { immediate: true });
 
 watch(detailRequestKey, () => {
+  releaseDetailMedia();
   detailLoadGeneration += 1;
   detailLoadKey = "";
   loadedCallEntry.value = null;
@@ -133,6 +150,11 @@ watch(detailRequestKey, () => {
   detailsError.value = "";
   if (isExpanded.value && needsDetails.value) void loadDetails();
 }, { flush: "sync" });
+
+onBeforeUnmount(() => {
+  detailLoadGeneration += 1;
+  releaseDetailMedia();
+});
 
 </script>
 

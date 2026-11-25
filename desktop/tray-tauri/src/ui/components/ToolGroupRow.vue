@@ -12,6 +12,8 @@ const props = defineProps({
   streamItemKey: { type: String, default: "" },
   verbose: { type: Boolean, default: false },
   agentId: { type: String, default: "" },
+  restoreToolMedia: { type: Function, default: null },
+  releaseToolMedia: { type: Function, default: null },
 });
 
 const expanded = ref(false);
@@ -138,6 +140,8 @@ function setToolStepExpanded(key, value) {
         :phase="phaseByStep.get(step) || 'idle'"
         :verbose="verbose"
         :agent-id="agentId"
+        :restore-tool-media="restoreToolMedia"
+        :release-tool-media="releaseToolMedia"
         :expanded="expandedToolStepKeys.has(String(step.key || ''))"
         @expanded-change="setToolStepExpanded(step.key, $event)"
         embedded

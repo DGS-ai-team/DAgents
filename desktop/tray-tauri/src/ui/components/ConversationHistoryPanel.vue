@@ -11,6 +11,8 @@ const props = defineProps({
   agentName: { type: String, default: '' },
   restoreMedia: { type: Function, default: null },
   releaseMedia: { type: Function, default: null },
+  restoreToolMedia: { type: Function, default: null },
+  releaseToolMedia: { type: Function, default: null },
 })
 
 const rounds = ref([])
@@ -398,7 +400,7 @@ onBeforeUnmount(() => {
           </section>
           <div v-if="!entries.length && !loadingItems" class="conversation-history-panel__state">这段记录没有可展示的消息。</div>
           <div v-else class="conversation-history-panel__transcript desktop-chat-wrapper app__body--chat-v61">
-            <MainChatPanel :key="`${agentId}:${selectedKey(selected)}`" :agent-id="agentId" :agent-title="agentName" :entries="entries" :entries-revision="entriesRevision" :hitl-queue="[]" :sending="false" :show-workspace-switcher="false" />
+            <MainChatPanel :key="`${agentId}:${selectedKey(selected)}`" :agent-id="agentId" :agent-title="agentName" :entries="entries" :entries-revision="entriesRevision" :hitl-queue="[]" :sending="false" :show-workspace-switcher="false" :restore-tool-media="restoreToolMedia" :release-tool-media="releaseToolMedia" />
           </div>
           <div v-if="loadingItems" class="conversation-history-panel__loading-more" role="status">正在读取消息…</div>
           <button v-if="hasMoreItems" class="conversation-history-panel__load-more" type="button" :disabled="loadingItems" @click="loadMoreItems">{{ loadingItems ? '正在加载…' : '加载后续消息' }}</button>

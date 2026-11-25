@@ -61,3 +61,48 @@ export async function restoreTranscriptMedia(snapshot, loadSource) {
   await Promise.all(pending)
   return changed ? { ...snapshot, transcript: rows } : snapshot
 }
+
+function sameMediaUrls(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false
+  return left.every((item, index) => {
+    const source = item && typeof item === "object" ? item.url : item
+    const target = right[index] && typeof right[index] === "object" ? right[index].url : right[index]
+    return source === target
+  })
+}
+
+function mergeMediaFields(current, restored) {
+  let next = current
+  const set = (key, value) => {
+    if (next === current) next = { ...current }
+    next[key] = value
+  }
+  if (Array.isArray(restored.images) && !sameMediaUrls(current.images, restored.images)) {
+    set("images", restored.images)
+  }
+  if (Array.isArray(restored.media) && !sameMediaUrls(current.media, restored.media)) {
+    set("media", restored.media)
+  }
+  if (Array.isArray(restored.data?.media) && !sameMediaUrls(current.data?.media, restored.data.media)) {
+    set("data", { ...current.data, media: restored.data.media })
+  }
+  return next
+}
+
+/** Rebase restored media onto the latest transcript, preserving unrelated patches. */
+export function mergeRestoredTranscriptMedia(latestTranscript, restoredEntries) {
+  if (!Array.isArray(latestTranscript) || !Array.isArray(restoredEntries)) return null
+  const restoredById = new Map(restoredEntries
+    .map(entry => [String(entry?.item_id || entry?.id || "").trim(), entry])
+    .filter(([itemId]) => itemId))
+  let changed = false
+  const transcript = latestTranscript.map(current => {
+    const itemId = String(current?.item_id || current?.id || "").trim()
+    const restored = itemId ? restoredById.get(itemId) : null
+    if (!restored || String(current?.item_version ?? "") !== String(restored?.item_version ?? "")) return current
+    const merged = mergeMediaFields(current, restored)
+    if (merged !== current) changed = true
+    return merged
+  })
+  return changed ? transcript : null
+}
