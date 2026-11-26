@@ -1,42 +1,3 @@
-import { reactive } from "vue";
-
-export const hitlStore = reactive({
-  queue: [],
-  busy: false,
-  /** 正在 resume 的队列项 index；-1 表示无。 */
-  busyIndex: -1,
-});
-
-export function enqueueHitl(item) {
-  if (item.kind === "approval") {
-    const key = approvalQueueKey(item.data);
-    hitlStore.queue = hitlStore.queue.filter(
-      (q) => q.kind !== "approval" || approvalQueueKey(q.data) !== key,
-    );
-  }
-  hitlStore.queue.push(item);
-}
-
-export function dequeueHitlAt(index) {
-  if (index < 0 || index >= hitlStore.queue.length) return null;
-  return hitlStore.queue.splice(index, 1)[0] || null;
-}
-
-export function getHitlAt(index) {
-  if (index < 0 || index >= hitlStore.queue.length) return null;
-  return hitlStore.queue[index] || null;
-}
-
-export function peekHitl() {
-  return getHitlAt(0);
-}
-
-export function clearHitl() {
-  hitlStore.queue = [];
-  hitlStore.busy = false;
-  hitlStore.busyIndex = -1;
-}
-
 /** 队列去重 / resume 路由用的稳定 key。 */
 export function approvalQueueKey(data) {
   const child = String(data?.child_agent_id || "").trim();
@@ -314,23 +275,14 @@ export function expandHitlRequired(data) {
   };
 }
 
-/** 将 hitl_required / hydrate pending_hitl 展开并入队。 */
-export function enqueueHitlRequired(data) {
-  if (!data?.items?.length) {
-    return { userInfos: [], memoryConflicts: [], approval: null };
-  }
+/** Project the authoritative hydrate HITL fact into the ordered chat UI queue. */
+export function hitlQueueFromPending(data) {
   const { userInfos, memoryConflicts, approval } = expandHitlRequired(data);
-  for (const ui of userInfos) {
-    enqueueHitl({ kind: "user_information", data: ui });
-  }
-  for (const mc of memoryConflicts) {
-    enqueueHitl({ kind: "memory_conflict", data: mc });
-  }
-  if (approval) {
-    enqueueHitl({ kind: "approval", data: approval });
-  }
-  hitlStore.busy = false;
-  return { userInfos, memoryConflicts, approval };
+  return [
+    ...userInfos.map((item) => ({ kind: "user_information", data: item })),
+    ...memoryConflicts.map((item) => ({ kind: "memory_conflict", data: item })),
+    ...(approval ? [{ kind: "approval", data: approval }] : []),
+  ];
 }
 
 /** 对齐 Go hitl.ShouldSkipChildRuntimeDisplay：隐藏子 Agent turn 的运行时 SSE。 */

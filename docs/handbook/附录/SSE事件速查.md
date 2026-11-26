@@ -30,7 +30,9 @@ GET /v1/streams?agent_id=agt-xxx&after_agent_seq=42
 | `delivery` | `replayable` 或 `ephemeral` |
 | `agent_id` / `type` / `ts` / `data` | 事件身份、名称、时间和业务数据 |
 
-当请求游标早于 Hub 保留历史时，流先发送 `resync_required`，其 `data.requires_hydrate=true`。客户端必须调用 Agent hydrate，以权威快照修复 transcript、HITL、工具和 turn 状态，然后从新的 `stream_epoch` / `agent_seq_hint` 继续接收事件。
+当请求游标早于 Hub 保留历史时，流先发送 `resync_required`，其 `data.requires_hydrate=true`。客户端必须调用 Agent hydrate，以修复 transcript、HITL、工具和 turn 状态。hydrate 的 `covered_agent_seq` 与 `covered_stream_seq`、`assistant_drafts` 在同一个 Hub 读边界捕获：前者覆盖可靠回放事件，后两者也能覆盖不占 Agent 序号的流式正文。响应中的 `stream_seq_hint` / `agent_seq_hint` 仍只是诊断提示，不能代替覆盖水位。Desktop 的原生 SSE 订阅器维护进程级重连游标，并在重连、纪元变化或 `resync_required` 后触发 hydrate；同时 Desktop 周期读取轻量 `GET /v1/agents/watermarks`，发现当前会话 revision 前进或未收到的 Agent 事件目标后，调度现有 hydrate；该目标只用于发现变化，不推进 applied cursor。其他按 Agent 断点续传的客户端应保留自己实际消费到的 `agent_seq`，在 epoch 变化或游标过期时 hydrate，并按客户端的版本栅栏合并回放事件。
+
+高频 `conversation_delta`（assistant 正文与 reasoning）和未完成的 `tool_call` 参数片段以 `delivery: "ephemeral"` 推送，不进入重放历史或 `agent_seq`。正文草稿由 Hub 在 hydrate 中累计并通过 `covered_stream_seq` 对齐；完整确认的 tool call 仍是 replayable 事实，由事件或 hydrate 的活动工具投影恢复。
 
 ---
 
@@ -38,8 +40,8 @@ GET /v1/streams?agent_id=agt-xxx&after_agent_seq=42
 
 | 事件 | 含义 | 客户端职责 |
 |------|------|------------|
-| `assistant` | assistant 正文 delta | 追加流式正文 |
-| `reasoning` | 推理 delta | 更新思考输出 |
+| `conversation_delta` | assistant 正文或 reasoning 的高频增量（`data.part` 区分） | 按 attempt 与连续 chunk 序号更新稳定草稿；不推进可靠游标 |
+| `assistant` / `reasoning` | 旧协议事件；当前 Node 不再用于高频流式正文 | 兼容性读取，不作为可靠恢复依据 |
 | `tool_call` | 模型发起工具调用 | 展示工具行 |
 | `tool_result` | 工具返回结果 | 更新工具行/继续 turn |
 | `turn_state` | Turn Coordinator 权威生命周期快照 | 更新 phase、终态、取消和工具执行态 |

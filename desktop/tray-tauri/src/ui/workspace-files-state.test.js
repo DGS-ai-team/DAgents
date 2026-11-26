@@ -152,6 +152,9 @@ test('media URLs are accepted only for the owning Agent and the Node media route
   assert.equal(agentMediaId('/v1/agents/agent-b/media/media_123', 'agent-a'), '')
   assert.equal(agentMediaId('https://example.test/v1/agents/agent-a/media/media_123', 'agent-a'), '')
   assert.equal(agentMediaId('/v1/agents/agent-a/media/../secret', 'agent-a'), '')
+  assert.equal(agentMediaId('dagents-media://media_123', 'agent-a'), 'media_123')
+  assert.equal(agentMediaId('dagents-media://media_123/other', 'agent-a'), '')
+  assert.equal(agentMediaId('dagents-media://media_123', ''), '')
 })
 
 test('workspace listing and writes use Node while file reads use the native full-read command', async () => {

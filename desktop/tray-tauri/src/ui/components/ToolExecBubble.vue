@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { formatToolCallLine, formatToolResultDisplay, formatToolElapsed } from "../utils/format.js";
 import { resolveToolVisual } from "../utils/toolSource.js";
-import { statusStore } from "../stores/statusLines.js";
+import { acquireLiveClock, liveClock } from "../stores/liveClock.js";
 import { isReadFileTool } from "../utils/readFilePreview.js";
 import { toolDisplayName } from "@shared-frontend/utils/toolCalls.js";
 import { resolveToolStepPhase, toolStepUserSummary } from "../utils/toolUserLabel.js";
@@ -31,6 +31,7 @@ const props = defineProps({
 const outputExpanded = ref(false);
 const copyState = ref("");
 let copyTimer = null;
+let releaseLiveClock = null;
 
 const isCall = computed(() => props.entry.kind === "tool_call");
 const isResult = computed(() => props.entry.kind === "tool_result");
@@ -124,7 +125,7 @@ watch(
 );
 
 const elapsedLive = computed(() => {
-  void statusStore.tick;
+  void liveClock.tick;
   if (!isCall.value || !props.entry.partial || !props.entry.startedAt) return "";
   return formatToolElapsed((Date.now() - props.entry.startedAt) / 1000);
 });
@@ -135,6 +136,16 @@ const toolPhase = computed(() =>
   }),
 );
 const isGenerating = computed(() => toolPhase.value === "generating");
+const tracksElapsedTime = computed(
+  () => isCall.value && isGenerating.value && !!props.entry.partial && !!props.entry.startedAt,
+);
+watch(tracksElapsedTime, (active) => {
+  if (active && !releaseLiveClock) releaseLiveClock = acquireLiveClock();
+  if (!active && releaseLiveClock) {
+    releaseLiveClock();
+    releaseLiveClock = null;
+  }
+}, { immediate: true });
 const isInterrupted = computed(() => interrupted.value || toolPhase.value === "interrupted");
 const isUnsuccessfulResult = computed(() =>
   ["denied", "failed", "error", "cancelled", "canceled", "timed_out", "unknown"].includes(
@@ -208,7 +219,11 @@ async function copyInputValue(value) {
   await copyValue(value);
 }
 
-onBeforeUnmount(clearCopyState);
+onBeforeUnmount(() => {
+  clearCopyState();
+  releaseLiveClock?.();
+  releaseLiveClock = null;
+});
 </script>
 
 <template>

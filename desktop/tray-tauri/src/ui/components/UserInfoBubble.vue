@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { extractUserInfo } from "../stores/hitl.js";
 import ToolGroupIcon from "./ToolGroupIcon.vue";
 
@@ -7,11 +7,13 @@ const props = defineProps({
   data: { type: Object, required: true },
   selected: { type: [Number, Array], default: 0 },
   busy: { type: Boolean, default: false },
+  streamItemKey: { type: String, default: "" },
 });
 
 const emit = defineEmits(["update:selected", "submit"]);
 
 const req = computed(() => extractUserInfo(props.data));
+const answer = ref("");
 
 const selectedSet = computed(() => {
   if (Array.isArray(props.selected)) {
@@ -21,6 +23,12 @@ const selectedSet = computed(() => {
   const opt = Number.isInteger(idx) ? req.value.options[idx] : null;
   return new Set(opt?.id ? [String(opt.id)] : []);
 });
+const canSubmit = computed(() => Boolean(answer.value.trim()) || selectedSet.value.size > 0 || (!req.value.required && !req.value.options.length));
+
+function submit() {
+  if (props.busy || !canSubmit.value) return;
+  emit("submit", answer.value);
+}
 
 function onSingleSelect(idx) {
   emit("update:selected", Number(idx));
@@ -35,7 +43,7 @@ function onMultiToggle(id, checked) {
 </script>
 
 <template>
-  <div class="msg msg--approval">
+  <div class="msg msg--approval" :data-stream-item-key="streamItemKey || undefined">
     <div class="msg__body msg__body--wide">
       <div class="approval-bubble approval-bubble--user-info">
         <div class="tool-exec-bubble__source">
@@ -64,21 +72,18 @@ function onMultiToggle(id, checked) {
             />
             <span>{{ opt.label }}</span>
           </label>
-          <button
-            type="button"
-            class="btn btn--primary btn--sm"
-            :disabled="busy"
-            @click="emit('submit', '')"
-          >
-            {{ busy ? "提交中…" : "提交选项" }}
-          </button>
-          <p class="approval-bubble__hint approval-bubble__hint--inline">
-            或在下方输入自定义回答后发送
-          </p>
         </div>
-        <p v-else class="approval-bubble__hint">
-          {{ req.placeholder || "在下方输入框回答后 Enter 发送" }}
-        </p>
+        <textarea
+          v-model="answer"
+          class="user-info-answer"
+          rows="2"
+          :disabled="busy"
+          :placeholder="req.placeholder || '填写补充回答（可选）'"
+          aria-label="补充回答"
+        ></textarea>
+        <button type="button" class="btn btn--primary btn--sm user-info-submit" :disabled="busy || !canSubmit" @click="submit">
+          {{ busy ? "提交中…" : "提交回答" }}
+        </button>
       </div>
     </div>
   </div>
@@ -100,21 +105,31 @@ function onMultiToggle(id, checked) {
   margin: 0;
 }
 
-.approval-bubble__hint {
-  margin: 0;
-  font-size: 12.5px;
-  color: var(--color-text-muted);
-}
-
-.approval-bubble__hint--inline {
-  margin-top: 4px;
-}
-
 .user-info-options {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
+
+.user-info-answer {
+  width: 100%;
+  min-height: 52px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.user-info-answer:focus-visible {
+  outline: 2px solid var(--color-focus, var(--color-primary));
+  outline-offset: 1px;
+}
+
+.user-info-submit { align-self: flex-start; }
 
 .user-info-option {
   display: flex;

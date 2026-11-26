@@ -28,6 +28,7 @@
 
 | 报告 | 用途 |
 |---|---|
+| [2026-11-15-upstream-message-pipeline-comparison.md](2026-11-15-upstream-message-pipeline-comparison.md) | Codex / DeepSeek Harness 消息身份、流式完成、事件接续、分页、Markdown 与滚动的源码对照 |
 | [baseline-2026-08.md](baseline-2026-08.md) | 三个项目的总体基线 |
 | [delta-2026-08-17.md](delta-2026-08-17.md) | 上游增量观察 |
 | [bash-tool-review-2026-08-17.md](bash-tool-review-2026-08-17.md) | Bash/终端工具对比 |

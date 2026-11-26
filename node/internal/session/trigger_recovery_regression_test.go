@@ -122,7 +122,7 @@ func (t *closeStoreDeliveryTracker) IsPendingDelivery(string, string) bool {
 }
 func (t *closeStoreDeliveryTracker) ClearPendingDeliveryIfMatch(string, string) { t.cleared = true }
 
-func TestTriggerPostCompletePersistenceFailureRetainsGuard(t *testing.T) {
+func TestTriggerStartBoundaryPersistenceFailureRetainsUncompletedClaim(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "sessions.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -145,8 +145,8 @@ func TestTriggerPostCompletePersistenceFailureRetainsGuard(t *testing.T) {
 		t.Fatal("consumer did not fail closed")
 	}
 	got, ok := rt.inputBox.InFlight()
-	if !ok || !got.Completed || got.Env.DeliveryID != "d" {
-		t.Fatalf("completed ownership guard = %+v, ok=%v", got, ok)
+	if !ok || got.Completed || got.Env.DeliveryID != "d" {
+		t.Fatalf("uncompleted start claim = %+v, ok=%v", got, ok)
 	}
 	if next, ok := rt.inputBox.Peek(); !ok || next.Env.Content != "must remain" {
 		t.Fatalf("next input was consumed or lost: %+v %v", next, ok)

@@ -13,6 +13,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/hooks"
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 	"github.com/DGS-ai-team/DAgents/node/internal/logx"
+	"github.com/DGS-ai-team/DAgents/node/internal/policy"
 	"github.com/DGS-ai-team/DAgents/node/internal/queue"
 	"github.com/DGS-ai-team/DAgents/node/internal/store"
 	"github.com/DGS-ai-team/DAgents/node/internal/stream"
@@ -27,6 +28,55 @@ func TestLifecycleObserverFailureStopsTransitionCaller(t *testing.T) {
 	}
 	if !r.turnCoordinator.Snapshot().HasActiveTurn {
 		t.Fatal("durable coordinator transition should remain inspectable for reconciliation")
+	}
+}
+
+func TestLifecycleCommandIDsAreScopedPerRuntime(t *testing.T) {
+	first := newRuntime("same-session", "agent-1", nil, &llm.MockClient{}, nil, nil, nil, nil,
+		nil, nil, nil, 0, 0, TurnOptions{}, nil)
+	second := newRuntime("same-session", "agent-1", nil, &llm.MockClient{}, nil, nil, nil, nil,
+		nil, nil, nil, 0, 0, TurnOptions{}, nil)
+	first.lifecycleCommandSeq = 17
+	second.lifecycleCommandSeq = 17
+
+	firstID := first.lifecycleNextCommandID()
+	secondID := second.lifecycleNextCommandID()
+	if firstID == secondID {
+		t.Fatalf("independent runtime instances generated the same lifecycle command id %q", firstID)
+	}
+	if got := lifecycleCommandSequence(firstID); got != 18 {
+		t.Fatalf("scoped command id sequence = %d, want 18 (%q)", got, firstID)
+	}
+	if got := lifecycleCommandSequence("same-session-lifecycle-17"); got != 17 {
+		t.Fatalf("legacy lifecycle command id sequence = %d, want 17", got)
+	}
+}
+
+func TestQueuedInputMutationRollsBackWhenRuntimePersistenceFails(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "queued-input-mutation.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := newRuntime("queued-input-mutation", "agent-1", nil, &llm.MockClient{}, nil, nil, st, nil,
+		nil, nil, nil, 0, 0, TurnOptions{}, nil)
+	seq, err := rt.inputBox.Append(InputKindUser, queue.Envelope{RequestType: queue.RequestTypeMessage, Content: "original"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = rt.editQueuedInput(seq, 1, queue.Envelope{RequestType: queue.RequestTypeMessage, Content: "must roll back"})
+	if err == nil {
+		t.Fatal("edit succeeded after persistence store was closed")
+	}
+	pending := rt.inputBox.PendingUserInputs()
+	if len(pending) != 1 || pending[0].Seq != seq || pending[0].Revision != 1 || pending[0].Env.Content != "original" {
+		t.Fatalf("queue after failed edit=%+v, want original revision 1", pending)
+	}
+	claimed, ok := rt.inputBox.Pop()
+	if !ok || claimed.Seq != seq || claimed.Revision != 1 || claimed.Env.Content != "original" {
+		t.Fatalf("claim after failed edit=%+v, ok=%v", claimed, ok)
 	}
 }
 
@@ -90,6 +140,40 @@ func TestRuntimePersistReportsStoreErrors(t *testing.T) {
 	}
 	if err := r.persist(context.Background()); err == nil {
 		t.Fatal("expected persist to report a closed store")
+	}
+}
+
+func TestRoundStartRuntimeStateIncludesHookStoreWithInputBox(t *testing.T) {
+	orch := turn.NewOrchestrator("agent-1", "", nil, &llm.MockClient{}, nil, nil, turn.SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, nil)
+	orch.SetHookStore(map[string]json.RawMessage{"cross-turn": json.RawMessage(`{"value":"kept"}`)})
+	r := &runtime{session: Session{ID: "session-1", AgentID: "agent-1"}, orch: orch, inputBox: NewInputBox()}
+
+	state, _ := r.roundStartRuntimeState()
+	if string(state.HookStore["cross-turn"]) != `{"value":"kept"}` {
+		t.Fatalf("round-start hook store = %s, want persisted cross-turn value", state.HookStore["cross-turn"])
+	}
+}
+
+func TestHistoryMutationScopesReusedToolCallIDsToModelSteps(t *testing.T) {
+	first := newLifecycleTestRuntime()
+	if err := first.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	firstResult := first.trackHistoryMutation(turn.HistoryMutationAppend, 0, llm.ToolResultMessage("reused-call", "read_file", "first"))
+
+	second := newLifecycleTestRuntime()
+	if err := second.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	secondResult := second.trackHistoryMutation(turn.HistoryMutationAppend, 0, llm.ToolResultMessage("reused-call", "read_file", "second"))
+
+	if firstResult.RecordID == "" || secondResult.RecordID == "" || firstResult.RecordID == secondResult.RecordID {
+		t.Fatalf("reused provider call ID produced duplicate durable identities: first=%q second=%q", firstResult.RecordID, secondResult.RecordID)
+	}
+	if firstResult.ToolCallSourceID != llm.AssistantMessageIDForStep(first.turnCoordinator.Snapshot().StepID) ||
+		secondResult.ToolCallSourceID != llm.AssistantMessageIDForStep(second.turnCoordinator.Snapshot().StepID) ||
+		firstResult.ToolCallSourceID == secondResult.ToolCallSourceID {
+		t.Fatalf("reused provider call ID lost its source assistant identity: first=%q second=%q", firstResult.ToolCallSourceID, secondResult.ToolCallSourceID)
 	}
 }
 
@@ -201,6 +285,7 @@ func TestRuntimeLifecyclePublishesTurnStateProjection(t *testing.T) {
 	r.publisher = hub
 	r.agentID = "agent-1"
 	r.queue = queue.NewMessageQueue()
+	r.orch = turn.NewOrchestrator("agent-1", t.TempDir(), hub, nil, nil, policy.NewDefaultEngine(), turn.SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
 	events := hub.SubscribeAgent(0, "session-1")
 	defer hub.Unsubscribe(events)
 
@@ -237,6 +322,24 @@ func TestRuntimeLifecyclePublishesTurnStateProjection(t *testing.T) {
 	if terminalHistoryRevision != uint64(1) {
 		t.Fatalf("terminal history revision event = %#v", terminalHistoryRevision)
 	}
+	select {
+	case event := <-events:
+		if event.Type != "turn_finished" || event.Data["turn_complete"] != true {
+			t.Fatalf("post-commit terminal notification = %+v", event)
+		}
+		if event.Data["history_revision"] != uint64(1) {
+			t.Fatalf("turn_finished history revision = %#v", event.Data["history_revision"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing post-commit turn_finished notification")
+	}
+	select {
+	case event := <-events:
+		if event.Type == "turn_finished" {
+			t.Fatalf("duplicate turn_finished notification: %+v", event)
+		}
+	default:
+	}
 	if r.historyRevision != 1 || len(r.messages) != 1 || r.messages[0].Content != "done" {
 		t.Fatalf("terminal history projection = revision=%d messages=%#v", r.historyRevision, r.messages)
 	}
@@ -251,6 +354,144 @@ func TestRuntimeLifecyclePublishesTurnStateProjection(t *testing.T) {
 	}
 	if len(view.Transcript) != 1 || view.Transcript[0]["kind"] != "assistant" || view.Transcript[0]["text"] != "done" {
 		t.Fatalf("terminal hydrate transcript = %#v", view.Transcript)
+	}
+}
+
+func TestTerminalHistoryPersistenceFailureSuppressesCompletionEvent(t *testing.T) {
+	hub := stream.NewHub(32, logx.Discard())
+	r := newLifecycleTestRuntime()
+	r.hub = hub
+	r.publisher = hub
+	r.agentID = "agent-1"
+	r.queue = queue.NewMessageQueue()
+	r.orch = turn.NewOrchestrator("agent-1", t.TempDir(), hub, nil, nil, policy.NewDefaultEngine(), turn.SkillAccess{}, nil, nil, hooks.RuntimeConfig{}, logx.Discard())
+	if err := r.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	state := r.turnCoordinator.Snapshot()
+	if _, err := r.lifecycleDispatchErr(turn.TurnCommand{
+		Type: turn.CommandAssistantReceived, SessionID: r.session.ID, TurnID: state.TurnID,
+		StepID: state.StepID, Generation: state.Generation, At: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	events := hub.SubscribeAgent(0, r.session.ID)
+	defer hub.Unsubscribe(events)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "sessions.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r.store = st
+
+	err = r.lifecycleAfterModelStep(turn.StepOutcome{}, []llm.Message{{Role: "assistant", Content: "done"}}, 0)
+	if err == nil {
+		t.Fatal("expected terminal history save failure to propagate")
+	}
+	if state := r.turnCoordinator.Snapshot(); state.TurnStatus.Terminal() {
+		t.Fatalf("failed history commit advanced lifecycle to terminal: %+v", state)
+	}
+	manager := NewManager("agent-1", hub, nil, nil, nil, nil, TurnOptions{}, logx.Discard())
+	manager.sessions[r.session.ID] = r
+	view, err := manager.GetHydrateView(r.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.TurnState.ResultCommitStatus != "failed" || view.HasActiveTurn || !view.TurnState.ExecutionStopped || view.TurnState.Phase != "recovery_required" {
+		t.Fatalf("hydrate after failed commit should be stopped and recoverable: active=%v state=%#v", view.HasActiveTurn, view.TurnState)
+	}
+	if _, err := manager.EnqueueMessage(context.Background(), r.session.ID, queue.RequestTypeMessage, "must not be accepted", nil, nil, ""); err == nil || err.Error() != "result_commit_recovery_required" {
+		t.Fatalf("EnqueueMessage after failed commit error = %v, want result_commit_recovery_required", err)
+	}
+	if r.inputBox.Len() != 0 {
+		t.Fatal("failed runtime persisted a new input that cannot be consumed")
+	}
+	gotFailedStatus := false
+	deadline := time.After(time.Second)
+	for !gotFailedStatus {
+		select {
+		case ev := <-events:
+			if ev.Type == "turn_finished" {
+				t.Fatalf("completion event escaped before history commit: %+v", ev)
+			}
+			if ev.Type == "turn_state" && ev.Data["result_commit_status"] == "failed" {
+				if ev.Data["recovery_required"] != true || ev.Data["execution_stopped"] != true {
+					t.Fatalf("failed commit SSE did not mark recovery required: %+v", ev.Data)
+				}
+				gotFailedStatus = true
+			}
+		case <-deadline:
+			t.Fatal("missing failed result commit status event")
+		}
+	}
+	for {
+		select {
+		case ev := <-events:
+			if ev.Type == "turn_finished" {
+				t.Fatalf("completion event escaped before history commit: %+v", ev)
+			}
+		default:
+			return
+		}
+	}
+}
+
+func TestCommitHistoryFallbackFailurePublishesRecoveryStatus(t *testing.T) {
+	hub := stream.NewHub(32, logx.Discard())
+	r := newLifecycleTestRuntime()
+	r.hub = hub
+	r.publisher = hub
+	r.agentID = "agent-1"
+	r.queue = queue.NewMessageQueue()
+	r.inputBox = NewInputBox()
+	events := hub.SubscribeAgent(0, r.session.ID)
+	defer hub.Unsubscribe(events)
+	if err := r.lifecycleBeginHumanTurn(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(t.TempDir(), "fallback-failure.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r.store = st
+
+	r.commitHistoryFallback([]llm.Message{{Role: "assistant", Content: "unsaved"}})
+	stepBefore := r.turnCoordinator.Snapshot().StepIndex
+	continued := r.runInlineToolContinuationChain(context.Background(), 0, turn.StepOutcome{ScheduleToolResult: true})
+	if continued.Err == nil || continued.Err.Error() != "result_commit_recovery_required" || continued.ScheduleToolResult {
+		t.Fatalf("continuation after fallback save failure = %#v", continued)
+	}
+	if got := r.turnCoordinator.Snapshot().StepIndex; got != stepBefore {
+		t.Fatalf("failed fallback advanced continuation step: before=%d after=%d", stepBefore, got)
+	}
+	manager := NewManager("agent-1", hub, nil, nil, nil, nil, TurnOptions{}, logx.Discard())
+	manager.sessions[r.session.ID] = r
+	view, err := manager.GetHydrateView(r.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.TurnState.ResultCommitStatus != "failed" || view.HasActiveTurn || view.TurnState.Phase != "recovery_required" || !view.TurnState.RecoveryRequired {
+		t.Fatalf("fallback failure hydrate state = active:%v state:%#v", view.HasActiveTurn, view.TurnState)
+	}
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.Type == "turn_state" && event.Data["result_commit_status"] == "failed" {
+				if event.Data["recovery_required"] != true || event.Data["execution_stopped"] != true {
+					t.Fatalf("fallback failure status event = %+v", event)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("fallback persistence failure did not publish recovery status")
+		}
 	}
 }
 
@@ -288,6 +529,10 @@ func TestProviderFailurePersistsPartialTranscriptAndTerminalHydrateHotAndCold(t 
 		Provenance: &llm.MessageProvenance{Producer: "model", Operation: "partial_response", Reference: state.TurnID + "/" + state.StepID},
 	}
 	history := []llm.Message{llm.UserMessage("hello", llm.UserNameHuman), partial}
+	// This focused runtime has no Orchestrator sink; explicitly register the
+	// returned source items as the production appendHistory sink would.
+	history[0] = r.trackHistoryMutation(turn.HistoryMutationAppend, 0, history[0])
+	history[1] = r.trackHistoryMutation(turn.HistoryMutationAppend, 1, history[1])
 	if err := r.lifecycleAfterModelStep(turn.StepOutcome{Err: errors.New("raw body: provider-secret")}, history, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +728,7 @@ func TestColdViewsPreferDurableLifecycleProjection(t *testing.T) {
 
 	// Deliberately make the persisted message snapshot disagree with the
 	// lifecycle projection; recovery must use the lifecycle authority.
-	if err := st.Save(context.Background(), store.Record{
+	if err := st.SaveConversationSnapshot(context.Background(), store.Record{
 		AgentID:  "session-1",
 		NodeID:   "agent-1",
 		Messages: history,
@@ -666,6 +911,9 @@ func TestRuntimeLifecycleStopsContinuationAtStepBudget(t *testing.T) {
 	}
 	if finished.Data["finish_reason"] != "budget_exhausted" || finished.Data["budget_reason"] != "max_tool_calls" || finished.Data["turn_complete"] != true {
 		t.Fatalf("budget terminal SSE = %+v", finished)
+	}
+	if finished.Data["history_revision"] != uint64(1) {
+		t.Fatalf("budget terminal SSE history revision = %#v", finished.Data["history_revision"])
 	}
 	if finished.Data["turn_id"] != terminalState.Data["turn_id"] || fmt.Sprint(finished.Data["turn_generation"]) != fmt.Sprint(terminalState.Data["generation"]) || terminalState.Data["turn_status"] != string(turn.TurnStatusBudgetExhausted) {
 		t.Fatalf("terminal SSE identity/status mismatch: finished=%+v state=%+v", finished, terminalState)
@@ -993,7 +1241,7 @@ func TestRuntimeLifecycleRecoveryPreservesLoadedHistoryRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := st.Save(context.Background(), store.Record{
+	if err := st.SaveConversationSnapshot(context.Background(), store.Record{
 		AgentID: "session-revision", NodeID: "agent-1",
 		Messages:     []llm.Message{{Role: "user", Content: "run"}},
 		RuntimeState: store.RuntimeState{HistoryRevision: 41},
@@ -1048,7 +1296,7 @@ func TestRuntimeLifecycleRecoversCompletedToolResultFromHistory(t *testing.T) {
 		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "call-history", Function: llm.ToolCallFunction{Name: "read_file", Arguments: `{"path":"README.md"}`}}}},
 		{Role: "tool", ToolCallID: "call-history", Name: "read_file", Content: "README"},
 	}
-	if err := st.Save(context.Background(), store.Record{AgentID: "session-1", NodeID: "agent-1", Messages: history}); err != nil {
+	if err := st.SaveConversationSnapshot(context.Background(), store.Record{AgentID: "session-1", NodeID: "agent-1", Messages: history}); err != nil {
 		t.Fatal(err)
 	}
 

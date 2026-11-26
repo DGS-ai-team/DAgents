@@ -2,6 +2,8 @@ package session
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -94,7 +96,10 @@ func TestEnqueueMessageTurn(t *testing.T) {
 		select {
 		case ev := <-ch:
 			switch ev.Type {
-			case "assistant":
+			case "conversation_delta":
+				if ev.Data["part"] != "content" {
+					continue
+				}
 				if c, ok := ev.Data["content"].(string); ok {
 					assistantText += c
 				}
@@ -107,6 +112,161 @@ func TestEnqueueMessageTurn(t *testing.T) {
 	}
 	if assistantText != "hello" {
 		t.Fatalf("assistant = %q", assistantText)
+	}
+}
+
+func TestEditQueuedMessagePreservesEpochAcrossClaimAndClear(t *testing.T) {
+	const sessionID = "edit-epoch"
+	hub := stream.NewHub(8, logx.Discard())
+	rt := &runtime{
+		session:      Session{ID: sessionID, AgentID: "agent-1"},
+		agentID:      "agent-1",
+		inputBox:     NewInputBox(),
+		publisher:    hub,
+		sessionEpoch: 1,
+	}
+	seq, err := rt.inputBox.Append(InputKindUser, queue.Envelope{
+		RequestType: queue.RequestTypeMessage, Content: "original", SessionEpoch: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := &Manager{
+		turn:     TurnOptions{MultimodalEnabled: true},
+		sessions: map[string]*runtime{sessionID: rt},
+	}
+
+	edited, err := mgr.EditQueuedMessage(sessionID, seq, 1, "edited", nil, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edited.Env.SessionEpoch != 1 {
+		t.Fatalf("edited queue epoch=%d, want original admission epoch 1", edited.Env.SessionEpoch)
+	}
+	claimed, ok := rt.inputBox.Pop()
+	if !ok || claimed.Env.Content != "edited" {
+		t.Fatalf("claimed input=%+v ok=%v", claimed, ok)
+	}
+	rt.mu.Lock()
+	rt.sessionEpoch = 2
+	rt.mu.Unlock()
+	rt.inputBox.DropStale(2)
+	if rt.sessionEpochCurrent(claimed.Env.SessionEpoch) {
+		t.Fatalf("claimed edited input from epoch %d remained dispatchable after clear advanced to epoch 2", claimed.Env.SessionEpoch)
+	}
+}
+
+func TestClearContextWhenRuntimeIsColdAdvancesInputConversationEpoch(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cold-clear.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	reg, err := tools.NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{}, reg, policy.NewDefaultEngine(), st,
+		TurnOptions{SkillsEnabled: false, CompressionBlocking: 0, MultimodalEnabled: true}, logx.Discard())
+	defer mgr.Stop()
+
+	session, _, err := mgr.Create("cold-clear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := mgr.getRuntime(session.ID)
+	receipt := InputReceipt{ClientRequestID: "request-before-cold-clear", PayloadDigest: "digest", ConversationEpoch: 1}
+	accepted, duplicate, err := rt.inputBox.AppendDeferredWithReceipt(InputKindUser, queue.Envelope{
+		RequestType: queue.RequestTypeMessage, Content: "must be removed by clear", SessionEpoch: 1,
+	}, receipt)
+	if err != nil || duplicate || accepted.InputSeq == 0 {
+		t.Fatalf("persisted pending input receipt=%+v duplicate=%v err=%v", accepted, duplicate, err)
+	}
+	rt.persistMu.Lock()
+	err = rt.persistLockedWithInputReceipt(context.Background(), &accepted)
+	rt.persistMu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.stop()
+	mgr.mu.Lock()
+	delete(mgr.sessions, session.ID)
+	mgr.mu.Unlock()
+	if coldReceipt, found, err := mgr.LookupInputReceipt(context.Background(), session.ID, receipt.ClientRequestID, 1); err != nil || !found || coldReceipt.Status != "queued" {
+		t.Fatalf("cold receipt lookup=%+v found=%v err=%v", coldReceipt, found, err)
+	}
+
+	if _, err := mgr.ClearContext(session.ID); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := st.Load(context.Background(), session.ID)
+	if err != nil || stored == nil {
+		t.Fatalf("load cleared runtime state=%v err=%v", stored, err)
+	}
+	epoch, err := ConversationEpochFromSnapshot(stored.RuntimeState.InputBoxState)
+	if err != nil || epoch != 2 {
+		t.Fatalf("cold clear epoch=%d err=%v, want 2", epoch, err)
+	}
+	if _, found, err := LookupReceiptInSnapshot(stored.RuntimeState.InputBoxState, receipt.ClientRequestID, 2); err != nil || found {
+		t.Fatalf("old receipt survived clear: found=%v err=%v", found, err)
+	}
+	if _, found, err := st.LookupInputReceipt(context.Background(), session.ID, receipt.ClientRequestID); err != nil || found {
+		t.Fatalf("input receipt row survived clear: found=%v err=%v", found, err)
+	}
+	if _, _, err := LookupReceiptInSnapshot(stored.RuntimeState.InputBoxState, receipt.ClientRequestID, 1); !errors.Is(err, ErrInputConversationChanged) {
+		t.Fatalf("old epoch lookup error=%v, want conversation changed", err)
+	}
+	if pending := pendingUserInputsFromSnapshot(stored.RuntimeState.InputBoxState); len(pending) != 0 {
+		t.Fatalf("cold clear retained queued input: %+v", pending)
+	}
+}
+
+func TestLegacySnapshotReceiptsMigrateToIndexedTableAndLeaveRuntimeJSON(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "legacy-receipts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	receipt := InputReceipt{ClientRequestID: "legacy-request", PayloadDigest: "legacy-digest", ConversationEpoch: 1, InputSeq: 1, InputRevision: 1, Status: "queued"}
+	legacySnapshot, err := json.Marshal(inputBoxState{Seq: 1, ConversationEpoch: 1, Receipts: map[string]InputReceipt{receipt.ClientRequestID: receipt}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(context.Background(), store.Record{AgentID: "legacy-receipts", NodeID: "agent-1", RuntimeState: store.RuntimeState{InputBoxState: legacySnapshot}}); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := tools.NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager("agent-1", stream.NewHub(32, logx.Discard()), &llm.MockClient{}, reg, policy.NewDefaultEngine(), st,
+		TurnOptions{SkillsEnabled: false, CompressionBlocking: 0, MultimodalEnabled: true}, logx.Discard())
+	defer mgr.Stop()
+	if _, _, err := mgr.Create("legacy-receipts"); err != nil {
+		t.Fatal(err)
+	}
+	rt := mgr.getRuntime("legacy-receipts")
+	if err := rt.persist(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	stored, found, err := st.LookupInputReceipt(context.Background(), "legacy-receipts", receipt.ClientRequestID)
+	if err != nil || !found || stored.PayloadDigest != receipt.PayloadDigest {
+		t.Fatalf("migrated receipt=%+v found=%v err=%v", stored, found, err)
+	}
+	record, err := st.Load(context.Background(), "legacy-receipts")
+	if err != nil || record == nil {
+		t.Fatalf("load migrated runtime: record=%+v err=%v", record, err)
+	}
+	var persisted inputBoxState
+	if err := json.Unmarshal(record.RuntimeState.InputBoxState, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Receipts) != 0 {
+		t.Fatalf("migrated receipt map remained in runtime snapshot: %+v", persisted.Receipts)
+	}
+	projected, found, err := mgr.LookupInputReceipt(context.Background(), "legacy-receipts", receipt.ClientRequestID, 1)
+	if err != nil || !found || projected.Status != "cancelled" {
+		t.Fatalf("migrated receipt projection=%+v found=%v err=%v", projected, found, err)
 	}
 }
 
@@ -369,6 +529,49 @@ func TestPersistTurnLifecycleBoundaries(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsSessionWhenLifecycleProjectionCannotRestore(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "invalid-lifecycle-restore.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	reg, err := tools.NewRegistry(t.TempDir(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := TurnOptions{SkillsEnabled: false}
+	first := NewManager("agent-1", stream.NewHub(8, logx.Discard()), &llm.MockClient{}, reg, policy.NewDefaultEngine(), st, options, logx.Discard())
+	session, _, err := first.Create("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Stop()
+
+	// A validly stored but impossible first event makes the durable lifecycle
+	// projection unrecoverable. Starting a fresh runtime anyway would reset its
+	// in-memory command sequence and could reuse IDs already present in SQLite.
+	if _, err := st.AppendTurnEvent(context.Background(), turn.TurnEventEnvelope{
+		SessionID: session.ID,
+		AgentID:   "agent-1",
+		TurnID:    "orphan-turn",
+		StepID:    "orphan-step",
+		CommandID: session.ID + "-lifecycle-1",
+		EventType: turn.EventStepStarted,
+		Payload:   json.RawMessage(`{"generation":1}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded := NewManager("agent-1", stream.NewHub(8, logx.Discard()), &llm.MockClient{}, reg, policy.NewDefaultEngine(), st, options, logx.Discard())
+	defer reloaded.Stop()
+	if _, _, err := reloaded.Create(session.ID); err == nil || !strings.Contains(err.Error(), "load turn lifecycle") {
+		t.Fatalf("Create with unrecoverable lifecycle should fail explicitly, got %v", err)
+	}
+	if rt := reloaded.getRuntime(session.ID); rt != nil {
+		t.Fatal("runtime started despite unrecoverable lifecycle projection")
+	}
+}
+
 func TestPersistTurnLifecycleToolBatchBoundaries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tool-lifecycle.db")
 	st, err := store.Open(path)
@@ -436,7 +639,7 @@ func TestRestoreSessionFromStore(t *testing.T) {
 	}
 	ctx := context.Background()
 	msgs := []llm.Message{{Role: "user", Content: "old"}, {Role: "assistant", Content: "ok"}}
-	if err := st.Save(ctx, store.Record{AgentID: "sess-restore", NodeID: "agent-1", Messages: msgs}); err != nil {
+	if err := st.SaveConversationSnapshot(ctx, store.Record{AgentID: "sess-restore", NodeID: "agent-1", Messages: msgs}); err != nil {
 		t.Fatal(err)
 	}
 	st.Close()

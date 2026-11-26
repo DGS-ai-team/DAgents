@@ -1,10 +1,19 @@
 package turn
 
 import (
+	"context"
 	"strings"
 
 	"github.com/DGS-ai-team/DAgents/node/internal/llm"
 )
+
+func assistantLifecycleID(ctx context.Context) string {
+	execution, ok := ExecutionContextFromContext(ctx)
+	if !ok {
+		return ""
+	}
+	return llm.AssistantMessageIDForStep(execution.StepID)
+}
 
 // assistantMessageFromResult converts a completed model response to the
 // canonical assistant history message. It must not be used for a partial

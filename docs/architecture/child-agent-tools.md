@@ -102,7 +102,7 @@ creating → active → completed
 | `temporary_agent_completed` | 正常完成或 TTL 终态结果 |
 | `temporary_agent_cancelled` | 显式取消或父级取消 |
 
-子 runtime 的 assistant、reasoning、tool_call、tool_result 事件仍可通过 relay 关联到父 session；UI 默认在工具卡片展开区展示进度，避免把子 transcript 平铺到父消息流。
+子 runtime 的 `conversation_delta`、tool_call、tool_result 等事件仍可通过 relay 关联到父 session；UI 默认在工具卡片展开区展示子 Agent 状态，避免把子 transcript 混入父会话的持久历史。
 
 ## 8. 持久化、刷新与重启
 

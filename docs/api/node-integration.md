@@ -88,15 +88,49 @@ Search 工具接受 `query`（1–128 Unicode 字符）、可选 `count`（1–5
 
 成功持久化新段后，SSE `runtime/notice` 的安全载荷包含 `message_kind: "context_boundary"` 和稳定的 `boundary_id`。hydrate transcript 中对应 `{ "kind": "context_boundary", "boundary_id": "..." }`。客户端按 ID 去重，在本次真实用户消息之前显示“新对话 · 上下文已重置”，不得渲染内部衔接正文或归档路径。消息队列中较晚到达的输入不改变此边界的顺序。SQLite 中的既有 transcript 继续保留；模型可读的段归档由 Node 写入 Agent 自身工作区的 `.dagents/<agent_id>/history/`。
 
-`POST /v1/messages` 接收 `agent_id`、`content` 和可选 `request_type`；默认类型为 `message`，`resume` 用于继续等待 HITL 的 Agent。Node 异步执行 turn，接口立即返回 `{ "accepted": true, "agent_id": "...", "priority": "..." }` 一类的接受结果。
+`POST /v1/messages` 接收 `agent_id`、`content` 和可选 `request_type`；默认类型为 `message`，`resume` 用于继续等待 HITL 的 Agent。每条 `message` 必须带本次发送唯一的 `client_request_id` 和从 hydrate 读取的 `conversation_epoch`；Node 将 FIFO 输入载荷、幂等回执和队列水位通过 SQLite 持久化边界提交后才返回 accepted 并允许消费者 claim。同 Agent、同 epoch、同 ID、同 payload 的重试返回原 `input_seq` / `input_id` 并标记 `duplicate: true`；同 ID 改变正文或附件返回 `409 input_request_conflict`，epoch 已因清空对话而变化时返回 `409 conversation_changed`。成功响应还返回 `input_revision`、`status` 和 epoch；`resume` 等控制请求不需要这些消息幂等字段，也不返回输入序号。执行期间继续提交的消息进入同一 FIFO 输入箱；存储失败会撤回暂存项并返回错误。
+
+若 POST 响应超时或连接断开，客户端不要生成新的 request ID。可通过 `GET /v1/agents/{agent_id}/inputs?client_request_id=...&conversation_epoch=...` 查询原回执：`found: true` 返回原输入身份及 `queued` / `claimed` / `consumed` / `cancelled` 状态；`found: false` 表示当前 epoch 未找到该请求，可使用同一 ID、同一 payload 重试 POST。旧 epoch 查询明确冲突。回执元数据按 conversation 与 request ID 建索引；待执行输入载荷保存在 SQLite `conversation_input_queue`，`conversation_inputs` 保存幂等回执，runtime `input_box_state` 只保存 epoch、sequence 和 queue/control revision 等调度水位，不再作为队列正文的权威副本。清空对话会递增 epoch，并在同一持久化边界内清理该对话的队列行与回执。
+
+`GET /v1/agents/{agent_id}/hydrate` 的 `pending_inputs` 是仅含用户消息的待处理投影，包含 `input_id`、`input_seq`、`input_revision`、`status`（`queued` / `claimed`）、正文、图片数量和文件引用；不会返回图片字节。新发送的附件预览由 Desktop 本地保留，重开后 Node 提供附件摘要和文件引用。
+
+同一 hydrate 返回 `queue_paused` 与 `queue_control_revision`。`POST /v1/agents/{agent_id}/inputs/control` 使用 `{"paused":true|false,"expected_revision":N}` 对根输入队列做 CAS；revision 过期返回 `409 queue_control_revision_conflict`，客户端应重新 hydrate。暂停只阻止队列 claim，不拒绝新消息；新输入仍会被接受并显示在队列中。Desktop 的“停止本轮”先持久暂停队列，再取消当前 Turn，因此已排队消息不会在停止后自动启动，用户可显式继续。模型失败、中断或额度耗尽也会持久暂停队列；内部审批准备轮被替换产生的取消不视为用户停止。清空上下文会清除旧 epoch 输入并恢复队列控制状态。
+
+未 claim 的用户输入可用版本 CAS 修改或撤回：`PATCH /v1/agents/{agent_id}/inputs/{input_seq}` 请求需包含 `expected_revision`、新 `content`，以及可选 `content_parts`、`file_refs`、`user_message_name`；省略附件字段会保留原附件，传空数组才会清除对应附件；成功返回相同 `input_id` / `input_seq` 与递增后的 `revision`。`DELETE` 同一路径的 JSON 请求需包含 `expected_revision`，成功返回 `204`。编辑 / 撤回与 claim 共用 InputBox 锁定边界，队列行、回执和 runtime 水位在同一 SQLite 持久化边界更新后才恢复消费；若 claim 已先发生，返回 `409 input_already_claimed`。版本不匹配返回 `409 input_revision_conflict`；队列不存在返回 `404 input_not_found`。冲突后客户端应 hydrate 权威队列状态，不能自行假定变更成功。runtime `input_box_state` 只保存 epoch、seq、queue/control revision 与 schema version，旧 mailbox JSON 仅在恢复时迁移一次。
+
+只读历史读取现提供轮次分页：`GET /v1/agents/{agent_id}/conversations/{conversation_id}/rounds?limit=10&before_round_id=...` 返回已结束轮次的摘要、所选 revision、轮内记录数和下一页锚点；当前存储模型仍是一 Agent 对应一个 conversation，因此两段 ID 必须相同。首版 cursor 锚定真实 `round_id`，普通追加新轮不会使旧页失效；清空导致锚点消失时返回 `409 history_cursor_stale`，客户端应重新加载。`limit` 默认 10，范围 1–100。
+
+轮次修订版本由 `GET /v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/revisions` 只读列出，包含当前选中版本、执行终态和条目数；active revision 不向历史页开放。Desktop 可选择这些保留版本查看，不会改变当前对话选中的 revision，也不会恢复对应 checkpoint 或重新执行工具。
+
+轮内内容用 `GET /v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/items?limit=50&revision_id=...&after_item_id=...` 分页。省略 `revision_id` 读取当前所选 revision；指定旧 revision 时响应标注 `selected: false`，只读返回对应记录，不会覆盖当前展示或 runtime 上下文。项目页返回与 hydrate 相同的安全 transcript 投影及 `item_version`，不会把模型内部上下文消息直接作为聊天项返回；`limit` 默认 50，范围 1–200。旧 item 锚点、清空后的 round 锚点返回 `409 history_cursor_stale`；active round 返回 `409 history_round_active`，仍由聊天页展示。
+
+主聊天 hydrate 的 transcript 投影最多内联 512 KiB：每条 assistant 工具调用记录首屏最多返回 50 个摘要；参数及工具结果正文不随摘要重复传输，点击单条工具后通过 `GET .../rounds/{round_id}/tool-steps/{tool_call_id}?revision_id=...&source_item_id=...` 读取完整配对。组内余项通过 `GET .../rounds/{round_id}/tool-steps?revision_id=...&source_item_id=...&after_tool_call_id=...&limit=50` 继续读取，游标绑定具体 assistant 记录及 revision，Node 保证调用与结果一起返回。超长 user / assistant 正文保留可见预览，点击“查看完整内容”时通过 `GET .../rounds/{round_id}/items/{item_id}/content?revision_id=...&part=content|reasoning` 读取对应文本。完整原始记录仍保存在 Node，读取详情不会改写历史。
+
+最新且当前选中的已结束 human 轮次可编辑并重新发送。先调用 `GET /v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/resubmit-target?revision_id=...`；只有会话空闲、没有排队 / 执行中输入或待处理审批，且保留了轮次起点 checkpoint 时才返回目标与原始用户输入。随后调用同路径下的 `POST .../resubmit`，请求包括 `expected_selected_revision_id`、`expected_conversation_revision`、`pre_checkpoint_revision`、`conversation_epoch`、`client_request_id`、修改后的 `content`，以及需要保留的 `content_parts`、`file_refs` 与 `user_message_name`。Node 在接受输入和启动新执行时分别重新校验 revision / checkpoint / 队列状态；成功后同一逻辑轮次选择一个新的不可变 revision，原 revision 仍可只读查看。重复 POST 使用原 ID / 内容返回相同回执，不会重复执行。过期目标或会话繁忙返回 `409 resubmit_target_changed`；清空对话后 epoch 不匹配返回 `409 conversation_changed`。重新发送不会回滚旧轮已完成的文件或外部副作用，也不会沿用旧审批，新工具调用仍按当前审批策略处理。
+
+未分配到轮次的旧记录通过 `GET /v1/agents/{agent_id}/conversations/{conversation_id}/legacy-items?limit=50&after_item_id=...` 查看。响应包含未归属记录总数、历史完整性标记和安全 transcript 项目；其 cursor 锚定实际 `item_id`，清空或锚点消失后返回 `409 history_cursor_stale`。旧记录以单独的“早期记录”时间线呈现，不按正文或间隔猜测轮次；此接口只读，不提供旧轮次 checkpoint 重建或编辑重发。
+
+`GET /v1/agents/{agent_id}/hydrate` 返回 transcript 与执行状态的聚合快照。主聊天 transcript 从独立 conversation records 中读取最近 5 个已结束的所选轮次及活动轮次，并带上窗口前最近的上下文边界标记；旧轮次与无轮次归属的记录通过历史读取 API 查看。响应中的 `has_earlier_history`、`earlier_round_count`、`window_start_round` 与 `window_end_round` 描述可继续查阅的旧历史和当前窗口范围。活动 runtime 中尚未提交的记录只覆盖当前窗口或带有活动轮归属的脏记录，不会让完整 LLM working set 倒灌到 Desktop transcript。
+
+响应中的 `stream_epoch`、`covered_agent_seq`、`covered_stream_seq` 与 `assistant_drafts` 共同构成实时接续基线：Hub 在同一读边界捕获可靠 Agent 游标、进程级流序号及当前流式 assistant / reasoning 项，随后 Node 构造 hydrate 投影。草稿带有稳定 item / attempt 身份、累计文本、`through_chunk_seq`、`through_agent_seq` 和 `through_stream_seq`。高频内容通过 ephemeral `conversation_delta` 实时发送，不进入重放序列；hydrate 用全局流覆盖位解决快照期间的迟到/重复增量，避免漏字或旧草稿复活。客户端只在接受同纪元快照后采用覆盖水位；较新的本地 delta 必须保留。`agent_seq_hint` 与 `stream_seq_hint` 仍是响应时的诊断提示，不表示覆盖快照。
+
+`history_revision`（顶层及 `turn_state.history_revision`）用于判断消息投影是否前进；`turn_state.lifecycle_seq` 用于判断执行状态是否前进。客户端必须分别比较这两个水位：一份快照的消息较新、状态较旧时仍可接收消息；状态较新、消息较旧时也仍可接收状态，不能因其中一个投影过期而丢弃整份快照。运行中的 Node 在同一 lifecycle 边界内采集两者，但这不代表两个 SQLite 数据库或运行时内存都处于同一事务中。
+
+正常终态的 `turn_finished` 只在结果历史和对应 lifecycle 状态已越过当前持久化边界后发布，并带有 `turn_id`、`turn_generation` 和已提交的 `history_revision`。它是完成通知；消息正文和工具结果仍以 hydrate transcript 为准。慢订阅者的事件队列溢出时，Node 会关闭该 SSE 连接，避免锁外补发造成事件乱序；客户端应按原游标重连。若游标超出保留范围，Node 发出 `resync_required`，客户端必须重新 hydrate 后再应用新事件。
+
+assistant 正文 / reasoning 的高频 `conversation_delta` 与模型尚未结束生成的 `tool_call` 参数片段均为 `ephemeral`，不占 `agent_seq` 且不参与回放；前者由 hydrate 的 assistant 草稿快照恢复，后者只作即时预览。完整确认的工具调用才进入 replayable 序列。这样可靠游标只越过可由已提交 transcript、lifecycle、活动工具和 assistant draft 快照恢复的状态。
+
+若结果提交失败，Node 不发布成功的 `turn_finished`，会在 `turn_state` 与运行时 hydrate 中返回 `phase: "recovery_required"`、`result_commit_status: "failed"`、`execution_stopped: true`、`recovery_required: true`；在恢复前，新的 `POST /v1/messages` 返回 HTTP 409，错误码为 `result_commit_recovery_required`。失败标记保存在运行时内存，Node 不承诺进程重启后仍能取回未持久化内容。
 
 ```sh
 curl -X POST http://127.0.0.1:18765/v1/messages \
   -H 'Content-Type: application/json' \
-  -d '{"agent_id":"AGENT_ID","content":"你好"}'
+  -d '{"agent_id":"AGENT_ID","request_type":"message","content":"你好","client_request_id":"send-6b3e3551","conversation_epoch":1}'
 ```
 
 `GET /v1/streams` 使用 `text/event-stream`。SSE wire frame 使用标准 `event:`、可选 `id:` 和 `data:`。`data` JSON 是 `stream.Event`：包含 `agent_id`、`type`、`seq`、可选 `agent_seq`、`event_version`、`stream_epoch`、`delivery`、`ts`、事件对应的 `data`。**事件判别字段是 `type`，不是 `event_type`。**`resync_required` 表示回放游标太旧，应先 hydrate。查询游标、live 订阅和 `Last-Event-ID` 以 `server_messages.go` 为准。
+
+有可信 Step 身份的 `conversation_delta` 事件在 `data` 中携带 `item_id`、`turn_id`、`step_id`、`attempt_id`、`part`、`chunk_seq` 与增量正文。`part` 为 `content` 或 `reasoning`；`item_id` 分别对应 `<step_id>/assistant/content` 与 `<step_id>/assistant/reasoning`，与最终或可恢复 partial hydrate 项的 `item_id`、`id` 相同，当前版本为 `item_version: 1`。同一逻辑 Step 的 provider 重试沿用 `item_id`，但使用不同 `attempt_id`；`chunk_seq` 对每个 attempt 和 part 独立从 1 递增。事件是 ephemeral，不带可靠 `agent_seq`；`seq` 只用于与 `covered_stream_seq` 做快照对齐。客户端只应接收当前活动 attempt 的连续 delta，不能让旧 attempt 的迟到事件覆盖新尝试或已完成内容。没有可信 Step ID 的内容仍可即时显示，但不能进入可恢复草稿快照。身份字段是 Node 展示元数据，不会发送给 LLM provider。
 
 ```sh
 curl -N 'http://127.0.0.1:18765/v1/streams?agent_id=AGENT_ID&live=1'
@@ -190,6 +224,14 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 | `POST` | `/v1/agents/{agent_id}/auto-config/reconcile` | `handleAutonomyV2ConfigReconcile` | [autonomy_v2_api.go#L18](../../node/internal/api/autonomy_v2_api.go#L18) |
 | `GET` | `/v1/agents/{agent_id}/browser/view` | `handleAgentBrowserView` | [browser_view_api.go#L9](../../node/internal/api/browser_view_api.go#L9) |
 | `POST` | `/v1/agents/{agent_id}/cancel` | `handleAgentCancel` | [agents_api.go#L44](../../node/internal/api/agents_api.go#L44) |
+| `POST` | `/v1/agents/{agent_id}/inputs/control` | `handleInputQueueControl` | [agents_api.go#L43](../../node/internal/api/agents_api.go#L43) |
+| `GET` | `/v1/agents/{agent_id}/conversations/{conversation_id}/rounds` | `handleConversationRoundPage` | [conversation_history_api.go](../../node/internal/api/conversation_history_api.go) |
+| `GET` | `/v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/revisions` | `handleConversationRoundRevisions` | [conversation_history_api.go](../../node/internal/api/conversation_history_api.go) |
+| `GET` | `/v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/items` | `handleConversationRoundItems` | [conversation_history_api.go](../../node/internal/api/conversation_history_api.go) |
+| `GET` | `/v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/items/{item_id}/content` | `handleConversationItemContent` | [conversation_history_api.go](../../node/internal/api/conversation_history_api.go) |
+| `GET` | `/v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/tool-steps` | `handleConversationToolSteps` | [conversation_history_api.go](../../node/internal/api/conversation_history_api.go) |
+| `GET` | `/v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/tool-steps/{tool_call_id}` | `handleConversationToolStep` | [conversation_history_api.go](../../node/internal/api/conversation_history_api.go) |
+| `GET` | `/v1/agents/{agent_id}/conversations/{conversation_id}/legacy-items` | `handleConversationLegacyItems` | [conversation_history_api.go](../../node/internal/api/conversation_history_api.go) |
 | `GET` | `/v1/agents/{agent_id}/child-agents` | `handleAgentListChildAgents` | [agents_api.go#L52](../../node/internal/api/agents_api.go#L52) |
 | `POST` | `/v1/agents/{agent_id}/child-agents/{child_agent_id}/cancel` | `handleAgentCancelChildAgent` | [agents_api.go#L54](../../node/internal/api/agents_api.go#L54) |
 | `POST` | `/v1/agents/{agent_id}/clear-context` | `handleAgentClearContext` | [agents_api.go#L47](../../node/internal/api/agents_api.go#L47) |
@@ -202,6 +244,9 @@ Browser 页面只读快照由 `GET /v1/agents/{agent_id}/browser/view?page_id=..
 | `GET` | `/v1/agents/{agent_id}/handbook/history` | `handleGetAgentHandbookHistory` | [agents_api.go#L34](../../node/internal/api/agents_api.go#L34) |
 | `POST` | `/v1/agents/{agent_id}/handbook/restore` | `handleRestoreAgentHandbook` | [agents_api.go#L35](../../node/internal/api/agents_api.go#L35) |
 | `GET` | `/v1/agents/{agent_id}/hydrate` | `handleAgentHydrate` | [agents_api.go#L40](../../node/internal/api/agents_api.go#L40) |
+| `GET` | `/v1/agents/{agent_id}/inputs` | `handleGetInputReceipt` | [agents_api.go#L42](../../node/internal/api/agents_api.go#L42) |
+| `PATCH` | `/v1/agents/{agent_id}/inputs/{input_seq}` | `handlePatchQueuedInput` | [agents_api.go](../../node/internal/api/agents_api.go) |
+| `DELETE` | `/v1/agents/{agent_id}/inputs/{input_seq}` | `handleDeleteQueuedInput` | [agents_api.go](../../node/internal/api/agents_api.go) |
 | `GET` | `/v1/agents/{agent_id}/linux-channels` | `handleGetAgentLinuxChannels` | [linux_channels_api.go#L62](../../node/internal/api/linux_channels_api.go#L62) |
 | `PUT` | `/v1/agents/{agent_id}/linux-channels` | `handlePutAgentLinuxChannels` | [linux_channels_api.go#L63](../../node/internal/api/linux_channels_api.go#L63) |
 | `GET` | `/v1/agents/{agent_id}/mcp` | `handleGetAgentMCP` | [mcp_api.go#L42](../../node/internal/api/mcp_api.go#L42) |

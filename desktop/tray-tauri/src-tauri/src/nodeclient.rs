@@ -659,7 +659,11 @@ impl Client {
             "POST",
             "/v1/messages",
             Some(serde_json::json!({
-                "agent_id": agent_id, "request_type": "message", "content": content
+                "agent_id": agent_id,
+                "request_type": "message",
+                "content": content,
+                "client_request_id": format!("desktop-rust-test-{agent_id}"),
+                "conversation_epoch": 1
             })),
         )
     }

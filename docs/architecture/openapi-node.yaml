@@ -26,6 +26,12 @@ paths:
       responses:
         "200":
           description: 已创建
+  /v1/agents/watermarks:
+    get:
+      summary: 批量读取会话版本水位
+      description: 只读会话 revision 元数据，不加载 transcript 或启动冷会话。
+      responses:
+        "200": {description: Node stream epoch 与各会话的 revision 水位}
   /v1/agents/{agent_id}:
     get:
       summary: 获取 Agent
@@ -181,12 +187,318 @@ paths:
           description: OK
   /v1/agents/{agent_id}/hydrate:
     get:
-      summary: 灌水对话与 HITL
+      summary: 获取对话 transcript、Turn 与待处理输入快照
+      description: >-
+        主视图返回最近 5 个终结轮次和活动轮次；assistant 草稿通过覆盖水位与 SSE 增量对齐。
+        完整消息契约、序号语义和恢复规则见 docs/api/node-integration.md 的“消息、SSE 与 HITL”。
       parameters:
         - $ref: "#/components/parameters/AgentID"
       responses:
         "200":
-          description: hydrate 视图
+          description: transcript 与当前执行状态的权威快照
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentHydrateResponse"}
+  /v1/agents/{agent_id}/inputs:
+    get:
+      summary: 查询消息提交回执
+      description: 用原 client_request_id 和 conversation_epoch 对账 POST /v1/messages 的超时结果；不要为重试生成新 ID。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: client_request_id
+          in: query
+          required: true
+          schema: {type: string, maxLength: 128}
+        - name: conversation_epoch
+          in: query
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+      responses:
+        "200": {description: 回执 found 与原输入身份 / 状态, content: {application/json: {schema: {$ref: "#/components/schemas/InputReceiptResponse"}}}}
+        "400": {description: 回执查询参数无效}
+        "409": {description: conversation epoch 已改变}
+  /v1/agents/{agent_id}/inputs/control:
+    post:
+      summary: 暂停或继续处理排队消息
+      description: 使用 queue_control_revision 做 CAS。暂停不阻止新消息入队。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/InputQueueControlRequest"}
+      responses:
+        "200": {description: 当前暂停状态与新 revision, content: {application/json: {schema: {$ref: "#/components/schemas/InputQueueControlResponse"}}}}
+        "400": {description: expected_revision 无效}
+        "404": {description: Agent 不存在}
+        "409": {description: queue control revision 冲突}
+  /v1/agents/{agent_id}/inputs/{input_seq}:
+    patch:
+      summary: CAS 编辑尚未 claim 的排队消息
+      description: 只允许编辑 queued 用户消息；附件字段省略表示保留，空数组表示清除。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: input_seq
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/QueuedInputPatch"}
+      responses:
+        "200": {description: 已更新的 input 身份、revision 与状态, content: {application/json: {schema: {$ref: "#/components/schemas/QueuedInputResponse"}}}}
+        "400": {description: 请求或 revision 无效}
+        "404": {description: Agent 或排队消息不存在}
+        "409": {description: revision 冲突或消息已 claim}
+    delete:
+      summary: CAS 撤回尚未 claim 的排队消息
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: input_seq
+          in: path
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/QueuedInputDelete"}
+      responses:
+        "204": {description: 已撤回}
+        "400": {description: expected_revision 无效}
+        "404": {description: Agent 或排队消息不存在}
+        "409": {description: revision 冲突或消息已 claim}
+  /v1/agents/{agent_id}/conversations/{conversation_id}/rounds:
+    get:
+      summary: 分页读取已结束的对话轮次
+      description: cursor 使用真实 round_id；详细字段与 stale-cursor 行为见 docs/api/node-integration.md。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: conversation_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 10}
+        - name: before_round_id
+          in: query
+          schema: {type: string}
+      responses:
+        "200": {description: 轮次摘要与下一页锚点, content: {application/json: {schema: {$ref: "#/components/schemas/ConversationRoundPage"}}}}
+        "400": {description: 参数无效}
+        "409": {description: history cursor 已失效}
+        "503": {description: 历史存储不可用}
+  /v1/agents/{agent_id}/conversations/{conversation_id}/legacy-items:
+    get:
+      summary: 分页读取未归属轮次的早期记录
+      description: 只读兼容入口；不猜测旧消息轮次归属。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: conversation_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+        - name: after_item_id
+          in: query
+          schema: {type: string}
+      responses:
+        "200": {description: 安全 transcript 项目及完整性标记, content: {application/json: {schema: {$ref: "#/components/schemas/ConversationLegacyItemsPage"}}}}
+        "400": {description: 参数无效}
+        "409": {description: history cursor 已失效}
+        "503": {description: 历史存储不可用}
+  /v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/revisions:
+    get:
+      summary: 列出轮次的只读 revision
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: conversation_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: round_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200": {description: 终态 revision 摘要与当前选中版本, content: {application/json: {schema: {$ref: "#/components/schemas/ConversationRoundRevisionsResponse"}}}}
+        "404": {description: 对话或轮次不存在}
+        "409": {description: 轮次仍在执行}
+        "503": {description: 历史存储不可用}
+  /v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/items:
+    get:
+      summary: 分页读取轮次 transcript
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: conversation_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: round_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+        - name: revision_id
+          in: query
+          schema: {type: string}
+        - name: after_item_id
+          in: query
+          schema: {type: string}
+      responses:
+        "200": {description: 安全 transcript 投影、revision 身份及下一页游标, content: {application/json: {schema: {$ref: "#/components/schemas/ConversationRoundItemsResponse"}}}}
+        "400": {description: 参数无效}
+        "404": {description: 对话或轮次不存在}
+        "409": {description: history cursor 已失效或轮次仍活动}
+        "503": {description: 历史存储不可用}
+  /v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/items/{item_id}/content:
+    get:
+      summary: 按需读取完整消息正文或 reasoning
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: conversation_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: round_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: item_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: revision_id
+          in: query
+          schema: {type: string}
+        - name: part
+          in: query
+          schema: {type: string, enum: [content, reasoning], default: content}
+      responses:
+        "200": {description: 完整文本及 item_version, content: {application/json: {schema: {$ref: "#/components/schemas/ConversationItemContentResponse"}}}}
+        "400": {description: part 或路径参数无效}
+        "404": {description: 对话、轮次或消息不存在}
+        "503": {description: 历史存储不可用}
+  /v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/tool-steps:
+    get:
+      summary: 分页读取单个 assistant 消息的工具调用与结果配对
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: conversation_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: round_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: source_item_id
+          in: query
+          required: true
+          schema: {type: string}
+        - name: revision_id
+          in: query
+          schema: {type: string}
+        - name: after_tool_call_id
+          in: query
+          schema: {type: string}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 50, default: 50}
+      responses:
+        "200": {description: 工具调用 / 结果配对与下一页游标, content: {application/json: {schema: {$ref: "#/components/schemas/ConversationToolStepsResponse"}}}}
+        "400": {description: 参数无效}
+        "404": {description: 对话或轮次不存在}
+        "409": {description: history cursor 已失效或轮次仍活动}
+        "503": {description: 历史存储不可用}
+  /v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/tool-steps/{tool_call_id}:
+    get:
+      summary: 按需读取指定工具调用与结果
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: conversation_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: round_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: tool_call_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: source_item_id
+          in: query
+          required: true
+          schema: {type: string}
+        - name: revision_id
+          in: query
+          schema: {type: string}
+      responses:
+        "200": {description: 指定工具调用与结果, content: {application/json: {schema: {$ref: "#/components/schemas/ConversationToolStepsResponse"}}}}
+        "400": {description: 参数无效}
+        "404": {description: 对话、轮次或工具调用不存在}
+        "409": {description: 轮次仍活动}
+        "503": {description: 历史存储不可用}
+  /v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/resubmit-target:
+    get:
+      summary: 检查末轮是否可编辑重发
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: conversation_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: round_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: revision_id
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        "200": {description: 目标 revision、checkpoint 与原始用户输入, content: {application/json: {schema: {$ref: "#/components/schemas/ConversationResubmitTargetResponse"}}}}
+        "400": {description: revision 或路径无效}
+        "404": {description: Agent 或轮次不存在}
+        "409": {description: 轮次不是当前可重发目标或会话正忙}
+  /v1/agents/{agent_id}/conversations/{conversation_id}/rounds/{round_id}/resubmit:
+    post:
+      summary: 编辑并重新执行最新已结束轮次
+      description: 创建同一逻辑轮次的新 revision；不会回滚旧 revision 的文件或外部副作用。
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+        - name: conversation_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: round_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ConversationResubmitRequest"}
+      responses:
+        "200":
+          description: 新 revision 的输入回执
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PostMessageResponse"}
+        "400": {description: 重发请求无效}
+        "409": {description: 目标 revision / checkpoint / conversation epoch 已变化或会话正忙}
+        "413": {description: 消息过大}
   /v1/agents/{agent_id}/policy:
     get:
       summary: 读取该 Agent 的审批策略（SQLite）
@@ -234,24 +546,19 @@ paths:
           description: OK
   /v1/messages:
     post:
-      summary: 入队用户消息 / HITL resume（仅 agent_id）
+      summary: 入队用户消息或继续 HITL
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [agent_id]
-              properties:
-                agent_id:
-                  type: string
-                content:
-                  type: string
-                request_type:
-                  type: string
+              $ref: "#/components/schemas/PostMessageRequest"
       responses:
         "200":
-          description: 已入队
+          description: 已接受；普通消息返回幂等输入身份，resume 为控制请求
+          content: {application/json: {schema: {$ref: "#/components/schemas/PostMessageResponse"}}}
+        "400": {description: 请求无效，包含缺失 client_request_id / conversation_epoch}
+        "409": {description: conversation 已变化、回执冲突或结果恢复未完成}
   /v1/streams:
     get:
       summary: SSE 事件流
@@ -1424,6 +1731,412 @@ paths:
         "503": {description: Manage 或工作组功能未启用}
 components:
   schemas:
+    UserContentPart:
+      oneOf:
+        - type: object
+          required: [type]
+          properties:
+            type: {type: string, enum: [text]}
+            text: {type: string}
+        - type: object
+          required: [type, image_url]
+          properties:
+            type: {type: string, enum: [image_url]}
+            image_url: {$ref: "#/components/schemas/ImageURLPart"}
+    ImageURLPart:
+      type: object
+      required: [url]
+      properties:
+        url: {type: string, description: data URL or an HTTP(S) image URL accepted by the provider}
+        detail: {type: string, description: auto, low, or high; case-insensitive}
+    FileReference:
+      type: object
+      required: [path]
+      properties:
+        id: {type: string}
+        path: {type: string, minLength: 1, description: Node-local path selected by the user}
+        name: {type: string}
+        revision: {type: string}
+        draft: {type: boolean}
+        annotation: {type: string}
+        anchor: {$ref: "#/components/schemas/FileReferenceAnchor"}
+    FileReferenceAnchor:
+      type: object
+      properties:
+        type: {type: string, enum: [file, text-range, document-text, sheet-range, pdf-region, image-region, html-region]}
+        label: {type: string}
+        quote: {type: string}
+        location: {type: object, additionalProperties: true}
+    PostMessageRequest:
+      oneOf:
+        - type: object
+          required: [agent_id, client_request_id, conversation_epoch]
+          properties:
+            agent_id: {type: string}
+            request_type: {type: string, enum: [message], default: message}
+            content: {type: string}
+            content_parts: {type: array, items: {$ref: "#/components/schemas/UserContentPart"}, maxItems: 16}
+            file_refs: {type: array, items: {$ref: "#/components/schemas/FileReference"}, maxItems: 8}
+            user_message_name: {type: string}
+            client_request_id: {type: string, minLength: 1, maxLength: 128}
+            conversation_epoch: {type: integer, format: int64, minimum: 1}
+          description: 普通用户消息；request_type 可省略，默认 message。
+        - type: object
+          required: [agent_id, request_type]
+          properties:
+            agent_id: {type: string}
+            request_type: {type: string, enum: [resume]}
+            resume_value: {type: object, additionalProperties: true}
+          description: HITL resume 控制请求，不使用消息幂等回执字段。
+    PostMessageResponse:
+      type: object
+      required: [accepted, agent_id, priority]
+      properties:
+        accepted: {type: boolean}
+        agent_id: {type: string}
+        priority: {type: string}
+        input_seq: {type: integer, format: int64}
+        input_id: {type: string}
+        input_revision: {type: integer, format: int64}
+        status: {type: string, enum: [queued, claimed, consumed, cancelled]}
+        conversation_epoch: {type: integer, format: int64}
+        duplicate: {type: boolean}
+    AgentHydrateResponse:
+      type: object
+      required: [agent_id, conversation_epoch, conversation_revision, turn_state, has_active_turn, queue_pending, queue_paused, queue_control_revision, pending_inputs, transcript, has_earlier_history, window_start_round, window_end_round, transcript_synchronized, pending_hitl, history_revision, stream_epoch, covered_agent_seq, covered_stream_seq, assistant_drafts, stream_seq_hint, agent_seq_hint, notify_seq, ack_seq, has_unread, child_agents]
+      properties:
+        agent_id: {type: string}
+        conversation_epoch: {type: integer, format: int64}
+        conversation_revision: {type: integer, format: int64}
+        turn_state: {$ref: "#/components/schemas/TurnStateView"}
+        has_active_turn: {type: boolean}
+        queue_pending: {type: integer, minimum: 0}
+        queue_paused: {type: boolean}
+        queue_control_revision: {type: integer, format: int64}
+        pending_inputs: {type: array, items: {$ref: "#/components/schemas/PendingInputView"}}
+        transcript: {type: array, items: {$ref: "#/components/schemas/ConversationTranscriptEntry"}}
+        has_earlier_history: {type: boolean}
+        window_start_round: {type: integer, format: int64}
+        window_end_round: {type: integer, format: int64}
+        transcript_synchronized: {type: boolean}
+        pending_hitl: {type: object, nullable: true, additionalProperties: true}
+        history_revision: {type: integer, format: int64}
+        stream_epoch: {type: string}
+        covered_agent_seq: {type: integer}
+        covered_stream_seq: {type: integer}
+        assistant_drafts: {type: array, items: {$ref: "#/components/schemas/AssistantDraftSnapshot"}}
+        stream_seq_hint: {type: integer}
+        agent_seq_hint: {type: integer}
+        notify_seq: {type: integer}
+        ack_seq: {type: integer}
+        has_unread: {type: boolean}
+        child_agents: {type: array, items: {$ref: "#/components/schemas/ChildAgentView"}}
+    TurnStateView:
+      type: object
+      required: [authority, phase, lifecycle_seq, terminal]
+      properties:
+        authority: {type: string, enum: [turn_coordinator]}
+        phase: {type: string}
+        turn_status: {type: string}
+        step_status: {type: string}
+        turn_id: {type: string}
+        step_id: {type: string}
+        step_index: {type: integer, minimum: 0}
+        generation: {type: integer, format: int64}
+        lifecycle_seq: {type: integer, format: int64}
+        history_revision: {type: integer, format: int64}
+        result_commit_status: {type: string}
+        execution_stopped: {type: boolean}
+        terminal: {type: boolean}
+        end_reason: {type: string}
+        interaction_kind: {type: string}
+        recovery_required: {type: boolean}
+        model_attempt: {allOf: [{$ref: "#/components/schemas/ModelAttemptView"}], nullable: true}
+        error: {allOf: [{$ref: "#/components/schemas/TurnErrorView"}], nullable: true}
+        tool_executions: {type: array, items: {$ref: "#/components/schemas/ToolExecutionView"}}
+    ToolExecutionView:
+      type: object
+      required: [id, tool_call_id, tool_name, status]
+      properties:
+        id: {type: string}
+        tool_call_id: {type: string}
+        tool_name: {type: string}
+        status: {type: string, enum: [proposed, pending, running, succeeded, failed, denied, cancelled, timed_out, unknown]}
+        attempt: {type: integer, minimum: 1}
+    ModelAttemptView:
+      type: object
+      required: [status, attempt, max_attempts]
+      properties:
+        status: {type: string}
+        attempt: {type: integer, minimum: 0}
+        max_attempts: {type: integer, minimum: 0}
+        retry_after_ms: {type: integer, format: int64, minimum: 0}
+    TurnErrorView:
+      type: object
+      required: [code, message, retryable]
+      properties:
+        code: {type: string}
+        message: {type: string}
+        retryable: {type: boolean}
+        incomplete: {type: boolean}
+    PendingInputView:
+      type: object
+      required: [input_id, input_seq, input_revision, status]
+      properties:
+        input_id: {type: string}
+        client_request_id: {type: string}
+        input_seq: {type: integer, format: int64}
+        input_revision: {type: integer, format: int64}
+        status: {type: string, enum: [queued, claimed]}
+        content: {type: string}
+        image_count: {type: integer, minimum: 0}
+        file_refs: {type: array, items: {$ref: "#/components/schemas/FileReference"}, maxItems: 8}
+    AssistantDraftSnapshot:
+      type: object
+      required: [item_id, attempt_id, part, text, through_chunk_seq, through_agent_seq, through_stream_seq]
+      properties:
+        item_id: {type: string}
+        attempt_id: {type: string}
+        turn_id: {type: string}
+        part: {type: string, enum: [content, reasoning]}
+        text: {type: string}
+        through_chunk_seq: {type: integer, format: int64}
+        through_agent_seq: {type: integer}
+        through_stream_seq: {type: integer}
+    ConversationTranscriptEntry:
+      type: object
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [user, assistant, reasoning, tool_call, tool_result, context_boundary]}
+        id: {type: string}
+        item_id: {type: string}
+        item_version: {type: integer, format: int64, minimum: 1}
+        text: {type: string}
+        summary: {type: string}
+        partial: {type: boolean}
+        blockId: {type: string}
+        boundary_id: {type: string}
+        client_request_id: {type: string}
+        file_refs: {type: array, items: {$ref: "#/components/schemas/FileReference"}, maxItems: 8}
+        images: {type: array, items: {type: string}}
+        media: {type: array, items: {type: object, additionalProperties: true}}
+        data: {type: object, additionalProperties: true}
+        parent_item_id: {type: string}
+        step_id: {type: string}
+        tool_batch_index: {type: integer, minimum: 0}
+        round_id: {type: string}
+        round_ordinal: {type: integer, format: int64, minimum: 1}
+        round_revision_id: {type: string}
+        detail_item_id: {type: string}
+        details_available: {type: boolean}
+        conversation_ordinal: {type: integer, format: int64}
+        conversation_entry_index: {type: integer, minimum: 0}
+      additionalProperties: true
+    ChildAgentView:
+      type: object
+      required: [child_agent_id, status, purpose, allowed_tools, loaded_skills, created_at, expires_at, turn_count, progress]
+      properties:
+        child_agent_id: {type: string}
+        tool_call_id: {type: string}
+        status: {type: string}
+        purpose: {type: string}
+        allowed_tools: {type: array, items: {type: string}}
+        loaded_skills: {type: array, items: {type: string}}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        turn_count: {type: integer, minimum: 0}
+        progress: {type: object, additionalProperties: true}
+    ConversationRoundPage:
+      type: object
+      required: [agent_id, conversation_id, conversation_revision, history_completeness, rounds, has_more]
+      properties:
+        agent_id: {type: string}
+        conversation_id: {type: string}
+        conversation_revision: {type: integer, format: int64}
+        history_completeness: {type: string}
+        rounds: {type: array, items: {$ref: "#/components/schemas/ConversationRoundSummary"}}
+        has_more: {type: boolean}
+        next_before_round_id: {type: string}
+    ConversationRoundSummary:
+      type: object
+      required: [round_id, ordinal, selected_revision_id, turn_id, source, generation, status, finish_reason, record_revision, checkpoint_revision, pre_checkpoint_revision, item_count]
+      properties:
+        round_id: {type: string}
+        ordinal: {type: integer, format: int64, minimum: 1}
+        selected_revision_id: {type: string}
+        turn_id: {type: string}
+        source: {type: string}
+        generation: {type: integer, format: int64}
+        status: {type: string}
+        finish_reason: {type: string}
+        record_revision: {type: integer, format: int64}
+        checkpoint_revision: {type: integer, format: int64}
+        pre_checkpoint_revision: {type: integer, format: int64}
+        item_count: {type: integer, format: int64, minimum: 0}
+    ConversationLegacyItemsPage:
+      type: object
+      required: [agent_id, conversation_id, conversation_revision, history_completeness, item_count, items, has_more]
+      properties:
+        agent_id: {type: string}
+        conversation_id: {type: string}
+        conversation_revision: {type: integer, format: int64}
+        history_completeness: {type: string}
+        item_count: {type: integer, format: int64, minimum: 0}
+        items: {type: array, items: {$ref: "#/components/schemas/ConversationTranscriptEntry"}}
+        has_more: {type: boolean}
+        next_after_item_id: {type: string}
+    ConversationRoundItemsResponse:
+      type: object
+      required: [agent_id, conversation_id, conversation_revision, round_id, revision_id, revision_status, selected, items, has_more]
+      properties:
+        agent_id: {type: string}
+        conversation_id: {type: string}
+        conversation_revision: {type: integer, format: int64}
+        round_id: {type: string}
+        revision_id: {type: string}
+        revision_status: {type: string}
+        selected: {type: boolean}
+        items: {type: array, items: {$ref: "#/components/schemas/ConversationTranscriptEntry"}}
+        has_more: {type: boolean}
+        next_after_item_id: {type: string}
+    ConversationRoundRevisionsResponse:
+      type: object
+      required: [agent_id, conversation_id, conversation_revision, round_id, selected_revision_id, revisions]
+      properties:
+        agent_id: {type: string}
+        conversation_id: {type: string}
+        conversation_revision: {type: integer, format: int64}
+        round_id: {type: string}
+        selected_revision_id: {type: string}
+        revisions: {type: array, items: {$ref: "#/components/schemas/ConversationRevisionSummary"}}
+    ConversationRevisionSummary:
+      type: object
+      required: [revision_id, turn_id, source, generation, status, finish_reason, record_revision, checkpoint_revision, pre_checkpoint_revision, item_count, selected]
+      properties:
+        revision_id: {type: string}
+        turn_id: {type: string}
+        source: {type: string}
+        generation: {type: integer, format: int64}
+        status: {type: string}
+        finish_reason: {type: string}
+        record_revision: {type: integer, format: int64}
+        checkpoint_revision: {type: integer, format: int64}
+        pre_checkpoint_revision: {type: integer, format: int64}
+        item_count: {type: integer, format: int64, minimum: 0}
+        selected: {type: boolean}
+    ConversationItemContentResponse:
+      type: object
+      required: [agent_id, conversation_id, round_id, revision_id, item_id, item_version, selected, part, text]
+      properties:
+        agent_id: {type: string}
+        conversation_id: {type: string}
+        round_id: {type: string}
+        revision_id: {type: string}
+        item_id: {type: string}
+        item_version: {type: integer, format: int64}
+        selected: {type: boolean}
+        part: {type: string, enum: [content, reasoning]}
+        text: {type: string}
+    ConversationToolStepsResponse:
+      type: object
+      required: [agent_id, conversation_id, conversation_revision, round_id, revision_id, revision_status, selected, source_item_id, total_count, steps]
+      properties:
+        agent_id: {type: string}
+        conversation_id: {type: string}
+        conversation_revision: {type: integer, format: int64}
+        round_id: {type: string}
+        revision_id: {type: string}
+        revision_status: {type: string}
+        selected: {type: boolean}
+        source_item_id: {type: string}
+        total_count: {type: integer, minimum: 0}
+        steps: {type: array, items: {$ref: "#/components/schemas/ConversationToolStep"}}
+        has_more: {type: boolean}
+        next_after_tool_call_id: {type: string}
+    ConversationToolStep:
+      type: object
+      required: [tool_call_id, call_entry]
+      properties:
+        tool_call_id: {type: string}
+        call_entry: {$ref: "#/components/schemas/ConversationTranscriptEntry"}
+        result_entry: {$ref: "#/components/schemas/ConversationTranscriptEntry"}
+    ConversationResubmitTargetResponse:
+      type: object
+      required: [agent_id, conversation_id, conversation_revision, conversation_epoch, round_id, revision_id, pre_checkpoint_revision, input]
+      properties:
+        agent_id: {type: string}
+        conversation_id: {type: string}
+        conversation_revision: {type: integer, format: int64}
+        conversation_epoch: {type: integer, format: int64}
+        round_id: {type: string}
+        revision_id: {type: string}
+        pre_checkpoint_revision: {type: integer, format: int64}
+        input: {$ref: "#/components/schemas/ConversationResubmitInput"}
+    ConversationResubmitInput:
+      type: object
+      properties:
+        content: {type: string}
+        content_parts: {type: array, items: {$ref: "#/components/schemas/UserContentPart"}, maxItems: 16}
+        file_refs: {type: array, items: {$ref: "#/components/schemas/FileReference"}, maxItems: 8}
+        user_message_name: {type: string}
+    InputReceiptResponse:
+      type: object
+      required: [found, conversation_epoch]
+      properties:
+        found: {type: boolean}
+        input_id: {type: string}
+        input_seq: {type: integer, format: int64}
+        input_revision: {type: integer, format: int64}
+        status: {type: string, enum: [queued, claimed, consumed, cancelled]}
+        conversation_epoch: {type: integer, format: int64}
+    InputQueueControlRequest:
+      type: object
+      required: [paused, expected_revision]
+      properties:
+        paused: {type: boolean}
+        expected_revision: {type: integer, format: int64, minimum: 1}
+    InputQueueControlResponse:
+      type: object
+      required: [queue_paused, queue_control_revision]
+      properties:
+        queue_paused: {type: boolean}
+        queue_control_revision: {type: integer, format: int64}
+    QueuedInputPatch:
+      type: object
+      required: [expected_revision, content]
+      properties:
+        expected_revision: {type: integer, format: int64, minimum: 1}
+        content: {type: string}
+        content_parts: {type: array, items: {$ref: "#/components/schemas/UserContentPart"}, maxItems: 16}
+        file_refs: {type: array, items: {$ref: "#/components/schemas/FileReference"}, maxItems: 8}
+        user_message_name: {type: string}
+    QueuedInputResponse:
+      type: object
+      required: [input_id, input_seq, revision, status]
+      properties:
+        input_id: {type: string}
+        input_seq: {type: integer, format: int64}
+        revision: {type: integer, format: int64}
+        status: {type: string, enum: [queued]}
+    QueuedInputDelete:
+      type: object
+      required: [expected_revision]
+      properties:
+        expected_revision: {type: integer, format: int64, minimum: 1}
+    ConversationResubmitRequest:
+      type: object
+      required: [expected_selected_revision_id, expected_conversation_revision, pre_checkpoint_revision, conversation_epoch, client_request_id]
+      properties:
+        expected_selected_revision_id: {type: string}
+        expected_conversation_revision: {type: integer, format: int64, minimum: 1}
+        pre_checkpoint_revision: {type: integer, format: int64, minimum: 0}
+        conversation_epoch: {type: integer, format: int64, minimum: 1}
+        client_request_id: {type: string, minLength: 1, maxLength: 128}
+        content: {type: string}
+        content_parts: {type: array, items: {$ref: "#/components/schemas/UserContentPart"}, maxItems: 16}
+        file_refs: {type: array, items: {$ref: "#/components/schemas/FileReference"}, maxItems: 8}
+        user_message_name: {type: string}
     NodeInfo:
       type: object
       required: [node_id, capabilities, multimodal_enabled, manage_enabled, workgroup_enabled, manage_registered]

@@ -18,7 +18,7 @@ turn.Orchestrator / session / childagent
         → GET /v1/streams 长连接推送给 Client
 ```
 
-常见 `type`：`assistant`、`reasoning`、`tool_call`、`tool_result`、`usage`、`turn_state`、`hitl_required`、`turn_finished`、`notification_changed` 等。
+常见 `type`：`conversation_delta`、`conversation_patch`、`tool_call`、`tool_result`、`usage`、`turn_state`、`hitl_required`、`turn_finished`、`notification_changed` 等。正文与 reasoning 的高频增量使用 ephemeral `conversation_delta`，不推进 `agent_seq`；Hub 保留有界于当前生成过程的累计草稿，并与 `covered_stream_seq` 一起供 hydrate 恢复。已提交消息、队列、审批与终态使用可靠事件或 `conversation_patch`。
 
 `turn_state` 是回合生命周期的权威快照；`hitl_required` 是需要用户交互的事实；`turn_finished` 只表示真正的终态。HITL 暂停不会发送 `turn_finished`，也不会借用终态事件表达“等待用户”。
 

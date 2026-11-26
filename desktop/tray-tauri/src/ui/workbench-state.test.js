@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { topSlotState } from './top-slot-state.js'
 import { findTerminalInstanceForSession, isTerminalDialogRequestCurrent, reusableTerminalConnection, runningTerminalSessions, terminalDialogChoices, terminalOpenArguments, terminalOpenIntent } from './terminal-open-state.js'
-import { agentErrorFor, agentSelectionViewTransition, applyAgentNotificationProjection, canCancelTurnPhase, cancelledTurnSummary, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopHitlQueue, desktopMenuNames, formatApprovalArguments, handleAgentNotificationEvent, hasPersistedPartialMessage, isAgentBusy, mergeAgentNotificationSummaries, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowTurnStopAction, shouldShowWorkgroupSidebar, switchDraft, tabForRoute, turnErrorSummary, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
+import { agentErrorFor, agentSelectionViewTransition, applyAgentNotificationProjection, canCancelTurnPhase, cancelledTurnSummary, chooseActiveAgentId, closeResourceTransition, createDesktopMenuModel, desktopChatEntries, desktopComposerStatus, desktopMenuNames, formatApprovalArguments, handleAgentNotificationEvent, hasPersistedPartialMessage, isAgentBusy, mergeAgentNotificationSummaries, menuFocusIndex, recoverFailedSend, routeForTab, shouldReconnectTerminal, shouldShowNodeFirstRun, shouldShowTurnStopAction, shouldShowWorkgroupSidebar, switchDraft, tabForRoute, turnErrorSummary, updateAgentBusy, updateAgentError, workgroupCollaborationEnabled } from './workbench-state.js'
 
 test('notification_changed uses notify_seq, preserves integer counts, and ignores stale per-Agent events', () => {
   const agents = [{ agent_id: 'agent-a', has_pending_hitl: true, pending_hitl_items: 2, notify_seq: 5 }]
@@ -93,7 +93,7 @@ test('turn-level stop remains available while awaiting tool approval or user inp
   }
 })
 
-test('waiting_user remains cancellable without switching the composer from send to stop', () => {
+test('waiting_user remains a live turn for queueing while keeping the send action separate from stop visibility', () => {
   assert.equal(canCancelTurnPhase('waiting_user'), true)
   assert.equal(shouldShowTurnStopAction('waiting_user'), false)
   assert.equal(shouldShowTurnStopAction('waiting_user', true), true, 'a request already being submitted stays locked')
@@ -103,9 +103,14 @@ test('waiting_user remains cancellable without switching the composer from send 
   const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
   assert.match(source, /const agentGenerating = computed\(\(\) => shouldShowTurnStopAction\(turnStateStore\.phase, busy\.value, cancellingTurn\.value\)\)/)
   assert.match(source, /const canCancelTurn = computed\(\(\) => canCancelTurnPhase\(turnStateStore\.phase\)\)/)
-  assert.match(source, /if \(hitlQueue\.value\.some\(item => item\.kind === 'user_information'\)\) \{ void submitUserInfo\(undefined, 'chat'\); return \}/)
+  assert.match(source, /turnRunning: turnInProgress\.value/)
+  assert.match(source, /const turnWasActive = turnInProgress\.value/)
+  assert.doesNotMatch(source, /hitlQueue\.value\.some\(item => item\.kind === 'user_information'\)\) \{ void submitUserInfo/)
   assert.match(source, /const dockPendingKind = computed\(\(\) => \{[\s\S]*?turnStateStore\.phase === 'waiting_user'[\s\S]*?return 'user_input'[\s\S]*?return 'approval'[\s\S]*?return 'request'/)
   assert.match(source, /:pending-kind="dockPendingKind"/)
+  assert.match(source, /class="send-button composer-action"[^\n]*@click="send"/)
+  assert.match(source, /class="send-button composer-action composer-stop-action"/)
+  assert.match(source, /:queueing="composerIntent === 'queue'"/)
 })
 
 test('sidebar actions live in keyboard-accessible context menus', () => {
@@ -138,6 +143,7 @@ test('Desktop menubar groups actions by user task and disables unavailable opera
   assert.equal(menus['视图'].find(item => item.action === 'agent-chat').disabled, false)
   assert.equal(menus['视图'].some(item => item.action === 'switch-resource'), false)
   assert.equal(menus['智能体'].find(item => item.action === 'approval').disabled, false)
+  assert.equal(menus['智能体'].find(item => item.action === 'open-history').disabled, false)
   assert.equal(menus['智能体'].find(item => item.action === 'compress-context').disabled, true)
   assert.equal(menus['智能体'].some(item => item.action === 'delete-agent'), false)
   assert.deepEqual(menus['智能体'].filter(item => item.header).map(item => item.label), ['autotest', '当前会话', '管理'])
@@ -252,23 +258,46 @@ test('DesktopApp supplies connection and active workspace state to the top-menu 
   assert.ok(menuContext, 'menu model call is present')
 })
 
-test('DesktopApp renders composer status in the visible footer and follows Turn and stream state', () => {
+test('DesktopApp renders hydrate sync status in the composer toolbar and keeps Turn and stream state', () => {
   const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
   assert.match(source, /desktopComposerStatus\(\{[\s\S]*?turnState: turnStateStore/)
-  assert.match(source, /<ComposerToolbar[^>]*:status-label="composerRuntimeStatus"/)
+  assert.match(source, /<ComposerToolbar[^>]*:status-label="composerStatusLabel"/)
+  assert.match(source, /:status-action-label="canRetryHydrateSync \? '重试同步结果' : ''"/)
+  assert.match(source, /@status-action="retryHydrateSync"/)
+  assert.match(source, /conversationController\.request\(id, \{/)
+  assert.match(source, /conversationController\.scheduleRetry\(id, ownerSequence, \(\) => \{/)
+  assert.match(source, /conversationStore\.failSync\(\)/)
+  assert.match(source, /conversationStore\.applyHydrateSnapshot\(snapshot, \{/)
+  assert.match(source, /conversationStore\.applyReadingWindowChange\(agentId, activeHydrationSequence, state, currentEpoch\)/)
+  assert.match(source, /conversationStore\.offerAgentEvent\(event, \{/)
+  assert.match(source, /conversationStore\.replaceVisibleItems\(agentId, activeHydrationSequence\)/)
+  assert.doesNotMatch(source, /desktopChatEntries\(/)
+  assert.doesNotMatch(source, /pendingChatEntriesForAgent/)
+  assert.doesNotMatch(source, /transcriptReferenceWindows/)
+  assert.doesNotMatch(source, /conversationStore\.eventSequencer/)
+  assert.match(source, /conversationStore\.claimDraftGapRecovery\(/)
+  assert.doesNotMatch(source, /draftGapRecoveryKeys|draftGapRecoveryItemIds|claimAssistantDraftGapRecovery/)
+  assert.doesNotMatch(source, /latestHydrateTranscript\.value\s*=/)
+  assert.doesNotMatch(source, /chatReadingWindow\.value\s*=/)
   assert.doesNotMatch(source, /desktop-composer-runtime-pill[^>]*>\{\{ composerRuntimeStatus \}\}/)
-  assert.match(source, /applyDesktopTurnEvent\(event, activeId\.value\)/)
-  assert.match(source, /const acceptedTurnState = applyHydrateTurnState\(snapshot\)/)
-  assert.match(source, /if \(!acceptedTurnState && turnStateStore\.turnId\) return/)
+  assert.match(source, /conversationStore\.applyActiveNodeEvent\(event,\s*\{\s*agentId: activeId\.value,\s*generation: activeHydrationSequence/s)
+  assert.doesNotMatch(source, /applyHydrateTurnStateSnapshot/)
+  assert.match(source, /const mergedSnapshot = conversationStore\.applyHydrateSnapshot\(snapshot, \{/)
+  assert.doesNotMatch(source, /applyDesktopTurnEvent\(|applyHydrateTurnState\(|restoreSnapshotLifecycle\(/)
+  assert.doesNotMatch(source, /mergeTranscriptReadWindow\(/)
+  assert.doesNotMatch(source, /restoreHydrateLifecycleFields\(/)
+  assert.doesNotMatch(source, /streamingText/)
+  assert.match(source, /reduction\.kind === 'draft'/)
+  assert.doesNotMatch(source, /event\.event_type === '(assistant|reasoning)'/)
 
   assert.equal(desktopComposerStatus({ generating: true }), '正在等待回复')
-  assert.equal(desktopComposerStatus({ generating: true, streamingText: '首个 token', turnState: { phase: 'model_generating' } }), '正在生成回复')
-  assert.equal(desktopComposerStatus({ generating: true, streamingText: 'reasoning', turnState: { phase: 'model_generating', outputChannel: 'reasoning' } }), '思考中')
+  assert.equal(desktopComposerStatus({ generating: true, hasAssistantOutput: true, turnState: { phase: 'model_generating' } }), '正在生成回复')
+  assert.equal(desktopComposerStatus({ generating: true, turnState: { phase: 'model_generating', outputChannel: 'reasoning' } }), '思考中')
   assert.equal(desktopComposerStatus({ generating: true, turnState: { phase: 'tool_executing' } }), '工具执行中')
   assert.equal(desktopComposerStatus({ generating: true, turnState: { phase: 'waiting_user' } }), '等待你的输入')
   assert.equal(desktopComposerStatus({ generating: true, turnState: { phase: 'model_generating', modelAttempt: { status: 'retrying', attempt: 1, maxAttempts: 3 } } }), '正在重试 1/2')
   assert.equal(desktopComposerStatus({ generating: true, turnState: { phase: 'completed', terminal: true } }), '')
-  assert.equal(desktopComposerStatus({ generating: false, streamingText: 'late text' }), '')
+  assert.equal(desktopComposerStatus({ generating: false, hasAssistantOutput: true }), '')
 })
 
 test('DesktopApp notification handler applies reducer output and refreshes unknown Agent membership', () => {
@@ -286,6 +315,64 @@ test('DesktopApp notification handler applies reducer output and refreshes unkno
   assert.doesNotMatch(source.slice(notificationHandler, activeAgentBranch), /agentListRefreshSequence\s*\+=/)
   assert.match(source, /mergeAgentNotificationSummaries\(Array\.isArray\(latest\) \? latest : \[\], agentNotificationProjections\.value, notificationVersionAtStart\)/)
   assert.match(source.slice(notificationHandler, activeAgentBranch), /return/)
+})
+
+test('native event scope changes before the selected Agent snapshot is hydrated', () => {
+  const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
+  const selectionStart = source.indexOf('async function selectAgent(')
+  const selectionEnd = source.indexOf('\nasync function send()', selectionStart)
+  assert.ok(selectionStart >= 0)
+  assert.ok(selectionEnd > selectionStart)
+  const selection = source.slice(selectionStart, selectionEnd)
+  const scopeUpdate = selection.indexOf("invoke('desktop_set_active_agent'")
+  const hydrate = selection.indexOf('await hydrateAgentSnapshot(id)')
+  assert.ok(scopeUpdate >= 0)
+  assert.ok(hydrate > scopeUpdate)
+  assert.match(selection, /selectionGeneration:\s*activeHydrationSequence/)
+  assert.match(selection, /webviewGeneration:\s*nativeWebviewGeneration/)
+  assert.match(selection, /if \(!scopeAccepted\) throw/)
+  assert.match(selection, /if \(epoch !== selectionEpoch\) return/)
+  assert.match(source, /nativeWebviewGeneration = await invoke\('desktop_event_scope_generation'\)/)
+})
+
+test('SSE diagnostics count Node ingress before hydration buffering or ordered reduction', () => {
+  const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
+  const subscriptionStart = source.indexOf('await conversationController.subscribe(')
+  const subscriptionEnd = source.indexOf('unlistenTerminal =', subscriptionStart)
+  assert.ok(subscriptionStart >= 0 && subscriptionEnd > subscriptionStart, 'Node event subscription is present')
+  const subscription = source.slice(subscriptionStart, subscriptionEnd)
+  assert.ok(subscription.indexOf('recordSSEEvent(') < subscription.indexOf('conversationController.bufferEvent(event)'))
+  assert.ok(subscription.indexOf('conversationController.bufferEvent(event)') < subscription.indexOf('applyOrderedDesktopNodeEvent(event)'))
+  assert.equal((source.match(/recordSSEEvent\(/g) || []).length, 1, 'each Node event is counted once at ingress')
+  const reducer = source.slice(source.indexOf('function processDesktopNodeEvent(event)'), source.indexOf('\nfunction drainActiveHydrateEventBuffer'))
+  assert.doesNotMatch(reducer, /recordSSEEvent\(/, 'snapshot-covered/deferred events must not be counted as missing ingress')
+})
+
+test('successful sends coalesce the snapshot fallback instead of reselecting the same Agent', () => {
+  const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
+  const sendStart = source.indexOf('async function sendMessageToActiveAgent(')
+  const sendEnd = source.indexOf('\nasync function executeSlashCommand', sendStart)
+  assert.ok(sendStart >= 0 && sendEnd > sendStart)
+  const sendHandler = source.slice(sendStart, sendEnd)
+  assert.match(sendHandler, /if \(activeId\.value === agentId\) \{[\s\S]*?scheduleActiveAgentHydrate\(agentId, 80\)/)
+  assert.match(sendHandler, /await nextTick\(\)[\s\S]*?chatPanel\.value\?\.scrollToTail\(\)/)
+  assert.doesNotMatch(sendHandler, /await selectAgent\(agentId\)/)
+})
+
+test('stale lifecycle reductions advance the stream cursor without scheduling hydrate work', () => {
+  const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
+  const eventStart = source.indexOf('function processDesktopNodeEvent(event)')
+  const eventEnd = source.indexOf('\nfunction drainActiveHydrateEventBuffer', eventStart)
+  assert.ok(eventStart >= 0)
+  assert.ok(eventEnd > eventStart)
+  const handler = source.slice(eventStart, eventEnd)
+  const staleGuard = handler.indexOf('if (reduction.stale) return')
+  const applyRemote = handler.indexOf('applyRemoteWorkerEvent(event.event_type, event.data)')
+  const hydrateSchedule = handler.indexOf('scheduleActiveAgentHydrate(eventAgentId')
+  assert.ok(staleGuard >= 0)
+  assert.ok(applyRemote > staleGuard)
+  assert.ok(hydrateSchedule > staleGuard)
+  assert.match(handler, /noteAppliedAgentSeq\(event\)/)
 })
 
 test('DesktopApp exposes one resource icon menu by the tabs and keeps error reasons visible', () => {
@@ -363,6 +450,7 @@ test('route and visible tab stay aligned on initial load and navigation', () => 
   assert.equal(routeForTab('file'), '/chat')
   assert.equal(routeForTab('browser'), '/chat')
   assert.equal(routeForTab('terminal'), '/chat')
+  assert.equal(tabForRoute('/chat', 'history'), 'history')
 })
 
 test('shared chat route preserves an explicitly selected resource across settings round trips', () => {
@@ -377,6 +465,9 @@ test('shared chat route preserves an explicitly selected resource across setting
   tab = 'terminal'
   tab = tabForRoute('/chat', tab)
   assert.equal(tab, 'terminal')
+  tab = 'history'
+  tab = tabForRoute('/chat', tab)
+  assert.equal(tab, 'history')
   assert.equal(tabForRoute('/chat', 'chat'), 'chat')
 })
 
@@ -402,6 +493,7 @@ test('the fixed top-left slot keeps page identity and sidebar state across setti
 test('closing a resource clears its matching open state and returns to the shared chat route', () => {
   assert.deepEqual(closeResourceTransition('file'), { tab: 'chat', workspaceOpened: false })
   assert.deepEqual(closeResourceTransition('browser'), { tab: 'chat', browserOpened: false })
+  assert.deepEqual(closeResourceTransition('history'), { tab: 'chat', historyOpened: false })
   assert.deepEqual(closeResourceTransition('terminal'), { tab: 'terminal', closeTerminal: true })
 })
 
@@ -413,58 +505,111 @@ test('a retained disconnected terminal reconnects when activated, but not when c
   assert.equal(shouldReconnectTerminal({ ...detached, sessionId: '' }), false)
 })
 
-test('Desktop chat adapter keeps hydrate tools and gives id-less history stable per-agent keys', () => {
+test('Desktop chat adapter keeps Node transcript item IDs for user, tool, and assistant rows', () => {
   const transcript = [
-    { kind: 'user', text: 'Inspect this' },
-    { kind: 'tool_call', blockId: 'call-1', data: { tool_name: 'read_file', arguments: { path: 'a.txt' } } },
-    { kind: 'tool_result', blockId: 'call-1', text: 'contents' },
-    { kind: 'assistant', text: 'Done' },
+    { item_id: 'human-1', kind: 'user', text: 'Inspect this' },
+    { item_id: 'call-1', kind: 'tool_call', blockId: 'call-1', data: { tool_name: 'read_file', arguments: { path: 'a.txt' } } },
+    { item_id: 'result-1', kind: 'tool_result', blockId: 'call-1', text: 'contents' },
+    { item_id: 'assistant-1', kind: 'assistant', text: 'Done' },
   ]
   const entries = desktopChatEntries('agent-a', transcript)
   assert.deepEqual(entries.map(entry => entry.kind), ['user', 'tool_call', 'tool_result', 'assistant'])
-  assert.deepEqual(entries.map(entry => entry.id), [
-    'agent-a:history:0', 'agent-a:history:1', 'agent-a:history:2', 'agent-a:history:3',
-  ])
+  assert.deepEqual(entries.map(entry => entry.id), ['human-1', 'call-1', 'result-1', 'assistant-1'])
   assert.deepEqual(entries[1].data.arguments, { path: 'a.txt' })
-  assert.notEqual(desktopChatEntries('agent-b', transcript)[0].id, entries[0].id)
+  assert.equal(desktopChatEntries('agent-b', transcript)[0].id, entries[0].id)
+})
+
+test('Desktop chat adapter rejects transcript rows without a Node-owned identity', () => {
+  assert.throws(() => desktopChatEntries('agent-a', [{ kind: 'user', text: 'unidentified' }]), /stable identity/)
+})
+
+test('Desktop chat adapter reuses normalized stable-ID entries by reference', () => {
+  const entry = { item_id: 'message-7', item_version: 2, id: 'message-7', kind: 'assistant', text: 'Hello', data: {} }
+  const draft = { id: 'draft-7', item_id: 'draft-7', attempt_id: 'attempt-1', kind: 'assistant', text: 'draft', streaming: true, data: {} }
+
+  const entries = desktopChatEntries('agent-a', [entry, draft])
+
+  assert.equal(entries[0], entry)
+  assert.equal(entries[1], draft)
 })
 
 test('Desktop chat adapter preserves the safe conversation boundary in hydrated history', () => {
   const entries = desktopChatEntries('agent-a', [
-    { kind: 'user', text: 'Earlier' },
-    { kind: 'assistant', text: 'Earlier answer' },
-    { kind: 'context_boundary', boundary_id: 'stable-id' },
-    { kind: 'user', text: 'New question' },
+    { item_id: 'human-1', kind: 'user', text: 'Earlier' },
+    { item_id: 'assistant-1', kind: 'assistant', text: 'Earlier answer' },
+    { item_id: 'boundary-1', kind: 'context_boundary', boundary_id: 'stable-id' },
+    { item_id: 'human-2', kind: 'user', text: 'New question' },
   ])
   assert.deepEqual(entries.map(entry => entry.kind), ['user', 'assistant', 'context_boundary', 'user'])
   assert.equal(entries[2].boundary_id, 'stable-id')
   assert.equal(entries[2].text, undefined)
 })
 
-test('pending user send is visible before hydrate and is not duplicated once persisted', () => {
-  const pending = { id: 'send-1', kind: 'user', text: '2 + 2?', baseTranscriptLength: 1 }
-  const beforeHydrate = desktopChatEntries('agent-a', [{ kind: 'user', text: 'Earlier' }], pending)
+test('pending user send is reconciled by client request identity, not matching text', () => {
+  const pending = { id: 'pending:request-1', client_request_id: 'request-1', kind: 'user', text: '2 + 2?' }
+  const beforeHydrate = desktopChatEntries('agent-a', [{ item_id: 'human-0', kind: 'user', text: 'Earlier' }], pending)
   assert.deepEqual(beforeHydrate.map(entry => entry.text), ['Earlier', '2 + 2?'])
-  assert.equal(beforeHydrate[1].id, 'agent-a:pending-user:send-1')
+  assert.equal(beforeHydrate[1].id, 'pending:request-1')
 
   const afterHydrate = desktopChatEntries('agent-a', [
-    { kind: 'user', text: 'Earlier' },
-    { kind: 'user', text: '2 + 2?' },
+    { item_id: 'human-0', kind: 'user', text: 'Earlier' },
+    { kind: 'user', item_id: 'agent-a/input/7', client_request_id: 'request-1', text: '2 + 2?' },
   ], pending)
   assert.deepEqual(afterHydrate.map(entry => entry.text), ['Earlier', '2 + 2?'])
 })
 
+test('pending input reconciliation uses durable IDs and preserves identical text from another request', () => {
+  const transcript = [
+    { item_id: 'human-repeat-old', kind: 'user', text: 'Repeat' },
+    { item_id: 'assistant-old', kind: 'assistant', text: 'Earlier response' },
+    { kind: 'user', item_id: 'input:agent-a:3', client_request_id: 'request-repeat-1', text: 'Repeat' },
+    { item_id: 'input:agent-a:4', id: 'input:agent-a:4', kind: 'user', text: 'Stable ID', data: {} },
+  ]
+  const pending = [
+    { item_id: 'input:agent-a:4', kind: 'user', text: 'Stable ID' },
+    { id: 'pending:request-repeat-1', client_request_id: 'request-repeat-1', kind: 'user', text: 'Repeat' },
+    { id: 'pending:request-repeat-2', client_request_id: 'request-repeat-2', kind: 'user', text: 'Repeat' },
+    { id: 'pending:request-new', client_request_id: 'request-new', kind: 'user', text: 'New' },
+  ]
 
-test('Desktop HITL adapter preserves every supported request type and queue order', () => {
-  const userInfo = { content: 'Which environment?', user_information_args: { question: 'Which environment?' } }
-  const memoryConflict = { id: 'memory-call', content: 'Conflict' }
-  const approval = { approval_id: 'approval-1', approval_args: { tool_calls: [{ id: 'call-1' }] } }
-  assert.deepEqual(desktopHitlQueue({ userInfos: [userInfo], memoryConflicts: [memoryConflict], approval }), [
-    { kind: 'user_information', data: userInfo },
-    { kind: 'memory_conflict', data: memoryConflict },
-    { kind: 'approval', data: approval },
+  const entries = desktopChatEntries('agent-a', transcript, pending)
+
+  assert.deepEqual(entries.map(entry => entry.id), [
+    'human-repeat-old',
+    'assistant-old',
+    'input:agent-a:3',
+    'input:agent-a:4',
+    'pending:request-repeat-2',
+    'pending:request-new',
   ])
 })
+
+test('Desktop optimistic input identity is created before submit and text-boundary matching is retired', () => {
+  const source = readFileSync(new URL('./DesktopApp.vue', import.meta.url), 'utf8')
+  const adapter = readFileSync(new URL('./utils/desktopChatEntries.js', import.meta.url), 'utf8')
+  assert.match(source, /id: `pending:\$\{clientRequestId\}`/)
+  assert.match(source, /client_request_id: clientRequestId/)
+  assert.match(source, /onClientRequestId: clientRequestId =>/)
+  assert.doesNotMatch(source, /baseTranscriptLength|sendSequence/)
+  assert.doesNotMatch(adapter, /baseTranscriptLength|pendingTexts|entry\.text\s*===|history:\$\{index\}/)
+})
+
+test('queued inputs keep server sequence identities, order, and reconcile into transcript records', () => {
+  const queued = [
+    { input_id: 'input:agent-a:5', item_id: 'input:agent-a:5', input_seq: 5, kind: 'user', text: 'First queued', queue_status: 'queued' },
+    { input_id: 'input:agent-a:6', item_id: 'input:agent-a:6', input_seq: 6, kind: 'user', text: 'Second queued', queue_status: 'queued' },
+  ]
+  const beforeExecution = desktopChatEntries('agent-a', [{ item_id: 'input:agent-a:4', kind: 'user', text: 'Current turn' }], queued)
+  assert.deepEqual(beforeExecution.map(entry => entry.text), ['Current turn', 'First queued', 'Second queued'])
+  assert.deepEqual(beforeExecution.slice(1).map(entry => entry.id), ['input:agent-a:5', 'input:agent-a:6'])
+
+  const afterClaim = desktopChatEntries('agent-a', [
+    { item_id: 'input:agent-a:4', kind: 'user', text: 'Current turn' },
+    { item_id: 'input:agent-a:5', kind: 'user', text: 'First queued' },
+  ], queued)
+  assert.deepEqual(afterClaim.map(entry => entry.text), ['Current turn', 'First queued', 'Second queued'])
+})
+
 
 test('composer drafts remain with the Agent that owns them', () => {
   const drafts = {}

@@ -129,7 +129,7 @@ func applyChildProgressEvent(progress *Progress, eventType string, data map[stri
 		progress.Phase = "tool_completed"
 		progress.PendingApproval = false
 		progress.PendingApprovalData = nil
-	case "assistant", "reasoning":
+	case "conversation_delta":
 		progress.Phase = "model_generating"
 		progress.PendingApproval = false
 		progress.CurrentTool = ""

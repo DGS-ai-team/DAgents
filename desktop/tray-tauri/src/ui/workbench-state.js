@@ -99,7 +99,7 @@ export function cancelledTurnSummary(turnState) {
 
 export function tabForRoute(path, currentTab = 'chat') {
   if (String(path || '').startsWith('/settings')) return 'settings'
-  if (['file', 'browser', 'terminal'].includes(currentTab)) return currentTab
+  if (['file', 'browser', 'terminal', 'history'].includes(currentTab)) return currentTab
   return 'chat'
 }
 
@@ -131,6 +131,7 @@ export function agentSelectionViewTransition(activeTab, changed, openChat = fals
 export function closeResourceTransition(tab) {
   if (tab === 'file') return { tab: 'chat', workspaceOpened: false }
   if (tab === 'browser') return { tab: 'chat', browserOpened: false }
+  if (tab === 'history') return { tab: 'chat', historyOpened: false }
   if (tab === 'terminal') return { tab: 'terminal', closeTerminal: true }
   return { tab }
 }
@@ -146,7 +147,7 @@ export function chooseActiveAgentId(agents, currentId) {
   return String(rows[0]?.agent_id || '')
 }
 
-export function desktopComposerStatus({ generating = false, cancelling = false, streamingText = '', turnState = {} } = {}) {
+export function desktopComposerStatus({ generating = false, cancelling = false, hasAssistantOutput = false, turnState = {} } = {}) {
   const phase = String(turnState?.phase || '')
   if (!generating || turnState?.terminal || ['completed', 'failed', 'cancelled', 'interrupted', 'budget_exhausted', 'finished'].includes(phase)) return ''
   if (cancelling) return '正在停止'
@@ -161,11 +162,8 @@ export function desktopComposerStatus({ generating = false, cancelling = false, 
   if (phase === 'tool_executing') return '工具执行中'
   if (phase === 'tool_waiting') return '等待工具审批'
   if (phase === 'waiting_user') return '等待你的输入'
-  if (streamingText) {
-    return phase === 'model_generating' && turnState?.outputChannel === 'reasoning'
-      ? '思考中'
-      : '正在生成回复'
-  }
+  if (phase === 'model_generating' && turnState?.outputChannel === 'reasoning') return '思考中'
+  if (hasAssistantOutput) return '正在生成回复'
   return '正在等待回复'
 }
 
@@ -205,31 +203,7 @@ export function hasPersistedPartialMessage(transcript) {
   )
 }
 
-export function desktopChatEntries(agentId, transcript = [], pendingUser = null) {
-  const rows = Array.isArray(transcript) ? transcript : []
-  const entries = rows.map((entry, index) => ({
-    ...entry,
-    id: `${agentId || 'agent'}:history:${index}`,
-    data: entry?.data && typeof entry.data === 'object' ? entry.data : {},
-  }));
-  const persistedPendingUser = pendingUser && rows.slice(Math.max(0, Number(pendingUser.baseTranscriptLength) || 0))
-    .some(entry => entry?.kind === 'user' && String(entry.text || '') === String(pendingUser.text || ''))
-  if (pendingUser && !persistedPendingUser) {
-    const entry = { ...pendingUser }
-    delete entry.baseTranscriptLength
-    entries.push({ ...entry, id: `${agentId || 'agent'}:pending-user:${pendingUser.id}`, data: {} })
-  }
-  return entries;
-}
-
-export function desktopHitlQueue(expanded = {}) {
-  return [
-    ...(expanded.userInfos || []).map(data => ({ kind: 'user_information', data })),
-    ...(expanded.memoryConflicts || []).map(data => ({ kind: 'memory_conflict', data })),
-    ...(expanded.approval ? [{ kind: 'approval', data: expanded.approval }] : []),
-  ]
-}
-
+export { desktopChatEntries } from './utils/desktopChatEntries.js'
 
 export function switchDraft(drafts, fromId, toId, currentValue) {
   if (fromId) drafts[fromId] = currentValue
@@ -290,7 +264,7 @@ export function createDesktopMenuModel(context = {}) {
   } = context
   const hasAgent = Boolean(activeAgentId) && !isWorkgroup
   const canOpenResource = online && !setupRequired && hasAgent
-  const closeableResource = ['terminal', 'file', 'browser'].includes(activeTab) && !isWorkgroup
+  const closeableResource = ['terminal', 'file', 'browser', 'history'].includes(activeTab) && !isWorkgroup
   const separator = { separator: true }
   const item = (label, action, disabled = false, extra = {}) => ({ label, action, disabled, ...extra })
   const resourceUnavailableReason = !online
@@ -340,7 +314,7 @@ export function createDesktopMenuModel(context = {}) {
       ...(canOpenResource && activeTab === 'terminal' && resourceActions.canEndTerminal
         ? [separator, item('结束当前终端…', 'end-terminal')]
         : []),
-      item('关闭当前资源', 'close-resource', !closeableResource, { hint: closeableResource ? ({ terminal: '终端', file: '工作区', browser: '浏览器' })[activeTab] : '当前没有可关闭的资源' }),
+      item('关闭当前资源', 'close-resource', !closeableResource, { hint: closeableResource ? ({ terminal: '终端', file: '工作区', browser: '浏览器', history: '对话历史' })[activeTab] : '当前没有可关闭的资源' }),
     ],
     视图: [
       item(sidebarCollapsed ? '展开侧栏' : '收起侧栏', 'sidebar'),
@@ -351,6 +325,7 @@ export function createDesktopMenuModel(context = {}) {
       item('当前智能体设置', 'current-agent-settings', !hasAgent || !online, { hint: !hasAgent || !online ? agentUnavailableReason : '' }),
       separator,
       { header: true, label: '当前会话' },
+      item('查看对话历史', 'open-history', !hasAgent || !online || setupRequired || activeTab === 'history', { hint: !hasAgent ? agentUnavailableReason : !online ? '本地服务未连接' : setupRequired ? setupUnavailableReason : activeTab === 'history' ? '当前已在对话历史页' : '' }),
       item('停止当前回合', 'stop-turn', !hasAgent || !online || !generating, { hint: !hasAgent || !online ? agentUnavailableReason : !generating ? '当前没有生成中的任务' : '' }),
       item('清空当前对话', 'clear-context', !hasAgent || !online || generating || hasPendingHitl, { hint: !hasAgent || !online ? agentUnavailableReason : generating ? '请先停止当前生成' : hasPendingHitl ? '请先处理待审批请求' : '' }),
       item('压缩上下文', 'compress-context', !hasAgent || !online || setupRequired || generating || hasPendingHitl || hasPendingApproval, { hint: !hasAgent || !online ? agentUnavailableReason : setupRequired ? setupUnavailableReason : generating ? '请等待当前生成结束' : hasPendingHitl || hasPendingApproval ? '请先处理待审批请求' : '' }),

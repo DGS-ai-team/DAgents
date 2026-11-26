@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "bench:message-stream": "node ./scripts/benchmark-message-stream.mjs",
     "test:frontend": "vitest run --config vitest.config.js && node --test ../../shared/icons/icons.test.js",
     "test:ui": "node --test ./src/ui/workbench-state.test.js ./src/ui/terminal-close.test.js ./src/ui/terminal-output.test.js ./src/ui/composer-surface-motion.test.js ./src/ui/workspace-files-state.test.js ./src/ui/workspace-references.test.js ./src/ui/workspace-preview.test.js ./src/ui/workgroup-state.test.js ./src/ui/slash-commands.test.js ./src/workspace-documents.test.js ./src/workspace-syntax.test.js ./src/desktop-settings-state.test.js ./src/top-slot-icons.test.js",
     "test": "npm run test:frontend && npm run test:ui",

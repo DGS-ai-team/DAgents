@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import ToolSummaryRow from "./ToolSummaryRow.vue";
 import { resolveToolVisual } from "../utils/toolSource.js";
 import { resolveToolStepPhase, toolStepPurposeOrToolLabel } from "../utils/toolUserLabel.js";
@@ -8,12 +8,28 @@ import UiIcon from "./UiIcon.vue";
 
 const props = defineProps({
   steps: { type: Array, default: () => [] },
+  conversationOrdinal: { type: Number, default: 0 },
+  streamItemKey: { type: String, default: "" },
   verbose: { type: Boolean, default: false },
+  agentId: { type: String, default: "" },
+  restoreToolMedia: { type: Function, default: null },
+  releaseToolMedia: { type: Function, default: null },
 });
 
 const expanded = ref(false);
-const everExpanded = ref(false);
+const expandedToolStepKeys = ref(new Set());
 
+watch(() => props.steps.map((step) => String(step?.key || "")), (keys) => {
+  const validKeys = new Set(keys);
+  const next = new Set([...expandedToolStepKeys.value].filter((key) => validKeys.has(key)));
+  if (next.size !== expandedToolStepKeys.value.size) expandedToolStepKeys.value = next;
+});
+
+const phasedSteps = computed(() => props.steps.map((step) => ({
+  step,
+  phase: resolveToolStepPhase(step),
+})));
+const phaseByStep = computed(() => new Map(phasedSteps.value.map(({ step, phase }) => [step, phase])));
 const phaseCounts = computed(() => {
   const counts = {
     generating: 0,
@@ -27,19 +43,18 @@ const phaseCounts = computed(() => {
     interrupted: 0,
     idle: 0,
   };
-  for (const step of props.steps) {
-    const phase = resolveToolStepPhase(step);
+  for (const { phase } of phasedSteps.value) {
     counts[phase] = (counts[phase] || 0) + 1;
   }
   return counts;
 });
 const selectedStep = computed(() => {
-  const priority = props.steps.filter((step) => ["generating", "running"].includes(resolveToolStepPhase(step)));
-  if (priority.length) return priority[priority.length - 1];
-  const pending = props.steps.filter((step) => resolveToolStepPhase(step) === "pending");
-  if (pending.length) return pending[pending.length - 1];
-  const active = props.steps.filter((step) => resolveToolStepPhase(step) === "background");
-  return active[active.length - 1] || props.steps[props.steps.length - 1] || null;
+  const priority = phasedSteps.value.filter(({ phase }) => ["generating", "running"].includes(phase));
+  if (priority.length) return priority[priority.length - 1].step;
+  const pending = phasedSteps.value.filter(({ phase }) => phase === "pending");
+  if (pending.length) return pending[pending.length - 1].step;
+  const active = phasedSteps.value.filter(({ phase }) => phase === "background");
+  return active[active.length - 1]?.step || props.steps[props.steps.length - 1] || null;
 });
 const selectedVisual = computed(() => {
   const step = selectedStep.value;
@@ -82,13 +97,23 @@ const headLabel = computed(() => `${titleLabel.value}，${statusDetailText.value
 
 function toggle() {
   expanded.value = !expanded.value;
-  if (expanded.value) everExpanded.value = true;
+}
+
+function setToolStepExpanded(key, value) {
+  const normalizedKey = String(key || "");
+  if (!normalizedKey) return;
+  const next = new Set(expandedToolStepKeys.value);
+  if (value) next.add(normalizedKey);
+  else next.delete(normalizedKey);
+  expandedToolStepKeys.value = next;
 }
 </script>
 
 <template>
   <div
     class="tool-group-row"
+    :data-conversation-ordinal="conversationOrdinal || undefined"
+    :data-stream-item-key="streamItemKey || undefined"
     :class="[`tool-group-row--${selectedVisual.kind}`, { 'tool-group-row--expanded': expanded }]"
   >
     <button
@@ -106,15 +131,19 @@ function toggle() {
       <UiIcon class="tool-group-row__chevron" :name="expanded ? 'chevron-down' : 'chevron-right'" :size="14" />
     </button>
 
-    <div v-if="everExpanded" v-show="expanded" class="tool-group-row__steps">
+    <div v-if="expanded" class="tool-group-row__steps">
       <ToolSummaryRow
         v-for="step in steps"
         :key="step.key"
         :call-entry="step.callEntry"
         :result-entry="step.resultEntry"
-        :execution-hint="step.executionHint"
-        :lifecycle-status="step.lifecycleStatus"
+        :phase="phaseByStep.get(step) || 'idle'"
         :verbose="verbose"
+        :agent-id="agentId"
+        :restore-tool-media="restoreToolMedia"
+        :release-tool-media="releaseToolMedia"
+        :expanded="expandedToolStepKeys.has(String(step.key || ''))"
+        @expanded-change="setToolStepExpanded(step.key, $event)"
         embedded
       />
     </div>

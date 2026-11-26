@@ -1,49 +1,18 @@
 import { describe, expect, it } from "vitest";
-import {
-  canSubmitComposer,
-  hasPendingUserInformation,
-  shouldShowCancel,
-  shouldShowInteractionCancel,
-} from "./composerState.js";
+import { normalComposerIntent } from "./composerState.js";
 
-describe("composer HITL state", () => {
-  it("allows a user-information answer while the Turn is sending", () => {
-    expect(hasPendingUserInformation([{ kind: "user_information" }])).toBe(true);
-    expect(canSubmitComposer({
-      sending: true,
-      hasUserInformation: true,
-      hasContent: true,
-    })).toBe(true);
-    expect(shouldShowCancel({
-      sending: true,
-      hasUserInformation: true,
-    })).toBe(false);
-    expect(shouldShowInteractionCancel({
-      sending: true,
-      hasUserInformation: true,
-    })).toBe(true);
-    expect(shouldShowInteractionCancel({
-      sending: false,
-      hasUserInformation: true,
-    })).toBe(true);
+describe("normal composer intent", () => {
+  it("queues ordinary messages during generation, including pending approvals", () => {
+    expect(normalComposerIntent({ turnRunning: true })).toBe("queue");
+    expect(normalComposerIntent({ turnRunning: true, interactionPending: true })).toBe("queue");
   });
 
-  it("keeps the ordinary sending gate for a draft message", () => {
-    expect(hasPendingUserInformation([{ kind: "approval" }])).toBe(false);
-    expect(canSubmitComposer({
-      sending: true,
-      hasContent: true,
-    })).toBe(false);
-    expect(shouldShowCancel({ sending: true })).toBe(true);
-    expect(shouldShowInteractionCancel({ sending: true })).toBe(false);
+  it("keeps pending interaction decisions separate when no turn is running", () => {
+    expect(normalComposerIntent({ interactionPending: true })).toBe("blocked");
   });
 
-  it("does not submit while the HITL request itself is busy", () => {
-    expect(canSubmitComposer({
-      sending: true,
-      hitlBusy: true,
-      hasUserInformation: true,
-      hasContent: true,
-    })).toBe(false);
+  it("sends normally while idle", () => {
+    expect(normalComposerIntent()).toBe("send");
+    expect(normalComposerIntent({ turnRunning: false, interactionPending: false })).toBe("send");
   });
 });

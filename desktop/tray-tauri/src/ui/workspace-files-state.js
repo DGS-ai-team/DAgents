@@ -164,7 +164,14 @@ export function deserializeWorkspaceDraft(raw, serverRevision) {
 
 export function agentMediaId(source, expectedAgentId) {
   try {
-    const url = new URL(String(source || ''), 'http://127.0.0.1')
+    if (!String(expectedAgentId || '').trim()) return ''
+    const raw = String(source || '').trim()
+    const internalRefPrefix = 'dagents-media://'
+    if (raw.toLowerCase().startsWith(internalRefPrefix)) {
+      const mediaId = raw.slice(internalRefPrefix.length).trim()
+      return /^[A-Za-z0-9_-]{1,128}$/.test(mediaId) ? mediaId : ''
+    }
+    const url = new URL(raw, 'http://127.0.0.1')
     if (!['http:', 'https:'].includes(url.protocol) || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) return ''
     const match = url.pathname.match(/^\/v1\/agents\/([^/]+)\/media\/([^/]+)$/)
     if (!match || decodeURIComponent(match[1]) !== expectedAgentId) return ''

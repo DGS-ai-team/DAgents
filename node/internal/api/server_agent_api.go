@@ -11,6 +11,7 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/manage"
 	"github.com/DGS-ai-team/DAgents/node/internal/session"
 	"github.com/DGS-ai-team/DAgents/node/internal/skills"
+	"github.com/DGS-ai-team/DAgents/node/internal/stream"
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 	"github.com/DGS-ai-team/DAgents/node/internal/turn"
 	"github.com/DGS-ai-team/DAgents/node/internal/version"
@@ -256,21 +257,32 @@ func (s *Server) handleAgentContextImpl(w http.ResponseWriter, r *http.Request) 
 }
 
 type sessionHydrateResponse struct {
-	AgentID         string                    `json:"agent_id"`
-	TurnState       session.TurnStateView     `json:"turn_state"`
-	HasActiveTurn   bool                      `json:"has_active_turn"`
-	QueuePending    int                       `json:"queue_pending"`
-	Transcript      []session.TranscriptEntry `json:"transcript"`
-	PendingHITL     map[string]any            `json:"pending_hitl"`
-	HistoryRevision uint64                    `json:"history_revision"`
-	StreamEpoch     string                    `json:"stream_epoch"`
-	StreamSeqHint   int                       `json:"stream_seq_hint"`
-	AgentSeqHint    int                       `json:"agent_seq_hint"`
-	NotifySeq       int                       `json:"notify_seq"`
-	AckSeq          int                       `json:"ack_seq"`
-	HasUnread       bool                      `json:"has_unread"`
-	ToolJobs        map[string]int            `json:"tool_jobs,omitempty"`
-	ChildAgents     []session.ChildAgentView  `json:"child_agents"`
+	AgentID                string                          `json:"agent_id"`
+	ConversationEpoch      uint64                          `json:"conversation_epoch"`
+	ConversationRevision   uint64                          `json:"conversation_revision"`
+	TurnState              session.TurnStateView           `json:"turn_state"`
+	HasActiveTurn          bool                            `json:"has_active_turn"`
+	QueuePending           int                             `json:"queue_pending"`
+	QueuePaused            bool                            `json:"queue_paused"`
+	QueueControlRevision   uint64                          `json:"queue_control_revision"`
+	PendingInputs          []session.PendingInputView      `json:"pending_inputs"`
+	Transcript             []session.TranscriptEntry       `json:"transcript"`
+	HasEarlierHistory      bool                            `json:"has_earlier_history"`
+	WindowStartRound       int64                           `json:"window_start_round"`
+	WindowEndRound         int64                           `json:"window_end_round"`
+	TranscriptSynchronized bool                            `json:"transcript_synchronized"`
+	PendingHITL            map[string]any                  `json:"pending_hitl"`
+	HistoryRevision        uint64                          `json:"history_revision"`
+	StreamEpoch            string                          `json:"stream_epoch"`
+	CoveredAgentSeq        int                             `json:"covered_agent_seq"`
+	CoveredStreamSeq       int                             `json:"covered_stream_seq"`
+	AssistantDrafts        []stream.AssistantDraftSnapshot `json:"assistant_drafts"`
+	StreamSeqHint          int                             `json:"stream_seq_hint"`
+	AgentSeqHint           int                             `json:"agent_seq_hint"`
+	NotifySeq              int                             `json:"notify_seq"`
+	AckSeq                 int                             `json:"ack_seq"`
+	HasUnread              bool                            `json:"has_unread"`
+	ChildAgents            []session.ChildAgentView        `json:"child_agents"`
 }
 
 func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) {
@@ -279,7 +291,7 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusBadRequest, "invalid_agent", "agent_id is required", nil)
 		return
 	}
-	view, err := s.sessions.GetHydrateView(sessionID)
+	view, err := s.sessions.GetHydrateViewContext(r.Context(), sessionID)
 	if err != nil {
 		if err.Error() == "agent_not_found" {
 			writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent 不存在", map[string]any{"agent_id": sessionID})
@@ -292,27 +304,41 @@ func (s *Server) handleAgentHydrateImpl(w http.ResponseWriter, r *http.Request) 
 	if transcript == nil {
 		transcript = []session.TranscriptEntry{}
 	}
-	toolJobs := map[string]int{"running": 0}
-	if reg := s.sessions.SessionTools(sessionID); reg != nil {
-		c := reg.SessionToolJobCounts(sessionID)
-		toolJobs["running"] = c.Running
+	pendingInputs := view.PendingInputs
+	if pendingInputs == nil {
+		pendingInputs = []session.PendingInputView{}
+	}
+	assistantDrafts := view.AssistantDrafts
+	if assistantDrafts == nil {
+		assistantDrafts = []stream.AssistantDraftSnapshot{}
 	}
 	writeJSON(w, http.StatusOK, sessionHydrateResponse{
-		AgentID:         view.SessionID,
-		TurnState:       view.TurnState,
-		HasActiveTurn:   view.HasActiveTurn,
-		QueuePending:    view.QueuePending,
-		Transcript:      transcript,
-		PendingHITL:     view.PendingHITL,
-		HistoryRevision: view.HistoryRevision,
-		StreamEpoch:     s.stream.Epoch(),
-		StreamSeqHint:   s.stream.CurrentSeq(),
-		AgentSeqHint:    s.stream.CurrentAgentSeq(sessionID),
-		NotifySeq:       view.NotifySeq,
-		AckSeq:          view.AckSeq,
-		HasUnread:       view.HasUnread,
-		ToolJobs:        toolJobs,
-		ChildAgents:     view.ChildAgents,
+		AgentID:                view.SessionID,
+		ConversationEpoch:      view.ConversationEpoch,
+		ConversationRevision:   view.ConversationRevision,
+		TurnState:              view.TurnState,
+		HasActiveTurn:          view.HasActiveTurn,
+		QueuePending:           view.QueuePending,
+		QueuePaused:            view.QueuePaused,
+		QueueControlRevision:   view.QueueControlRevision,
+		PendingInputs:          pendingInputs,
+		Transcript:             transcript,
+		HasEarlierHistory:      view.HasEarlierHistory,
+		WindowStartRound:       view.WindowStartRound,
+		WindowEndRound:         view.WindowEndRound,
+		TranscriptSynchronized: view.TranscriptSynchronized,
+		PendingHITL:            view.PendingHITL,
+		HistoryRevision:        view.HistoryRevision,
+		StreamEpoch:            view.StreamEpoch,
+		CoveredAgentSeq:        view.CoveredAgentSeq,
+		CoveredStreamSeq:       view.CoveredStreamSeq,
+		AssistantDrafts:        assistantDrafts,
+		StreamSeqHint:          s.stream.CurrentSeq(),
+		AgentSeqHint:           s.stream.CurrentAgentSeq(sessionID),
+		NotifySeq:              view.NotifySeq,
+		AckSeq:                 view.AckSeq,
+		HasUnread:              view.HasUnread,
+		ChildAgents:            view.ChildAgents,
 	})
 }
 
@@ -379,6 +405,13 @@ func (s *Server) handleAgentCompressImpl(w http.ResponseWriter, r *http.Request)
 	}
 	if result.Status == "busy" {
 		writeAPIError(w, http.StatusConflict, "turn_busy", "当前 turn 进行中，请稍后再试", map[string]any{
+			"agent_id": sessionID,
+			"status":   result.Status,
+		})
+		return
+	}
+	if result.Status == "persistence_failed" {
+		writeAPIError(w, http.StatusInternalServerError, "compression_persistence_failed", "上下文压缩结果未能持久化", map[string]any{
 			"agent_id": sessionID,
 			"status":   result.Status,
 		})

@@ -41,6 +41,7 @@ Windows Desktop 已实现主要日常功能，正在收束发布验收；当前�
 
 | 文档 | 说明 |
 |---|---|
+| [conversation-message-pipeline-refactor-plan.md](conversation-message-pipeline-refactor-plan.md) | Desktop / Node 消息同步、模型上下文与历史分离、排队输入、编辑重发及最近轮次 / 历史页；含原逻辑对比、43 张交互图、稳定内容复用、通知丢失水位校验、工作包与验收标准 |
 | [workgroup-multi-agent-collaboration-refactor-plan.md](workgroup-multi-agent-collaboration-refactor-plan.md) | 多智能体委派、子 Agent Turn、工具审批、Ask User、取消恢复与前端投影重构方案 |
 | [workgroup-agent-membership-ui.md](workgroup-agent-membership-ui.md) | Workgroup 成员 UI 的后续增强 |
 

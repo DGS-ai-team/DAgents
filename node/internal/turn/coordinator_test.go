@@ -50,6 +50,37 @@ func TestTurnCoordinatorCancellationClearsRetryingModelAttempt(t *testing.T) {
 	}
 }
 
+func TestDispatchBatchDurableRollsBackAllTerminalCommands(t *testing.T) {
+	coordinator := NewTurnCoordinator("s", "a")
+	now := time.Now().UTC()
+	for _, c := range []TurnCommand{{Type: CommandStartTurn, SessionID: "s", TurnID: "t", Generation: 1, Source: TurnSourceHuman, At: now}, {Type: CommandStartStep, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, At: now}, {Type: CommandAssistantReceived, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, At: now}} {
+		if _, err := coordinator.Dispatch(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := coordinator.Snapshot()
+	commands := []TurnCommand{{Type: CommandCompleteStep, SessionID: "s", TurnID: "t", StepID: "step", Generation: 1, CommandID: "step-done", At: now}, {Type: CommandCompleteTurn, SessionID: "s", TurnID: "t", Generation: 1, CommandID: "turn-done", At: now}}
+	if _, err := coordinator.DispatchBatchDurable(commands, func(got []TurnCommand, snapshots []CoordinatorSnapshot) error {
+		if len(got) != 2 || len(snapshots) != 2 || snapshots[1].TurnStatus != TurnStatusCompleted {
+			t.Fatalf("batch projections=%+v", snapshots)
+		}
+		return fmt.Errorf("injected atomic write failure")
+	}); err == nil {
+		t.Fatal("expected batch persistence failure")
+	}
+	after := coordinator.Snapshot()
+	if after.TurnStatus != before.TurnStatus || after.StepStatus != before.StepStatus || after.TurnID != before.TurnID {
+		t.Fatalf("failed batch leaked projection: before=%+v after=%+v", before, after)
+	}
+	snapshots, err := coordinator.DispatchBatchDurable(commands, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshots) != 2 || snapshots[1].TurnStatus != TurnStatusCompleted {
+		t.Fatalf("successful retry projections=%+v", snapshots)
+	}
+}
+
 func TestTurnCoordinatorDispatchesOneTurnAcrossMultipleSteps(t *testing.T) {
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 	coordinator := NewTurnCoordinator("session-1", "agent-1")
@@ -640,6 +671,31 @@ func TestTurnCoordinatorTracksSnapshotAttemptsAndToolExecution(t *testing.T) {
 	}
 	if c.ToolExecutionID("call-1") != "call-1-execution" {
 		t.Fatal("tool execution was not recorded")
+	}
+}
+
+func TestTurnCoordinatorActiveToolCallsAreEmptyBetweenTurns(t *testing.T) {
+	now := time.Now().UTC()
+	c := NewTurnCoordinator("session-1", "agent-1")
+	commands := []TurnCommand{
+		{Type: CommandStartTurn, SessionID: "session-1", TurnID: "turn-1", Generation: 1, Source: TurnSourceHuman, At: now},
+		{Type: CommandStartStep, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1, At: now},
+		{Type: CommandAssistantReceived, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1, HasTools: true, AssistantMessageID: "assistant-1", At: now},
+		{Type: CommandToolCallRecorded, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1, ToolCallID: "call-1", ToolName: "read_file", Arguments: []byte(`{"path":"x"}`), At: now},
+		{Type: CommandToolExecutionStarted, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1, ToolExecutionID: "call-1-execution", At: now},
+		{Type: CommandToolExecutionCompleted, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1, ToolExecutionID: "call-1-execution", ExecutionStatus: ToolExecutionStatusSucceeded, At: now},
+		{Type: CommandToolBatchSettled, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1, At: now},
+		{Type: CommandCompleteStep, SessionID: "session-1", TurnID: "turn-1", StepID: "step-1", Generation: 1, At: now},
+		{Type: CommandCompleteTurn, SessionID: "session-1", TurnID: "turn-1", Generation: 1, At: now},
+		{Type: CommandStartTurn, SessionID: "session-1", TurnID: "turn-2", Generation: 2, Source: TurnSourceHuman, At: now.Add(time.Second)},
+	}
+	for _, command := range commands {
+		if _, err := c.Dispatch(command); err != nil {
+			t.Fatalf("dispatch %s: %v", command.Type, err)
+		}
+	}
+	if calls := c.ActiveToolCalls(); len(calls) != 0 {
+		t.Fatalf("stale prior-turn tool calls leaked into a turn with no step: %#v", calls)
 	}
 }
 

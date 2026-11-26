@@ -1337,6 +1337,13 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
 .attachment-actions-leave-active .attachment-action-option:nth-child(1) { transition-delay: .16s; }
 .attachment-actions-leave-active .attachment-action-option:nth-child(2) { transition-delay: .08s; }
 .attachment-actions-leave-active .attachment-action-option:nth-child(3) { transition-delay: 0s; }
+.composer-toolbar__status-group {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
 .composer-toolbar__status {
   display: inline-flex;
   flex: 0 1 110px;
@@ -1391,16 +1398,12 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
 .composer-status-leave-to { transform: translateY(-100%); opacity: 0; }
 
 .composer-action { position: relative; }
-.composer-action__send,
-.composer-action__stop {
-  grid-area: 1 / 1;
-  transition: opacity 200ms ease, transform 240ms cubic-bezier(.22,.8,.25,1);
+/* The shared icon-only button rule has higher specificity than a plain utility selector. */
+.desktop-shell .composer-toolbar-right > .composer-stop-action.is-hidden {
+  display: none;
+  pointer-events: none;
 }
-.composer-action__send { opacity: 1; transform: translateY(0) scale(1); }
-.composer-action__stop { opacity: 0; transform: translateY(3px) scale(.65); }
-.composer-action.is-stop .composer-action__send { opacity: 0; transform: translateY(-3px) scale(.65); }
-.composer-action.is-stop .composer-action__stop { opacity: 1; transform: translateY(0) scale(1); }
-.composer-action.is-stop:disabled { opacity: .75; }
+.dock-stop-action.is-hidden { visibility: hidden; pointer-events: none; }
 
 @media (forced-colors: active) {
   .composer-toolbar__status-text { background: none; color: CanvasText; animation: none; }
@@ -2184,6 +2187,74 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
   display: grid;
   place-items: center;
 }
+.queued-input-edit-scrim {
+  z-index: 80;
+  padding: 24px;
+  background: rgb(31 40 44 / 34%);
+}
+.queued-input-edit-dialog {
+  display: flex;
+  width: min(540px, calc(100vw - 32px));
+  max-height: min(680px, calc(100vh - 32px));
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  overflow: auto;
+  border: 1px solid #d6dadd;
+  border-radius: 12px;
+  background: #fbfcfc;
+  box-shadow: 0 18px 54px rgb(20 32 38 / 22%);
+}
+.queued-input-edit-dialog__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.queued-input-edit-dialog__head h2 {
+  margin: 0;
+  color: #202629;
+  font-size: 16px;
+  font-weight: 650;
+}
+.queued-input-edit-dialog__head p,
+.queued-input-edit-dialog__attachments {
+  margin: 5px 0 0;
+  color: #667278;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.queued-input-edit-dialog__field {
+  width: 100%;
+  min-height: 150px;
+  max-height: 42vh;
+  padding: 11px 12px;
+  resize: vertical;
+  border: 1px solid #d6dadd;
+  border-radius: 8px;
+  outline: none;
+  background: #fff;
+  color: #202629;
+  font: inherit;
+  line-height: 1.55;
+}
+.queued-input-edit-dialog__field:focus-visible {
+  border-color: #aab7bc;
+  box-shadow: 0 0 0 3px rgb(91 112 121 / 12%);
+}
+.queued-input-edit-dialog__attachments { margin: -6px 0 0; }
+.queued-input-edit-dialog__error {
+  margin: -4px 0 0;
+  color: #9a403a;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.queued-input-edit-dialog__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.queued-input-edit-dialog__spacer { flex: 1; }
 
 @media (max-width: 930px) {
   .desktop-shell { grid-template-columns: 205px minmax(0, 1fr); }
@@ -2200,8 +2271,8 @@ html body .desktop-chat-wrapper .tool-summary-row--child .tool-summary-row__visu
   .composer-toolbar__status-text { animation: none; background: none; color: #5d686e; }
   .composer-status-enter-active,
   .composer-status-leave-active,
-  .composer-action__send,
-  .composer-action__stop { transition: none; }
+  .composer-stop-action,
+  .dock-stop-action { transition: none; }
   .dock-panel-enter-active,
   .dock-panel-leave-active,
   .dock-bar-enter-active,

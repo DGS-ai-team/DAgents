@@ -24,7 +24,7 @@ func newWorkgroupOpenTestServer(t *testing.T) (*Server, *workgroupAgentBridge) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := history.Save(context.Background(), store.Record{
+	if err := history.SaveConversationSnapshot(context.Background(), store.Record{
 		AgentID:  "wg-session-test",
 		Messages: []llm.Message{{Role: "user", Content: "keep this workgroup history"}},
 	}); err != nil {

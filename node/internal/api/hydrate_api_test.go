@@ -29,7 +29,12 @@ func TestHandleSessionHydrate(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	sessionID := "sess-hydrate-test"
-	if err := st.Save(context.Background(), store.Record{
+	liveDelta := srv.stream.PublishEphemeral(sessionID, "conversation_delta", map[string]any{
+		"display_type": "delta", "item_id": "step-live/assistant/content",
+		"attempt_id": "turn-live/step-live/attempt/1", "turn_id": "turn-live", "part": "content",
+		"chunk_seq": uint64(1), "content": "still generating", "step_id": "step-live",
+	})
+	if err := st.SaveConversationSnapshot(context.Background(), store.Record{
 		AgentID: sessionID,
 		Messages: []llm.Message{
 			{Role: "user", Content: "ping"},
@@ -89,12 +94,29 @@ func TestHandleSessionHydrate(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d body = %s", resp.StatusCode, body)
 	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := fields["tool_jobs"]; exists {
+		t.Fatal("hydrate response must not include the retired tool_jobs projection")
+	}
 	var got sessionHydrateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.AgentID != sessionID {
 		t.Fatalf("agent_id = %q", got.AgentID)
+	}
+	if got.StreamEpoch == "" || got.CoveredAgentSeq != 0 || got.CoveredStreamSeq != liveDelta.Seq {
+		t.Fatalf("hydrate sync baseline = epoch %q, covered agent seq %d, covered stream seq %d", got.StreamEpoch, got.CoveredAgentSeq, got.CoveredStreamSeq)
+	}
+	if len(got.AssistantDrafts) != 1 || got.AssistantDrafts[0].Text != "still generating" || got.AssistantDrafts[0].ThroughChunkSeq != 1 || got.AssistantDrafts[0].ThroughAgentSeq != 0 || got.AssistantDrafts[0].ThroughStreamSeq != liveDelta.Seq {
+		t.Fatalf("assistant_drafts = %+v", got.AssistantDrafts)
 	}
 	if got.TurnState.Phase != "tool_waiting" {
 		t.Fatalf("turn_state.phase = %q", got.TurnState.Phase)
@@ -141,7 +163,7 @@ func TestHandleSessionHydrateTreatsTodoLifecycleStatusAsCompletedTool(t *testing
 			sessionID := "auto-hydrate-todo-" + todoStatus
 			callID := "call-todo-" + todoStatus
 			content := `{"id":"todo-1","text":"record the verified result","status":"` + todoStatus + `"}`
-			if err := st.Save(context.Background(), store.Record{
+			if err := st.SaveConversationSnapshot(context.Background(), store.Record{
 				AgentID: sessionID,
 				Messages: []llm.Message{
 					{Role: "assistant", ToolCalls: []llm.ToolCall{{

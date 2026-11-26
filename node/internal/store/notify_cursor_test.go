@@ -18,7 +18,7 @@ func TestNotifyCursorBumpAndAck(t *testing.T) {
 
 	ctx := context.Background()
 	sessionID := "sess-notify"
-	if err := st.Save(ctx, Record{
+	if err := st.SaveConversationSnapshot(ctx, Record{
 		AgentID:  sessionID,
 		Messages: []llm.Message{{Role: "user", Content: "hi"}},
 	}); err != nil {

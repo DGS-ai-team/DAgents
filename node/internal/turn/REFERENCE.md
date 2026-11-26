@@ -34,7 +34,7 @@ SSE 推送统一见 `sse_publish.go`（`publishAssistant` / `publishToolCall` / 
 
 | 符号 | 说明 |
 |------|------|
-| `publishAssistant` / `publishReasoning` | 流式 delta |
+| `publishAssistant` / `publishReasoning` | `conversation_delta` ephemeral 流式 delta；hydrate 草稿快照负责断线恢复 |
 | `publishError` | `error` SSE |
 | `publishHITLRequired` | 本地 turn 统一 HITL SSE（子 Agent relay 在 session/child-agent 层发 `approval_required` / `user_information_required`） |
 | `publishToolCall` / `publishToolResult` | 工具 SSE |

@@ -51,6 +51,15 @@ func TestResetActiveContextKeepsHistoryAndIsIdempotentAcrossRestart(t *testing.T
 	rt := mgr.getRuntime("session-1")
 	rt.mu.Lock()
 	rt.messages = []llm.Message{{Role: "user", Content: "old question"}, {Role: "assistant", Content: "old answer"}}
+	for index := range rt.messages {
+		rt.messages[index].RecordID, err = llm.NewOpaqueRecordID()
+		if err != nil {
+			rt.mu.Unlock()
+			t.Fatal(err)
+		}
+		rt.noteRecordUpsertLocked(rt.messages[index])
+	}
+	rt.noteCheckpointDirtyLocked()
 	rt.mu.Unlock()
 	if err := rt.persist(context.Background()); err != nil {
 		t.Fatal(err)
@@ -64,7 +73,15 @@ func TestResetActiveContextKeepsHistoryAndIsIdempotentAcrossRestart(t *testing.T
 		t.Fatalf("capture boundary: %q err=%v", boundary, err)
 	}
 	rt.mu.Lock()
-	rt.messages = append(rt.messages, llm.Message{Role: "user", Content: "new question"})
+	newMessage := llm.Message{Role: "user", Content: "new question"}
+	newMessage.RecordID, err = llm.NewOpaqueRecordID()
+	if err != nil {
+		rt.mu.Unlock()
+		t.Fatal(err)
+	}
+	rt.messages = append(rt.messages, newMessage)
+	rt.noteRecordUpsertLocked(newMessage)
+	rt.noteCheckpointDirtyLocked()
 	rt.mu.Unlock()
 	changed, err := mgr.ResetActiveContext(leaseCtx, "session-1", boundary, "dream-commit-1")
 	if err != nil || !changed {
@@ -99,7 +116,8 @@ func TestResetActiveContextKeepsHistoryAndIsIdempotentAcrossRestart(t *testing.T
 	if err != nil || restored == nil {
 		t.Fatalf("load: record=%v err=%v", restored, err)
 	}
-	if len(restored.Messages) != 3 || restored.RuntimeState.ActiveContextStart != 2 || restored.RuntimeState.LastContextResetID != "dream-commit-1" {
+	fullHistory, historyErr := reopened.LoadConversationRecords(context.Background(), "session-1")
+	if historyErr != nil || len(fullHistory) != 3 || len(restored.Messages) != 1 || restored.RuntimeState.ActiveContextStart != 0 || restored.RuntimeState.LastContextResetID != "dream-commit-1" {
 		t.Fatalf("durable reset state=%+v messages=%d", restored.RuntimeState, len(restored.Messages))
 	}
 	reopened.Close()

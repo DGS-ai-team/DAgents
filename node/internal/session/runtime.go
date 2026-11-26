@@ -38,6 +38,24 @@ func newContinuationID() string {
 	return "turn-" + hex.EncodeToString(b[:])
 }
 
+func newLifecycleCommandScope() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%d-%d", time.Now().UnixNano(), atomic.AddUint64(&lifecycleScopeFallbackSeq, 1))
+	}
+	return hex.EncodeToString(b[:])
+}
+
+var lifecycleScopeFallbackSeq uint64
+
+func newLogicalRoundID() string {
+	return "round-" + strings.TrimPrefix(newContinuationID(), "turn-")
+}
+
+func newRoundRevisionID() string {
+	return "revision-" + strings.TrimPrefix(newContinuationID(), "turn-")
+}
+
 // Session 表示对外可见的 session 元数据。
 type Session struct {
 	ID      string
@@ -92,6 +110,8 @@ type runtime struct {
 
 	mu              sync.Mutex         // 互斥锁
 	persistMu       sync.Mutex         // serializes full runtime snapshots
+	deltaMu         sync.Mutex         // protects explicit transcript/checkpoint dirty state
+	ingressMu       sync.Mutex         // serializes input acceptance with fail-closed state changes
 	turnCancel      context.CancelFunc // 取消 turn 上下文
 	turnCancelToken *struct{}          // prevents a stale step defer from clearing a newer cancel handle
 	// sessionEpoch invalidates events queued before clear-context/rebuild.
@@ -107,13 +127,36 @@ type runtime struct {
 	// lifecycleMu serializes compound Coordinator transitions. The
 	// TurnCoordinator owns Turn/Step identity and generation; runtime keeps no
 	// second lifecycle projection.
-	lifecycleMu                               sync.Mutex
-	lifecycleCommandSeq                       uint64
-	lifecycleEventSeq                         uint64
-	lifecycleEventsLoaded                     bool
-	messages                                  []llm.Message // 交互消息列表
-	pendingInputMessage                       *llm.Message
-	historyRevision                           uint64 // committed message snapshot revision
+	lifecycleMu               sync.Mutex
+	lifecycleCommandSeq       uint64
+	lifecycleCommandScope     string
+	lifecycleEventSeq         uint64
+	lifecycleEventsLoaded     bool
+	messages                  []llm.Message // 交互消息列表
+	pendingInputMessage       *llm.Message
+	historyRevision           uint64 // committed message snapshot revision
+	conversationRevision      uint64
+	contextCheckpointRevision uint64
+	recordDeltaUpserts        map[string]pendingRecordMutation
+	recordDeltaDeletes        map[string]uint64
+	recordMutationSequence    uint64
+	// Epochs are protected by deltaMu so the history sink can reject late
+	// mutations from a turn invalidated by Clear without acquiring r.mu.
+	historyMutationSessionEpoch               uint64
+	historyMutationTurnEpoch                  uint64
+	historyMutationErr                        error
+	activeRoundID                             string // protected by deltaMu; logical round, not execution TurnID
+	activeRevisionID                          string // protected by deltaMu; one immutable execution revision
+	checkpointDirty                           bool
+	checkpointMutationSequence                uint64
+	checkpointFullReplaceSequence             uint64
+	checkpointSyncedMutationSequence          uint64
+	checkpointMutations                       []pendingCheckpointMutation
+	historyFullReplaceSequence                uint64
+	historyMutations                          []pendingCheckpointMutation
+	historyCommitDirty                        bool   // in-memory history has not reached the durable runtime snapshot
+	resultCommitStatus                        string // empty, committed, or failed; surfaced to hydrate/turn_state
+	executionStopped                          bool   // fail closed after a result could not cross its durability boundary
 	toolCallProjectionHiddenThroughGeneration uint64
 	activeContextStart                        int    // durable transcript index visible to new model requests
 	lastContextResetID                        string // idempotency fence for the last logical reset
@@ -190,6 +233,15 @@ func newRuntimeWithPublisher(
 	turnOpts TurnOptions,
 	triggerDelivery triggers.DeliveryTracker,
 ) *runtime {
+	conversationFound := turnOpts.initialContextCheckpointRevision > 0 || turnOpts.initialConversationRevision > 0
+	if st != nil && !conversationFound {
+		conversationRevision, checkpointRevision, found, err := st.LoadConversationRevisions(context.Background(), id)
+		if err == nil && found {
+			turnOpts.initialConversationRevision = conversationRevision
+			turnOpts.initialContextCheckpointRevision = checkpointRevision
+			conversationFound = true
+		}
+	}
 	workspaceRoot := effectiveWorkspaceRoot(turnOpts)
 	if strings.TrimSpace(turnOpts.WorkspaceRoot) == "" {
 		turnOpts.WorkspaceRoot = workspaceRoot
@@ -220,21 +272,24 @@ func newRuntimeWithPublisher(
 		}
 	}
 	rt := &runtime{
-		session:         Session{ID: id, AgentID: agentID},
-		inputBox:        NewInputBox(),
-		queue:           queue.NewMessageQueue(),
-		turnCoordinator: turn.NewTurnCoordinator(id, agentID),
-		done:            make(chan struct{}),
+		session:               Session{ID: id, AgentID: agentID},
+		inputBox:              NewInputBox(),
+		queue:                 queue.NewMessageQueue(),
+		turnCoordinator:       turn.NewTurnCoordinator(id, agentID),
+		done:                  make(chan struct{}),
+		lifecycleCommandScope: newLifecycleCommandScope(),
 		// Session epochs start at one so the first human message is fenceable
 		// against clear-context.
-		sessionEpoch:      1,
-		store:             st,
-		hub:               eventHub,
-		publisher:         pub,
-		agentID:           agentID,
-		logger:            logger,
-		skillsCatalog:     catalog,
-		skillsTurnCatalog: turnCatalog,
+		sessionEpoch:                1,
+		historyMutationSessionEpoch: 1,
+		historyMutationTurnEpoch:    1,
+		store:                       st,
+		hub:                         eventHub,
+		publisher:                   pub,
+		agentID:                     agentID,
+		logger:                      logger,
+		skillsCatalog:               catalog,
+		skillsTurnCatalog:           turnCatalog,
 		compression: func() *compression.Coordinator {
 			coord := compression.NewCoordinator(llmClient, turnOpts.CompressionSilent, turnOpts.CompressionBlocking)
 			coord.SetLogger(logger)
@@ -246,9 +301,14 @@ func newRuntimeWithPublisher(
 			}
 			return coord
 		}(),
-		candidatePipeline: candidatePipeline,
-		messages:          append([]llm.Message(nil), initial...),
-		historyRevision:   turnOpts.initialHistoryRevision,
+		candidatePipeline:         candidatePipeline,
+		messages:                  append([]llm.Message(nil), initial...),
+		historyRevision:           turnOpts.initialHistoryRevision,
+		conversationRevision:      turnOpts.initialConversationRevision,
+		contextCheckpointRevision: turnOpts.initialContextCheckpointRevision,
+		recordDeltaUpserts:        make(map[string]pendingRecordMutation),
+		recordDeltaDeletes:        make(map[string]uint64),
+		checkpointDirty:           turnOpts.initialContextCheckpointRevision == 0,
 		toolCallProjectionHiddenThroughGeneration: turnOpts.initialToolCallProjectionHiddenThroughGeneration,
 		activeContextStart:                        nonNegative(turnOpts.initialActiveContextStart),
 		lastContextResetID:                        strings.TrimSpace(turnOpts.initialLastContextResetID),
@@ -274,6 +334,32 @@ func newRuntimeWithPublisher(
 		budgetResolver:                            turnOpts.BudgetResolver,
 		onLifecycle:                               turnOpts.OnLifecycle,
 		memoryService:                             turnOpts.MemoryService,
+	}
+	// A fresh runtime may receive an explicit seed transcript (tests and
+	// embedded callers). Assign stable IDs once at this ingress boundary and
+	// commit those explicit mutations; restored runtimes already carry a durable
+	// checkpoint revision and must not rewrite unchanged records.
+	if st != nil && !conversationFound && turnOpts.initialContextCheckpointRevision == 0 {
+		rt.mu.Lock()
+		for index := range rt.messages {
+			message := rt.messages[index]
+			if message.Name == llm.UserNameCompression {
+				continue
+			}
+			if strings.TrimSpace(message.RecordID) == "" {
+				id, err := llm.NewOpaqueRecordID()
+				if err != nil {
+					rt.deltaMu.Lock()
+					rt.historyMutationErr = err
+					rt.deltaMu.Unlock()
+					continue
+				}
+				message.RecordID = id
+				rt.messages[index].RecordID = id
+			}
+			rt.noteRecordUpsertLocked(message)
+		}
+		rt.mu.Unlock()
 	}
 	if len(turnOpts.initialDreamingAttempt) > 0 {
 		var attempt DreamingAttempt
@@ -415,6 +501,7 @@ func newRuntimeWithPublisher(
 		_, err := rt.lifecycleDispatchErr(command)
 		return err
 	})
+	rt.orch.SetHistoryMutationSink(rt.trackHistoryMutation)
 	rt.orch.SetExecutionFence(func(execution turn.TurnExecutionContext) bool {
 		if execution.SessionID != rt.session.ID || rt.turnCoordinator == nil {
 			return false
@@ -447,6 +534,15 @@ func newRuntimeWithPublisher(
 		rt.restoreLifecycleEventsFrom(turnOpts.initialLifecycleEvents, true)
 	} else {
 		rt.restoreLifecycleEvents()
+	}
+	if st != nil {
+		if lifecycle := rt.turnCoordinator.Snapshot(); lifecycle.HasActiveTurn && !lifecycle.TurnStatus.Terminal() {
+			if revision, err := st.LoadRoundRevisionForTurn(context.Background(), id, lifecycle.TurnID); err == nil && revision != nil && revision.Status == "active" {
+				rt.deltaMu.Lock()
+				rt.activeRoundID, rt.activeRevisionID = revision.RoundID, revision.RevisionID
+				rt.deltaMu.Unlock()
+			}
+		}
 	}
 	// 返回 runtime
 	return rt
@@ -575,6 +671,9 @@ func (r *runtime) start(parent context.Context) {
 // consumeLoop 消费消息循环
 func (r *runtime) consumeLoop(ctx context.Context) {
 	for {
+		if r.executionIsStopped() {
+			return
+		}
 		// Control/continuation records are drained before a new external input.
 		// A human or trigger arriving while HITL is pending therefore stays in
 		// InputBox and cannot preempt the active Turn.
@@ -754,7 +853,7 @@ func (r *runtime) dispatchInput(ctx context.Context, record InputRecord) bool {
 			}
 		}
 	}
-	consumed := r.handleInputMessage(ctx, env, source)
+	consumed := r.handleInputMessage(ctx, record, source)
 	return consumed
 }
 
@@ -823,21 +922,142 @@ func (r *runtime) commitStepHistory(history *[]llm.Message) bool {
 	if history == nil {
 		return false
 	}
+	r.deltaMu.Lock()
+	syncedMutationSequence := r.checkpointSyncedMutationSequence
+	fullReplaceSequence := r.historyFullReplaceSequence
+	mutationSequence := r.checkpointMutationSequence
+	mutations := make([]pendingCheckpointMutation, 0, len(r.historyMutations))
+	for _, mutation := range r.historyMutations {
+		if mutation.Sequence > syncedMutationSequence {
+			mutations = append(mutations, mutation)
+		}
+	}
+	r.deltaMu.Unlock()
+	if fullReplaceSequence <= syncedMutationSequence && len(mutations) > 0 {
+		if updated, ok := applyHistoryMutations(r.messages, r.activeContextStart, mutations); ok {
+			r.messages = updated
+			r.historyRevision++
+			r.deltaMu.Lock()
+			r.checkpointSyncedMutationSequence = mutationSequence
+			remaining := r.historyMutations[:0]
+			for _, mutation := range r.historyMutations {
+				if mutation.Sequence > mutationSequence {
+					remaining = append(remaining, mutation)
+				}
+			}
+			r.historyMutations = remaining
+			r.deltaMu.Unlock()
+			return true
+		}
+	}
 	merged := *history
 	if r.activeContextStart > 0 && r.activeContextStart <= len(r.messages) {
 		merged = append(append([]llm.Message(nil), r.messages[:r.activeContextStart]...), (*history)...)
 	}
+	// Pending input history may already have been committed as part of the
+	// durable begin-turn boundary. When Orchestrator returns that same source
+	// item again, update its payload in place instead of creating a duplicate
+	// transcript fact. Stable identities also make assistant partial→final
+	// updates idempotent here.
+	positions := make(map[string]int, len(merged))
+	compact := make([]llm.Message, 0, len(merged))
+	for _, message := range merged {
+		id := strings.TrimSpace(message.RecordID)
+		if id != "" {
+			if index, ok := positions[id]; ok {
+				compact[index] = message
+				continue
+			}
+			positions[id] = len(compact)
+		}
+		compact = append(compact, message)
+	}
+	merged = compact
 	if turn.Digest(r.messages) == turn.Digest(merged) {
+		if mutationSequence > syncedMutationSequence {
+			r.deltaMu.Lock()
+			r.checkpointSyncedMutationSequence = mutationSequence
+			remaining := r.historyMutations[:0]
+			for _, mutation := range r.historyMutations {
+				if mutation.Sequence > mutationSequence {
+					remaining = append(remaining, mutation)
+				}
+			}
+			r.historyMutations = remaining
+			r.deltaMu.Unlock()
+		}
 		return false
 	}
 	r.messages = append([]llm.Message(nil), merged...)
 	r.historyRevision++
+	if fullReplaceSequence <= syncedMutationSequence || len(mutations) == 0 {
+		r.noteCheckpointDirtyLocked()
+	}
+	r.deltaMu.Lock()
+	r.checkpointSyncedMutationSequence = r.checkpointMutationSequence
+	remaining := r.historyMutations[:0]
+	for _, mutation := range r.historyMutations {
+		if mutation.Sequence > r.checkpointSyncedMutationSequence {
+			remaining = append(remaining, mutation)
+		}
+	}
+	r.historyMutations = remaining
+	r.deltaMu.Unlock()
 	return true
+}
+
+func applyHistoryMutations(messages []llm.Message, activeStart int, mutations []pendingCheckpointMutation) ([]llm.Message, bool) {
+	if activeStart < 0 || activeStart > len(messages) {
+		return nil, false
+	}
+	length := len(messages)
+	for _, mutation := range mutations {
+		operation := mutation.Operation
+		activeLength := length - activeStart
+		switch operation.Kind {
+		case string(turn.HistoryMutationAppend):
+			length++
+		case string(turn.HistoryMutationInsert):
+			if operation.Index < 0 || operation.Index > activeLength {
+				return nil, false
+			}
+			length++
+		case string(turn.HistoryMutationReplace):
+			if operation.Index < 0 || operation.Index >= activeLength {
+				return nil, false
+			}
+		default:
+			return nil, false
+		}
+	}
+	updated := messages
+	for _, mutation := range mutations {
+		operation := mutation.Operation
+		activeLength := len(updated) - activeStart
+		switch operation.Kind {
+		case string(turn.HistoryMutationAppend):
+			updated = append(updated, operation.Message)
+		case string(turn.HistoryMutationInsert):
+			position := activeStart + operation.Index
+			updated = append(updated, llm.Message{})
+			copy(updated[position+1:], updated[position:len(updated)-1])
+			updated[position] = operation.Message
+		case string(turn.HistoryMutationReplace):
+			if operation.Index >= activeLength {
+				return nil, false
+			}
+			updated[activeStart+operation.Index] = operation.Message
+		}
+	}
+	return updated, true
 }
 
 // acceptEnvelope filters stale control continuations while preserving
 // external facts for side-effect reconciliation after a turn is cancelled.
 func (r *runtime) acceptEnvelope(env queue.Envelope) bool {
+	if r.executionIsStopped() {
+		return false
+	}
 	r.mu.Lock()
 	epoch := r.sessionEpoch
 	r.mu.Unlock()
@@ -875,7 +1095,18 @@ func (r *runtime) acceptEnvelope(env queue.Envelope) bool {
 	return true
 }
 
-func (r *runtime) handleInputMessage(parent context.Context, env queue.Envelope, source turn.TurnSource) bool {
+func (r *runtime) executionIsStopped() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.executionStopped
+}
+
+func (r *runtime) handleInputMessage(parent context.Context, record InputRecord, source turn.TurnSource) bool {
+	env := record.Env
+	resubmit := env.ConversationResubmit
 	if !r.sessionEpochCurrent(env.SessionEpoch) {
 		r.logger.Info("stale human message dropped after session clear", "session_id", r.session.ID)
 		return true
@@ -885,6 +1116,8 @@ func (r *runtime) handleInputMessage(parent context.Context, env queue.Envelope,
 		r.logger.Warn("invalid user message", "session_id", r.session.ID, "error", err)
 		return true
 	}
+	userMsg.RecordID = llm.InputRecordID(r.session.ID, record.Seq)
+	userMsg.ClientRequestID = record.ClientRequestID
 	// A new input must never preempt an active Turn. InputBox normally pops only
 	// while idle; keep this defensive guard for races and direct test fixtures.
 	if state := r.turnCoordinator.Snapshot(); state.HasActiveTurn && !state.TurnStatus.Terminal() {
@@ -895,26 +1128,100 @@ func (r *runtime) handleInputMessage(parent context.Context, env queue.Envelope,
 		r.signalInputBox()
 		return false
 	}
-	if source == turn.TurnSourceHuman {
+	if source == turn.TurnSourceHuman && resubmit == nil {
 		if err := r.maybeStartIdleConversation(parent, env.SessionEpoch); err != nil && r.logger != nil {
 			r.logger.Warn("idle conversation boundary failed; retaining existing context", "session_id", r.session.ID, "error", err)
 		}
 	}
 	r.applyPendingMemoryScope()
 	r.observeSkillCatalogChange()
+	var resubmitCheckpoint *store.CheckpointCommit
+	var previousMessages []llm.Message
+	var previousContextStart int
+	if resubmit != nil {
+		if r.store == nil {
+			r.logger.Warn("conversation resubmit rejected without durable history", "session_id", r.session.ID)
+			return true
+		}
+		r.ingressMu.Lock()
+		if !r.sessionEpochCurrent(env.SessionEpoch) {
+			r.ingressMu.Unlock()
+			return true
+		}
+		checkpoint, err := r.store.LoadConversationCheckpointRevision(parent, r.session.ID, resubmit.PreCheckpointRevision)
+		if err != nil || checkpoint == nil || checkpoint.Revision != resubmit.PreCheckpointRevision {
+			r.ingressMu.Unlock()
+			if r.logger != nil {
+				r.logger.Warn("conversation resubmit checkpoint unavailable", "session_id", r.session.ID, "round_id", resubmit.RoundID, "error", err)
+			}
+			return false
+		}
+		r.mu.Lock()
+		r.deltaMu.Lock()
+		if len(r.recordDeltaUpserts) != 0 || len(r.recordDeltaDeletes) != 0 || r.checkpointDirty || r.historyCommitDirty {
+			r.deltaMu.Unlock()
+			r.mu.Unlock()
+			r.ingressMu.Unlock()
+			if r.logger != nil {
+				r.logger.Warn("conversation resubmit rejected with uncommitted history", "session_id", r.session.ID)
+			}
+			return false
+		}
+		previousMessages = append([]llm.Message(nil), r.messages...)
+		previousContextStart = r.activeContextStart
+		r.messages = append([]llm.Message(nil), checkpoint.Messages...)
+		r.activeContextStart = 0
+		r.deltaMu.Unlock()
+		r.mu.Unlock()
+		resubmitCheckpoint = &store.CheckpointCommit{Messages: append([]llm.Message(nil), checkpoint.Messages...), Lineage: "resubmit_base"}
+	}
 	r.mu.Lock()
 	r.pendingInputMessage = &userMsg
 	r.mu.Unlock()
-	if err := r.lifecycleBeginInputTurn(source); err != nil {
+	roundID, revisionID := newLogicalRoundID(), newRoundRevisionID()
+	if resubmit != nil {
+		roundID, revisionID = resubmit.RoundID, newRoundRevisionID()
+	}
+	var lifecycleErr error
+	if resubmit != nil {
+		lifecycleErr = r.lifecycleBeginInputTurnIdentityWithResubmit(source, roundID, revisionID, resubmit, resubmitCheckpoint)
+	} else {
+		lifecycleErr = r.lifecycleBeginInputTurnIdentity(source, roundID, revisionID)
+	}
+	if lifecycleErr != nil {
 		r.mu.Lock()
-		r.messages = append(r.messages, userMsg)
-		r.historyRevision++
+		r.pendingInputMessage = nil
 		r.mu.Unlock()
-		r.logger.Warn("start human turn lifecycle failed", "session_id", r.session.ID, "error", err)
-		return true
+		if resubmit != nil {
+			state := r.turnCoordinator.Snapshot()
+			committed := state.HasActiveTurn && !state.TurnStatus.Terminal() && r.activeRoundID == resubmit.RoundID && r.activeRevisionID == revisionID
+			if !committed {
+				r.mu.Lock()
+				r.messages = previousMessages
+				r.activeContextStart = previousContextStart
+				r.mu.Unlock()
+			}
+			r.ingressMu.Unlock()
+		}
+		if r.logger != nil {
+			r.logger.Warn("start human turn lifecycle failed", "session_id", r.session.ID, "error", lifecycleErr)
+		}
+		if r.markResultCommitFailed() {
+			r.publishTurnState(r.turnCoordinator.Snapshot(), "")
+		}
+		// The input remains uncompleted in InputBox. Do not acknowledge or
+		// persist it as consumed when the atomic start boundary failed. The
+		// runtime is stopped until recovery because the accepted input's
+		// lifecycle claim could not be made durable.
+		return false
+	}
+	if resubmit != nil {
+		r.ingressMu.Unlock()
 	}
 	r.mu.Lock()
 	r.pendingInputMessage = nil
+	r.noteRecordUpsertLocked(userMsg)
+	r.noteCheckpointMutationPendingLocked()
 	r.mu.Unlock()
 	// Clear-context may have won the race while lifecycleBeginHumanTurn was
 	// opening the new turn. Do not let an already accepted queue envelope from
@@ -960,7 +1267,19 @@ func (r *runtime) buildInputUserMessage(env queue.Envelope) (llm.Message, error)
 // Each continuation starts a new lifecycle Step but remains in this serialized
 // Turn chain, while MessageQueue only carries explicit control/recovery events.
 func (r *runtime) runInlineToolContinuationChain(parent context.Context, expectedEpoch uint64, outcome turn.StepOutcome) turn.StepOutcome {
+	if r.executionIsStopped() {
+		outcome.ScheduleToolResult = false
+		if outcome.Err == nil {
+			outcome.Err = fmt.Errorf("result_commit_recovery_required")
+		}
+		return outcome
+	}
 	for outcome.Err == nil && outcome.Pending == nil && outcome.ScheduleToolResult {
+		if r.executionIsStopped() {
+			outcome.ScheduleToolResult = false
+			outcome.Err = fmt.Errorf("result_commit_recovery_required")
+			break
+		}
 		started, err := r.lifecycleBeginContinuationStep(turn.TurnSourceHuman)
 		if err != nil {
 			outcome.Err = err
@@ -1186,9 +1505,31 @@ func (r *runtime) commitHistoryFallback(history []llm.Message) {
 		return
 	}
 	changed := r.commitStepHistory(&history)
-	r.mu.Unlock()
 	if changed {
-		r.persist(context.Background())
+		r.historyCommitDirty = true
+	}
+	needsSave := r.historyCommitDirty
+	r.mu.Unlock()
+	if needsSave {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := r.persist(ctx)
+		cancel()
+		if err != nil {
+			r.lifecycleMu.Lock()
+			changed := r.markResultCommitFailed()
+			state := r.turnCoordinator.Snapshot()
+			r.lifecycleMu.Unlock()
+			if changed {
+				r.publishTurnState(state, "")
+			}
+			return
+		}
+		r.mu.Lock()
+		r.historyCommitDirty = false
+		if !r.executionStopped {
+			r.resultCommitStatus = "committed"
+		}
+		r.mu.Unlock()
 	}
 }
 
@@ -1219,6 +1560,11 @@ func (r *runtime) clearMessages(ctx context.Context) error {
 	if r.sideEffectsEnabled() {
 		r.sideEffects.ClearSession(r.session.ID, r.orch)
 	}
+	// Serialize the epoch change with every external input admission. Without
+	// this boundary, a POST could persist an old-epoch receipt after clear had
+	// already removed its mailbox entry and still receive an accepted response.
+	r.ingressMu.Lock()
+	defer r.ingressMu.Unlock()
 	// A prior snapshot writer must finish before the clear mutates memory. Keep
 	// the lifecycle epoch, transcript clear, and replacement snapshot within one
 	// serialized durability boundary so an old Save cannot resurrect history.
@@ -1227,12 +1573,16 @@ func (r *runtime) clearMessages(ctx context.Context) error {
 	r.mu.Lock()
 	r.sessionEpoch++
 	newEpoch := r.sessionEpoch
+	r.deltaMu.Lock()
+	r.historyMutationSessionEpoch = newEpoch
+	r.deltaMu.Unlock()
 	r.toolCallProjectionHiddenThroughGeneration = r.turnCoordinator.Snapshot().Generation
 	r.messages = nil
 	r.activeContextStart = 0
 	r.lastContextResetID = ""
 	r.lastHumanInteraction = time.Now().UTC()
 	r.historyRevision++
+	r.noteCheckpointDirtyLocked()
 	r.loadedSkills = nil
 	r.mu.Unlock()
 	if r.inputBox != nil {
@@ -1244,10 +1594,42 @@ func (r *runtime) clearMessages(ctx context.Context) error {
 	}
 	var persistErr error
 	if r.store != nil {
-		// Save the cleared transcript and its projection boundary together. A
-		// preliminary ClearMessages write would create a crash window where the
-		// transcript is empty but the old tool-call projection remains visible.
-		persistErr = r.persistLocked(ctx)
+		var inputState json.RawMessage
+		if r.inputBox != nil {
+			inputState = r.inputBox.SnapshotForPersistence()
+		}
+		var hookStore map[string]json.RawMessage
+		if r.orch != nil {
+			hookStore = hooks.CloneSessionStore(r.orch.HookStoreSnapshot())
+		}
+		r.mu.Lock()
+		state := store.RuntimeState{InputBoxState: inputState, HistoryRevision: r.historyRevision, ConversationRevision: r.conversationRevision, ContextCheckpointRevision: r.contextCheckpointRevision, ToolCallProjectionHiddenThroughGeneration: r.toolCallProjectionHiddenThroughGeneration, ActiveContextStart: 0, LastContextResetID: "", LastHumanInteraction: r.lastHumanInteraction, HookStore: hookStore, NotifySeq: r.notifySeq, AckSeq: r.ackSeq}
+		r.mu.Unlock()
+		persistErr = r.store.ClearMessagesWithRuntimeState(ctx, r.session.ID, state)
+		if persistErr == nil {
+			if r.inputBox != nil {
+				r.inputBox.MarkPersistenceCommitted(inputState)
+			}
+			r.mu.Lock()
+			r.conversationRevision++
+			r.contextCheckpointRevision++
+			r.deltaMu.Lock()
+			r.recordDeltaUpserts = make(map[string]pendingRecordMutation)
+			r.recordDeltaDeletes = make(map[string]uint64)
+			// A successful clear discards all identity-allocation failures tied
+			// to the old transcript. New input must be allowed to establish fresh
+			// identities after this recovery boundary.
+			r.historyMutationErr = nil
+			r.checkpointDirty = false
+			r.checkpointFullReplaceSequence = 0
+			r.checkpointSyncedMutationSequence = r.checkpointMutationSequence
+			r.checkpointMutations = nil
+			r.historyFullReplaceSequence = r.checkpointMutationSequence
+			r.historyMutations = nil
+			r.deltaMu.Unlock()
+			r.historyCommitDirty = false
+			r.mu.Unlock()
+		}
 	}
 	r.persistMu.Unlock()
 	r.lifecycleMu.Unlock()
@@ -1333,7 +1715,22 @@ func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 	}
 	// sidecarPrefix → SystemPromptForSession → getLoadedSkills 会抢 r.mu，须在持锁前计算。
 	prefix := r.sidecarPrefix()
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+	if r.lifecycleExecutionBusy() {
+		return compression.ForceResult{Status: "busy"}
+	}
+	r.persistMu.Lock()
 	r.mu.Lock()
+	previousMessages := append([]llm.Message(nil), r.messages...)
+	previousStart := r.activeContextStart
+	previousHistoryRevision := r.historyRevision
+	r.deltaMu.Lock()
+	previousCheckpointDirty := r.checkpointDirty
+	previousCheckpointMutationSequence := r.checkpointMutationSequence
+	previousCheckpointFullReplaceSequence := r.checkpointFullReplaceSequence
+	previousHistoryFullReplaceSequence := r.historyFullReplaceSequence
+	r.deltaMu.Unlock()
 	start := r.activeContextStart
 	if start < 0 || start > len(r.messages) {
 		start = len(r.messages)
@@ -1347,26 +1744,56 @@ func (r *runtime) compressContext(ctx context.Context) compression.ForceResult {
 	afterCount := len(active)
 	if result.Status == "applied" {
 		r.messages = append(append([]llm.Message(nil), r.messages[:start]...), active...)
+		r.historyRevision++
+		r.noteCheckpointDirtyLocked()
 	}
 	r.mu.Unlock()
-	if result.Status == "applied" {
-		// Manual compression has the same semantics as pre-step compression:
-		// the next model request must build a fresh context segment.
-		r.scheduleModelContextRebuild("context_compression_manual", "next_model_step")
-		if err := r.lifecycleContextCompacted("context_compressed_manual", beforeDigest, afterDigest, beforeCount, afterCount); err != nil && r.logger != nil {
-			r.logger.Warn("record manual context compaction lifecycle failed", "session_id", r.session.ID, "error", err)
-		}
+	if result.Status != "applied" {
+		r.persistMu.Unlock()
+		return result
 	}
-	if result.Status == "applied" {
+	var persistErr error
+	if r.store != nil {
+		persistErr = r.persistLocked(ctx)
+	}
+	if persistErr != nil {
 		r.mu.Lock()
-		r.historyRevision++
+		r.messages = previousMessages
+		r.activeContextStart = previousStart
+		r.historyRevision = previousHistoryRevision
+		r.deltaMu.Lock()
+		r.checkpointDirty = previousCheckpointDirty
+		r.checkpointMutationSequence = previousCheckpointMutationSequence
+		r.checkpointFullReplaceSequence = previousCheckpointFullReplaceSequence
+		r.historyFullReplaceSequence = previousHistoryFullReplaceSequence
+		r.deltaMu.Unlock()
 		r.mu.Unlock()
-		r.persist(ctx)
+		r.persistMu.Unlock()
+		if r.logger != nil {
+			r.logger.Warn("manual context compression checkpoint failed", "session_id", r.session.ID, "error", persistErr)
+		}
+		result.Status = "persistence_failed"
+		return result
 	}
+	r.persistMu.Unlock()
+	if err := r.lifecycleContextCompactedLocked("context_compressed_manual", beforeDigest, afterDigest, beforeCount, afterCount); err != nil && r.logger != nil {
+		r.logger.Warn("record manual context compaction lifecycle failed", "session_id", r.session.ID, "error", err)
+	}
+	// Manual compression has the same semantics as pre-step compression:
+	// the next model request must build a fresh context segment.
+	r.scheduleModelContextRebuild("context_compression_manual", "next_model_step")
 	return result
 }
 
 func (r *runtime) enqueue(env queue.Envelope, priority queue.Priority) error {
+	r.ingressMu.Lock()
+	defer r.ingressMu.Unlock()
+	r.mu.Lock()
+	stopped := r.executionStopped
+	r.mu.Unlock()
+	if stopped {
+		return fmt.Errorf("result_commit_recovery_required")
+	}
 	r.mu.Lock()
 	if env.SessionEpoch == 0 {
 		env.SessionEpoch = r.sessionEpoch
@@ -1432,7 +1859,13 @@ func (r *runtime) appendInput(kind InputKind, env queue.Envelope) (uint64, error
 	if r == nil || r.inputBox == nil {
 		return 0, fmt.Errorf("input box unavailable")
 	}
+	r.ingressMu.Lock()
+	defer r.ingressMu.Unlock()
 	r.mu.Lock()
+	if r.executionStopped {
+		r.mu.Unlock()
+		return 0, fmt.Errorf("result_commit_recovery_required")
+	}
 	if env.SessionEpoch == 0 {
 		env.SessionEpoch = r.sessionEpoch
 	}
@@ -1441,16 +1874,218 @@ func (r *runtime) appendInput(kind InputKind, env queue.Envelope) (uint64, error
 	if env.SessionEpoch != currentEpoch {
 		return 0, nil
 	}
-	seq, err := r.inputBox.Append(kind, env)
-	if err == nil {
-		if r.executionGate != nil {
-			r.executionGate.notifyInput()
-		}
-		// Persist the accepted tail before the consumer starts processing it.
-		// This preserves inputs accepted while a Turn is waiting for approval.
-		r.persist(context.Background())
+	r.persistMu.Lock()
+	seq, err := r.inputBox.AppendDeferred(kind, env)
+	if err != nil {
+		r.persistMu.Unlock()
+		return 0, err
 	}
-	return seq, err
+	// Persist the accepted tail before making it visible to the consumer. The
+	// input remains hidden behind InputBox's deferred marker until this write
+	// commits, closing the append→wake race for both idle and busy sessions.
+	if r.store != nil {
+		err = r.persistLocked(context.Background())
+		if err != nil {
+			r.inputBox.RollbackDeferred(seq)
+			r.persistMu.Unlock()
+			return 0, err
+		}
+	}
+	r.inputBox.CommitDeferred(seq)
+	r.persistMu.Unlock()
+	r.publishInputQueueSnapshot()
+	if r.executionGate != nil {
+		r.executionGate.notifyInput()
+	}
+	return seq, nil
+}
+
+func (r *runtime) appendInputWithReceipt(kind InputKind, env queue.Envelope, receipt InputReceipt) (InputReceipt, bool, error) {
+	if r == nil || r.inputBox == nil {
+		return InputReceipt{}, false, fmt.Errorf("input box unavailable")
+	}
+	r.ingressMu.Lock()
+	defer r.ingressMu.Unlock()
+	r.mu.Lock()
+	if r.executionStopped {
+		r.mu.Unlock()
+		return InputReceipt{}, false, fmt.Errorf("result_commit_recovery_required")
+	}
+	currentEpoch := r.sessionEpoch
+	r.mu.Unlock()
+	if receipt.ConversationEpoch != currentEpoch {
+		return InputReceipt{}, false, ErrInputConversationChanged
+	}
+	if r.store != nil {
+		storedReceipt, found, err := r.store.LookupInputReceipt(context.Background(), r.session.ID, receipt.ClientRequestID)
+		if err != nil {
+			return InputReceipt{}, false, err
+		}
+		if found {
+			if storedReceipt.ConversationEpoch != receipt.ConversationEpoch {
+				return InputReceipt{}, false, ErrInputConversationChanged
+			}
+			if storedReceipt.PayloadDigest != receipt.PayloadDigest {
+				return InputReceipt{}, false, ErrInputRequestConflict
+			}
+			return r.inputBox.ProjectReceipt(storedReceipt, receipt.ConversationEpoch)
+		}
+	}
+	env.SessionEpoch = currentEpoch
+	r.persistMu.Lock()
+	receipt, duplicate, err := r.inputBox.AppendDeferredWithReceipt(kind, env, receipt)
+	if err != nil || duplicate {
+		r.persistMu.Unlock()
+		return receipt, duplicate, err
+	}
+	// The queue row and retry receipt commit together. The deferred entry stays
+	// invisible to the consumer until both are durable, so a successful HTTP
+	// response can be reconciled after a lost response or process restart.
+	if r.store != nil {
+		if err := r.persistLockedWithInputReceipt(context.Background(), &receipt); err != nil {
+			r.inputBox.RollbackDeferred(receipt.InputSeq)
+			r.persistMu.Unlock()
+			return InputReceipt{}, false, err
+		}
+		r.inputBox.ForgetReceipt(receipt.ClientRequestID)
+	}
+	r.inputBox.CommitDeferred(receipt.InputSeq)
+	r.persistMu.Unlock()
+	r.publishInputQueueSnapshot()
+	if r.executionGate != nil {
+		r.executionGate.notifyInput()
+	}
+	return receipt, false, nil
+}
+
+func (r *runtime) appendConversationResubmitWithReceipt(env queue.Envelope, receipt InputReceipt, guard store.ConversationResubmitGuard) (InputReceipt, bool, error) {
+	if r == nil || r.inputBox == nil || r.store == nil || env.ConversationResubmit == nil {
+		return InputReceipt{}, false, fmt.Errorf("conversation resubmit requires durable history")
+	}
+	r.ingressMu.Lock()
+	defer r.ingressMu.Unlock()
+	r.mu.Lock()
+	if r.executionStopped {
+		r.mu.Unlock()
+		return InputReceipt{}, false, fmt.Errorf("result_commit_recovery_required")
+	}
+	currentEpoch := r.sessionEpoch
+	r.mu.Unlock()
+	if receipt.ConversationEpoch != currentEpoch {
+		return InputReceipt{}, false, ErrInputConversationChanged
+	}
+	storedReceipt, found, err := r.store.LookupInputReceipt(context.Background(), r.session.ID, receipt.ClientRequestID)
+	if err != nil {
+		return InputReceipt{}, false, err
+	}
+	if found {
+		if storedReceipt.ConversationEpoch != receipt.ConversationEpoch {
+			return InputReceipt{}, false, ErrInputConversationChanged
+		}
+		if storedReceipt.PayloadDigest != receipt.PayloadDigest {
+			return InputReceipt{}, false, ErrInputRequestConflict
+		}
+		return r.inputBox.ProjectReceipt(storedReceipt, receipt.ConversationEpoch)
+	}
+	gate := r.executionGate
+	if gate != nil {
+		gate.mu.Lock()
+		defer gate.mu.Unlock()
+		if gate.maintenance || gate.dispatches != 0 {
+			return InputReceipt{}, false, store.ErrConversationResubmitConflict
+		}
+	}
+	if r.turnState() != "idle" || r.queue.Len() != 0 || r.inputBox.Len() != 0 || r.inputBox.HasInFlight() || r.hasPendingHITL() {
+		return InputReceipt{}, false, store.ErrConversationResubmitConflict
+	}
+	env.SessionEpoch = currentEpoch
+	wasPaused, controlRevision := r.inputBox.QueueControlState()
+	if wasPaused {
+		if _, _, err := r.inputBox.SetQueuePaused(false, controlRevision); err != nil {
+			return InputReceipt{}, false, err
+		}
+	}
+	r.persistMu.Lock()
+	accepted, duplicate, err := r.inputBox.AppendDeferredWithReceipt(InputKindUser, env, receipt)
+	if err != nil || duplicate {
+		r.persistMu.Unlock()
+		if wasPaused {
+			r.inputBox.RestoreQueueControl(wasPaused, controlRevision)
+		}
+		return accepted, duplicate, err
+	}
+	if err := r.persistLockedWithInputReceiptAndResubmit(context.Background(), &accepted, &guard); err != nil {
+		r.inputBox.RollbackDeferred(accepted.InputSeq)
+		if wasPaused {
+			r.inputBox.RestoreQueueControl(wasPaused, controlRevision)
+		}
+		r.persistMu.Unlock()
+		return InputReceipt{}, false, err
+	}
+	r.inputBox.ForgetReceipt(accepted.ClientRequestID)
+	r.inputBox.CommitDeferred(accepted.InputSeq)
+	r.persistMu.Unlock()
+	if gate != nil {
+		gate.notify()
+		if gate.maintenanceCancel != nil {
+			gate.maintenanceCancel()
+		}
+	}
+	r.signalInputBox()
+	return accepted, false, nil
+}
+
+func (r *runtime) editQueuedInput(seq, expectedRevision uint64, env queue.Envelope) (InputRecord, error) {
+	return r.mutateQueuedInput(seq, expectedRevision, &env)
+}
+
+func (r *runtime) deleteQueuedInput(seq, expectedRevision uint64) (InputRecord, error) {
+	return r.mutateQueuedInput(seq, expectedRevision, nil)
+}
+
+// mutateQueuedInput serializes edits/deletes with ingress and runtime snapshot
+// writes. InputBox pauses claims while the tentative mutation is persisted;
+// persistence failure restores the exact queue order before claims resume.
+func (r *runtime) mutateQueuedInput(seq, expectedRevision uint64, replacement *queue.Envelope) (InputRecord, error) {
+	if r == nil || r.inputBox == nil {
+		return InputRecord{}, fmt.Errorf("input box unavailable")
+	}
+	r.ingressMu.Lock()
+	defer r.ingressMu.Unlock()
+	r.mu.Lock()
+	if r.executionStopped {
+		r.mu.Unlock()
+		return InputRecord{}, fmt.Errorf("result_commit_recovery_required")
+	}
+	r.mu.Unlock()
+
+	r.persistMu.Lock()
+	var record InputRecord
+	var mutation *inputBoxMutation
+	var err error
+	if replacement != nil {
+		record, mutation, err = r.inputBox.BeginQueuedEdit(seq, expectedRevision, *replacement)
+	} else {
+		record, mutation, err = r.inputBox.BeginQueuedDelete(seq, expectedRevision)
+	}
+	if err != nil {
+		r.persistMu.Unlock()
+		return InputRecord{}, err
+	}
+	if r.store != nil {
+		if err := r.persistLocked(context.Background()); err != nil {
+			r.inputBox.RollbackMutation(mutation)
+			r.persistMu.Unlock()
+			return InputRecord{}, err
+		}
+	}
+	r.inputBox.CommitMutation(mutation)
+	r.persistMu.Unlock()
+	r.publishInputQueueSnapshot()
+	if r.executionGate != nil {
+		r.executionGate.notifyInput()
+	}
+	return record, nil
 }
 
 type resumeDiagSnapshot struct {

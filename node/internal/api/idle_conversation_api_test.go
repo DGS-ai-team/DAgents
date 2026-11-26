@@ -118,7 +118,7 @@ func TestIdleConversationBoundaryThroughHTTP(t *testing.T) {
 	}
 	postMessage := func(content string, expectedCalls int) {
 		t.Helper()
-		body, _ := json.Marshal(map[string]any{"agent_id": created.AgentID, "request_type": "message", "content": content})
+		body := testIdempotentMessageBody(t, created.AgentID, content)
 		resp, err := http.Post(ts.URL+"/v1/messages", "application/json", bytes.NewReader(body))
 		if err != nil {
 			t.Fatal(err)

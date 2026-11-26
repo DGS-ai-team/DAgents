@@ -305,6 +305,13 @@ func (m *Manager) RunDreaming(ctx context.Context, sessionID, prompt string, met
 	mutationBefore := reg.HandbookMutationCount()
 
 	user := llm.UserMessage(strings.TrimSpace(prompt), llm.UserNameHuman)
+	// Dreaming inputs are source-level control records even though they do not
+	// enter InputBox. Allocate once before pending/turn history commits so both
+	// the lifecycle-bound snapshot and Orchestrator append share identity.
+	user.RecordID, err = llm.NewOpaqueRecordID()
+	if err != nil {
+		return DreamingTurnResult{}, err
+	}
 	r.mu.Lock()
 	r.pendingInputMessage = &user
 	r.mu.Unlock()

@@ -198,23 +198,133 @@ func TestOrchestratorPersistsTextOnlyPartialAssistantAfterProviderFailure(t *tes
 	client := &partialTextTransientFailure{}
 	orch := testOrchestrator(t, stream.NewHub(16, logx.Discard()), client)
 	var history []llm.Message
-	_, _, err := runMessageTurnInline(t, orch, context.Background(), "session-partial-text", &history, "hello", nil)
-	if err == nil {
+	ctx := WithExecutionContext(context.Background(), TurnExecutionContext{
+		SessionID: "session-partial-text", TurnID: "turn-partial-text", StepID: "step-partial-text", Generation: 1, StepIndex: 1,
+	})
+	outcome := orch.RunHumanMessageTurn(ctx, "session-partial-text", &history, llm.UserMessage("hello", llm.UserNameHuman))
+	if outcome.Err == nil {
 		t.Fatal("expected provider error")
 	}
-	if len(history) != 2 {
+	if len(history) < 2 {
 		t.Fatalf("history = %#v, want user plus partial assistant", history)
 	}
 	partial := history[1]
-	if partial.Role != "assistant" || partial.Content != "partial answer" || partial.ReasoningContent != "" || len(partial.ToolCalls) != 0 {
+	if partial.Role != "assistant" || partial.Content != "partial answer" || partial.ReasoningContent != "private reasoning" || len(partial.ToolCalls) != 0 {
 		t.Fatalf("persisted partial message = %#v", partial)
 	}
 	if partial.Provenance == nil || partial.Provenance.Operation != "partial_response" {
 		t.Fatalf("partial provenance = %#v", partial.Provenance)
 	}
+	if partial.DisplayIdentity == nil || partial.DisplayIdentity.ContentItemID != "step-partial-text/assistant/content" || partial.DisplayIdentity.ReasoningItemID != "step-partial-text/assistant/reasoning" || partial.DisplayIdentity.ItemVersion != 1 {
+		t.Fatalf("partial identity = %#v", partial.DisplayIdentity)
+	}
 	if client.calls != 1 {
 		t.Fatalf("provider requests = %d, want no replay after output", client.calls)
 	}
+}
+
+func TestAssistantDisplayIdentityAlignsStreamAndFinalAcrossRetryAttempts(t *testing.T) {
+	hub := stream.NewHub(32, logx.Discard())
+	sub := hub.SubscribeAgent(0, "session-identity")
+	client := &identityRetryClient{}
+	orch := testOrchestrator(t, hub, client)
+	orch.SetModelRetryLimit(1)
+	var commands []TurnCommand
+	orch.SetLifecycleCommandSink(func(_ string, command TurnCommand) error {
+		commands = append(commands, command)
+		return nil
+	})
+
+	ctx := WithExecutionContext(context.Background(), TurnExecutionContext{
+		SessionID: "session-identity", TurnID: "turn-identity", StepID: "step-identity", Generation: 1, StepIndex: 1,
+	})
+	history := []llm.Message{}
+	outcome := orch.RunHumanMessageTurn(ctx, "session-identity", &history, llm.UserMessage("hello", llm.UserNameHuman))
+	if outcome.Err != nil {
+		t.Fatal(outcome.Err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("history len = %d, want user + assistant: %#v", len(history), history)
+	}
+	identity := history[1].DisplayIdentity
+	if identity == nil || identity.ContentItemID != "step-identity/assistant/content" || identity.ReasoningItemID != "step-identity/assistant/reasoning" || identity.ItemVersion != 1 {
+		t.Fatalf("final identity = %#v", identity)
+	}
+	if history[1].Content != "answer" || history[1].ReasoningContent != "reason" {
+		t.Fatalf("final assistant = %#v", history[1])
+	}
+
+	var contentEvents, reasoningEvents []stream.Event
+	for len(sub) > 0 {
+		ev := <-sub
+		switch ev.Type {
+		case "conversation_delta":
+			if ev.Data["part"] == "content" {
+				contentEvents = append(contentEvents, ev)
+			}
+			if ev.Data["part"] == "reasoning" {
+				reasoningEvents = append(reasoningEvents, ev)
+			}
+		case "assistant":
+			contentEvents = append(contentEvents, ev)
+		case "reasoning":
+			reasoningEvents = append(reasoningEvents, ev)
+		}
+	}
+	if len(contentEvents) != 2 || len(reasoningEvents) != 1 {
+		t.Fatalf("stream events: content=%#v reasoning=%#v", contentEvents, reasoningEvents)
+	}
+	assertIdentityDelta := func(ev stream.Event, itemID, part string, attempt int, seq uint64) {
+		t.Helper()
+		if ev.Type != "conversation_delta" || ev.Delivery != "ephemeral" || ev.AgentSeq != 0 || ev.Data["turn_id"] != "turn-identity" || ev.Data["item_id"] != itemID || ev.Data["part"] != part || ev.Data["attempt_id"] != ModelAttemptID("turn-identity", "step-identity", attempt) || ev.Data["chunk_seq"] != seq {
+			t.Fatalf("%s event data = %#v", part, ev.Data)
+		}
+	}
+	assertIdentityDelta(contentEvents[0], identity.ContentItemID, "content", 1, uint64(1))
+	assertIdentityDelta(contentEvents[1], identity.ContentItemID, "content", 2, uint64(1))
+	assertIdentityDelta(reasoningEvents[0], identity.ReasoningItemID, "reasoning", 2, uint64(1))
+
+	var attempts []string
+	for _, command := range commands {
+		if command.Type == CommandModelRequestStarted {
+			attempts = append(attempts, command.AttemptID)
+		}
+	}
+	if len(attempts) != 2 || attempts[0] != ModelAttemptID("turn-identity", "step-identity", 1) || attempts[1] != ModelAttemptID("turn-identity", "step-identity", 2) || attempts[0] == attempts[1] {
+		t.Fatalf("attempt command IDs = %v", attempts)
+	}
+}
+
+type identityRetryClient struct {
+	calls     int
+	firstCall llm.StreamHandler
+}
+
+func (c *identityRetryClient) StreamChat(_ context.Context, _ llm.ChatRequest, handler llm.StreamHandler) (llm.ChatResult, error) {
+	c.calls++
+	if c.calls == 1 {
+		c.firstCall = handler
+		return llm.ChatResult{}, &llm.ProviderHTTPError{StatusCode: 503, RetryAfter: time.Millisecond}
+	}
+	// A delayed callback from the failed attempt keeps that attempt's identity;
+	// it must never be mistaken for output from the retry.
+	if c.firstCall.OnDelta != nil {
+		c.firstCall.OnDelta("late")
+	}
+	if handler.OnDelta != nil {
+		handler.OnDelta("answer")
+	}
+	if handler.OnReasoningDelta != nil {
+		handler.OnReasoningDelta("reason")
+	}
+	return llm.ChatResult{Content: "answer", ReasoningContent: "reason", FinishReason: "stop"}, nil
+}
+
+func (*identityRetryClient) CompleteText(context.Context, llm.CompleteRequest) (string, error) {
+	return "", nil
+}
+func (*identityRetryClient) NormalizeAssistant(existing []llm.Message, msg llm.Message) llm.Message {
+	return llm.StubNormalizeAssistant(existing, msg)
 }
 
 func TestRetryDelayHonorsRetryAfter(t *testing.T) {

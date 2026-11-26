@@ -35,7 +35,12 @@ func (o *Orchestrator) runLLMAfterCallPhase(ctx context.Context, sessionID strin
 		return result, err
 	}
 	merged := hooks.ApplyLLMAfterCallToResult(out, in)
-	return chatResultFromLLMAfterCall(merged), nil
+	resultAfterHooks := chatResultFromLLMAfterCall(merged)
+	// llm.after_call currently mutates content/tool calls/finish reason only.
+	// Keep the provider's reasoning part attached so a streamed reasoning item
+	// remains recoverable in the final assistant transcript entry.
+	resultAfterHooks.ReasoningContent = result.ReasoningContent
+	return resultAfterHooks, nil
 }
 
 func isLLMAfterCallAbort(err error) bool {

@@ -28,6 +28,14 @@ func TestReleaseEvictsFromMemoryKeepsDB(t *testing.T) {
 	rt := mgr.getRuntime(sess.ID)
 	rt.mu.Lock()
 	rt.messages = []llm.Message{{Role: "user", Content: "persisted history"}}
+	rt.messages[0].RecordID, err = llm.NewOpaqueRecordID()
+	if err != nil {
+		rt.mu.Unlock()
+		t.Fatal(err)
+	}
+	rt.noteRecordUpsertLocked(rt.messages[0])
+	rt.noteCheckpointDirtyLocked()
+	rt.historyRevision++
 	rt.mu.Unlock()
 	if err := rt.persist(context.Background()); err != nil {
 		t.Fatal(err)

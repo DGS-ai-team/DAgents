@@ -103,8 +103,7 @@ runOneStep(ctx, sessionID, history)
 
 | 阶段 | SSE 事件 |
 |------|----------|
-| 正文流 | `assistant`（`display_type: delta`） |
-| 推理流 | `reasoning` |
+| 正文 / 推理流 | `conversation_delta`（ephemeral，`data.part` 区分 `content` / `reasoning`） |
 | 工具参数流 | `tool_call`（partial） |
 | 用量 | `usage` |
 | 本步结束 | `turn_finished`（终态；见 [附录/SSE事件速查](./附录/SSE事件速查.md)） |

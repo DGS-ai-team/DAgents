@@ -7,20 +7,52 @@ import (
 	"github.com/DGS-ai-team/DAgents/node/internal/tools"
 )
 
+type pendingTerminalResult struct {
+	finishReason string
+	additional   map[string]any
+}
+
 // publishAssistant 推送 assistant SSE。
-func (o *Orchestrator) publishAssistant(sessionID, delta string) {
-	o.hub.Publish(sessionID, "assistant", o.withLifecycleMetadata(sessionID, map[string]any{
+func (o *Orchestrator) publishAssistant(sessionID, delta string, identity *llm.MessageDisplayIdentity, turnID, stepID, attemptID string, chunkSeq uint64) {
+	payload := map[string]any{
 		"content":      delta,
 		"display_type": "delta",
-	}))
+		"turn_id":      turnID,
+		"step_id":      stepID,
+		"part":         "content",
+	}
+	addAssistantDeltaIdentity(payload, identity, attemptID, "content", chunkSeq)
+	o.hub.PublishEphemeral(sessionID, "conversation_delta", o.withLifecycleMetadata(sessionID, payload))
 }
 
 // publishReasoning 推送 reasoning SSE。
-func (o *Orchestrator) publishReasoning(sessionID, delta string) {
-	o.hub.Publish(sessionID, "reasoning", o.withLifecycleMetadata(sessionID, map[string]any{
+func (o *Orchestrator) publishReasoning(sessionID, delta string, identity *llm.MessageDisplayIdentity, turnID, stepID, attemptID string, chunkSeq uint64) {
+	payload := map[string]any{
 		"content":      delta,
 		"display_type": "reasoning",
-	}))
+		"turn_id":      turnID,
+		"step_id":      stepID,
+		"part":         "reasoning",
+	}
+	addAssistantDeltaIdentity(payload, identity, attemptID, "reasoning", chunkSeq)
+	o.hub.PublishEphemeral(sessionID, "conversation_delta", o.withLifecycleMetadata(sessionID, payload))
+}
+
+func addAssistantDeltaIdentity(payload map[string]any, identity *llm.MessageDisplayIdentity, attemptID, part string, chunkSeq uint64) {
+	if identity == nil || attemptID == "" || chunkSeq == 0 {
+		return
+	}
+	itemID := identity.ContentItemID
+	if part == "reasoning" {
+		itemID = identity.ReasoningItemID
+	}
+	if itemID == "" {
+		return
+	}
+	payload["item_id"] = itemID
+	payload["attempt_id"] = attemptID
+	payload["part"] = part
+	payload["chunk_seq"] = chunkSeq
 }
 
 // publishError 推送 error SSE。
@@ -54,8 +86,13 @@ func (o *Orchestrator) PublishPendingHITL(sessionID string, pending *PendingHITL
 }
 
 // publishToolCallPayload 推送 tool call payload SSE。
-func (o *Orchestrator) publishToolCallPayload(sessionID string, payload map[string]any) {
-	o.hub.Publish(sessionID, "tool_call", o.withLifecycleMetadata(sessionID, payload))
+func (o *Orchestrator) publishToolCallPayload(sessionID string, payload map[string]any, replayable bool) {
+	data := o.withLifecycleMetadata(sessionID, payload)
+	if replayable {
+		o.hub.Publish(sessionID, "tool_call", data)
+		return
+	}
+	o.hub.PublishEphemeral(sessionID, "tool_call", data)
 }
 
 // publishToolCall 推送 tool call SSE。
@@ -87,7 +124,9 @@ func (o *Orchestrator) publishToolCall(sessionID string, tc llm.ToolCall, partia
 	if toolIndex >= 0 {
 		payload["tool_index"] = toolIndex
 	}
-	o.publishToolCallPayload(sessionID, o.withLifecycleMetadata(sessionID, payload))
+	// Incomplete provider tool-call argument deltas are transient UI feedback;
+	// only the accepted complete call participates in the replay cursor.
+	o.publishToolCallPayload(sessionID, payload, !partial)
 }
 
 // publishToolResult 推送 tool result SSE。
@@ -134,16 +173,58 @@ func (o *Orchestrator) publishTurnFinished(sessionID, finishReason string, noWor
 // PublishBudgetExhausted emits the terminal SSE after the lifecycle projection
 // has recorded a budget-exhausted Turn. budgetReason identifies the actual
 // max_tool_calls limit that prevented further tool execution.
-func (o *Orchestrator) PublishBudgetExhausted(sessionID, turnID string, generation uint64, budgetReason string) {
-	o.publishTurnFinishedWithDetails(sessionID, "budget_exhausted", map[string]any{
-		"budget_reason":   budgetReason,
-		"turn_id":         turnID,
-		"turn_generation": generation,
+func (o *Orchestrator) PublishBudgetExhausted(sessionID, turnID string, generation uint64, budgetReason string, historyRevision uint64) {
+	o.runTurnDonePhase(sessionID, "budget_exhausted")
+	o.PublishCommittedTurnFinished(sessionID, "budget_exhausted", map[string]any{
+		"budget_reason":    budgetReason,
+		"turn_id":          turnID,
+		"turn_generation":  generation,
+		"history_revision": historyRevision,
 	})
 }
 
 func (o *Orchestrator) publishTurnFinishedWithDetails(sessionID, finishReason string, additional map[string]any) {
 	o.runTurnDonePhase(sessionID, finishReason)
+	if o == nil {
+		return
+	}
+	o.terminalMu.Lock()
+	if o.terminalBySession == nil {
+		o.terminalBySession = make(map[string]pendingTerminalResult)
+	}
+	o.terminalBySession[sessionID] = pendingTerminalResult{finishReason: finishReason, additional: cloneEventData(additional)}
+	o.terminalMu.Unlock()
+}
+
+// RunTurnDoneCommitted preserves the business Hook for runtime terminal paths
+// whose completion is decided after the Orchestrator Step returns.
+func (o *Orchestrator) RunTurnDoneCommitted(sessionID, finishReason string) {
+	if o == nil {
+		return
+	}
+	o.runTurnDonePhase(sessionID, finishReason)
+}
+
+// PublishCommittedTurnFinished emits the UI-facing result only after the
+// runtime has committed the matching history and lifecycle state.
+func (o *Orchestrator) PublishCommittedTurnFinished(sessionID, finishReason string, additional map[string]any) {
+	if o == nil || o.hub == nil {
+		return
+	}
+	if additional == nil {
+		additional = map[string]any{}
+	}
+	o.terminalMu.Lock()
+	if pending, ok := o.terminalBySession[sessionID]; ok {
+		if strings.TrimSpace(pending.finishReason) != "" {
+			finishReason = pending.finishReason
+		}
+		for key, value := range pending.additional {
+			additional[key] = value
+		}
+		delete(o.terminalBySession, sessionID)
+	}
+	o.terminalMu.Unlock()
 	payload := map[string]any{
 		"finish_reason": finishReason,
 		"turn_complete": true,
@@ -161,10 +242,25 @@ func (o *Orchestrator) publishTurnFinishedWithDetails(sessionID, finishReason st
 	o.hub.Publish(sessionID, "turn_finished", o.withLifecycleMetadata(sessionID, payload))
 }
 
+func cloneEventData(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
 // PublishNoWorkFinished emits the trusted no-work terminal only after the
 // session runtime has committed the tool result and lifecycle transition.
 func (o *Orchestrator) PublishNoWorkFinished(sessionID string) {
-	o.publishTurnFinished(sessionID, "stop", true)
+	if o == nil {
+		return
+	}
+	o.runTurnDonePhase(sessionID, "stop")
+	o.PublishCommittedTurnFinished(sessionID, "stop", map[string]any{"no_work": true})
 }
 
 // publishUsage 推送 usage SSE。
@@ -289,7 +385,7 @@ func (o *Orchestrator) PublishSideEffectCallback(sessionID string, built SideEff
 		"display_type":    "normal_text",
 		"deferred":        true,
 		"side_effect_seq": sideEffectSeq,
-	})
+	}, true)
 	tc := llm.ToolCall{
 		ID:   built.ToolCallID,
 		Type: "function",

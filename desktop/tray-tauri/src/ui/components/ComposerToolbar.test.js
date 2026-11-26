@@ -38,6 +38,18 @@ describe("ComposerToolbar status", () => {
     wrapper.unmount();
   });
 
+  it("shows a retry icon action with an accessible label and emits it on click", async () => {
+    const wrapper = mount(ComposerToolbar, {
+      props: { desktopCompact: true, statusLabel: "结果暂未同步", statusActionLabel: "重试同步结果" },
+    });
+
+    const action = wrapper.get('button[aria-label="重试同步结果"]');
+    expect(action.attributes("title")).toBe("重试同步结果");
+    await action.trigger("click");
+    expect(wrapper.emitted("status-action")).toEqual([[]]);
+    wrapper.unmount();
+  });
+
   it("keeps the trigger compact and shows each profile model above its config name", async () => {
     const wrapper = mount(ComposerToolbar, {
       props: {

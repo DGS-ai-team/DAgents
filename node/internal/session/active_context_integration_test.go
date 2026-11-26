@@ -203,12 +203,12 @@ func TestDreamingActiveContextResetHydratesAndKeepsChatUsable(t *testing.T) {
 	if raw, err := os.ReadFile(filepath.Join(handbook, "round-5.md")); err != nil || string(raw) != "round-5" {
 		t.Fatalf("reopened tool write=%q err=%v", raw, err)
 	}
-	record, err := st2.Load(context.Background(), rt.ID)
-	if err != nil || record == nil {
-		t.Fatalf("hydrated session: record=%v err=%v", record, err)
+	record, err := st2.LoadConversationRecords(context.Background(), rt.ID)
+	if err != nil {
+		t.Fatalf("hydrated history: err=%v", err)
 	}
 	allText := ""
-	for _, msg := range record.Messages {
+	for _, msg := range record {
 		allText += "\n" + msg.Content
 	}
 	if strings.Count(allText, "first experience") != 1 || strings.Count(allText, "second experience") != 1 || strings.Count(allText, "third experience") != 1 ||

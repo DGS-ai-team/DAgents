@@ -9,9 +9,10 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   desktopCompact: { type: Boolean, default: false },
   statusLabel: { type: String, default: "" },
+  statusActionLabel: { type: String, default: "" },
 });
 
-const emit = defineEmits(["switch-profile", "open-model-settings"]);
+const emit = defineEmits(["switch-profile", "open-model-settings", "status-action"]);
 
 const open = ref(false);
 const rootRef = ref(null);
@@ -110,22 +111,32 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="composer-toolbar">
-    <span
-      class="composer-toolbar__status"
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-      :title="statusLabel || undefined"
-    >
-      <span class="visually-hidden">{{ statusLabel }}</span>
-      <span class="composer-toolbar__status-window" aria-hidden="true">
-        <Transition name="composer-status" appear>
-          <span v-if="statusLabel" :key="statusLabel" class="composer-toolbar__status-line">
-            <span class="composer-toolbar__status-text">{{ statusLabel }}</span>
-          </span>
-        </Transition>
+    <div class="composer-toolbar__status-group">
+      <span
+        class="composer-toolbar__status"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        :title="statusLabel || undefined"
+      >
+        <span class="visually-hidden">{{ statusLabel }}</span>
+        <span class="composer-toolbar__status-window" aria-hidden="true">
+          <Transition name="composer-status" appear>
+            <span v-if="statusLabel" :key="statusLabel" class="composer-toolbar__status-line">
+              <span class="composer-toolbar__status-text">{{ statusLabel }}</span>
+            </span>
+          </Transition>
+        </span>
       </span>
-    </span>
+      <button
+        v-if="statusActionLabel"
+        class="desktop-error-hint__retry"
+        type="button"
+        :aria-label="statusActionLabel"
+        :title="statusActionLabel"
+        @click.stop="emit('status-action')"
+      ><UiIcon name="refresh-cw" :size="13" /></button>
+    </div>
 
     <div v-if="showProfileSwitch" ref="rootRef" class="composer-toolbar__profile">
       <button

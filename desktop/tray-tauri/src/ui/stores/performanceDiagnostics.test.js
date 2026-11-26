@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearPerformanceDiagnostics,
   disablePerformanceDiagnostics,
   enablePerformanceDiagnostics,
   getPerformanceDiagnosticsSnapshot,
   measureSync,
+  measureElementLayout,
   recordSSEEvent,
   startPerformanceSpan,
   updateRuntimeMetrics,
@@ -30,6 +31,18 @@ describe("performance diagnostics", () => {
     expect(snapshot.recentEvents[0]).not.toHaveProperty("content");
   });
 
+  it("keeps independent sequence cursors when switching between Agents", () => {
+    recordSSEEvent("assistant", 18, "agent-a");
+    recordSSEEvent("assistant", 2, "agent-b");
+    recordSSEEvent("tool_result", 4, "agent-b");
+    recordSSEEvent("assistant", 21, "agent-a");
+
+    const snapshot = getPerformanceDiagnosticsSnapshot();
+    expect(snapshot.seqGaps).toBe(3);
+    expect(snapshot.lastSeq).toBe(21);
+    expect(snapshot.recentEvents.at(-1)).toMatchObject({ streamKey: "agent-a", seq: 21, gap: 2 });
+  });
+
   it("records synchronous spans and runtime scale metrics", () => {
     const value = measureSync("stream.build", () => 42, { entries: 240 });
     const span = startPerformanceSpan("scroll.update");
@@ -46,6 +59,23 @@ describe("performance diagnostics", () => {
       streamItems: 200,
       visibleItems: 180,
       unrevealedChars: 32,
+    });
+  });
+
+  it("measures an actual DOM layout read and records its node count", () => {
+    const element = {
+      getBoundingClientRect: vi.fn(() => ({ width: 320, height: 80 })),
+      querySelectorAll: vi.fn(() => [{}, {}]),
+    };
+    const result = measureElementLayout("stream.layout", element, { visibleItems: 1 });
+
+    expect(element.getBoundingClientRect).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ width: 320, height: 80 });
+    expect(getPerformanceDiagnosticsSnapshot().durations["stream.layout"]).toMatchObject({ count: 1 });
+    expect(getPerformanceDiagnosticsSnapshot().recentSpans.at(-1)).toMatchObject({
+      name: "stream.layout",
+      domNodes: 2,
+      visibleItems: 1,
     });
   });
 

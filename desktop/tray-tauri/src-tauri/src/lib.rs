@@ -43,7 +43,7 @@ use std::thread;
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
-use tauri::webview::WebviewWindowBuilder;
+use tauri::webview::{PageLoadEvent, WebviewWindowBuilder};
 use tauri::{
     AppHandle, Emitter, Manager, RunEvent, State, Url, WebviewUrl, WebviewWindow, WindowEvent,
 };
@@ -66,6 +66,7 @@ struct Shared {
     shell_stop: Arc<AtomicBool>,
     ui_focus: Arc<uifocus::Store>,
     sse_subscriber: Mutex<Option<events::Subscriber>>,
+    event_bridge: Arc<events::EventBridge>,
     hold_stopped: AtomicBool,
     node_running: AtomicBool,
     recovering: AtomicBool,
@@ -342,6 +343,7 @@ pub fn run() {
         Arc::clone(&node_client),
     ));
     let ui_focus = Arc::new(uifocus::Store::new());
+    let event_bridge = Arc::new(events::EventBridge::default());
     let shell_stop = Arc::new(AtomicBool::new(false));
 
     let shared = Arc::new(Shared {
@@ -355,6 +357,7 @@ pub fn run() {
         shell_stop,
         ui_focus,
         sse_subscriber: Mutex::new(None),
+        event_bridge: Arc::clone(&event_bridge),
         hold_stopped: AtomicBool::new(false),
         node_running: AtomicBool::new(false),
         recovering: AtomicBool::new(false),
@@ -377,6 +380,9 @@ pub fn run() {
         .manage(Arc::clone(&shared))
         .invoke_handler(tauri::generate_handler![
             desktop_node_status,
+            desktop_events_ready,
+            desktop_event_scope_generation,
+            desktop_set_active_agent,
             desktop_settings_get,
             desktop_settings_save,
             desktop_quit,
@@ -423,6 +429,14 @@ pub fn run() {
                         .map_err(|e| format!("加载窗口图标失败: {e}"))?,
                 )?
                 .on_navigation(is_desktop_mvp_navigation_allowed)
+                .on_page_load({
+                    let event_bridge = Arc::clone(&shared.event_bridge);
+                    move |_window, payload| {
+                        if payload.event() == PageLoadEvent::Started {
+                            event_bridge.webview_loading();
+                        }
+                    }
+                })
                 .build()?;
 
                 let win_for_close = window.clone();
@@ -579,6 +593,10 @@ pub fn run() {
                     }
                 });
 
+                let bridge_on_connect = Arc::clone(&shared.event_bridge);
+                let app_on_connect = app.handle().clone();
+                let bridge_on_event = Arc::clone(&shared.event_bridge);
+                let app_on_event = app.handle().clone();
                 let sub = events::Subscriber::new(
                     Arc::clone(&shared.node_client),
                     Arc::clone(&shared.pending_store),
@@ -588,12 +606,12 @@ pub fn run() {
                         move || refresh_pending_ui(&shared, &app)
                     },
                 )
+                .with_connection_handler(move || {
+                    bridge_on_connect.stream_connected(&app_on_connect);
+                })
                 .with_event_handler({
-                    let app = app.handle().clone();
                     move |event| {
-                        if let Some(window) = app.get_webview_window("desktop_mvp") {
-                            let _ = window.emit("desktop-node-event", event);
-                        }
+                        bridge_on_event.forward(&app_on_event, event);
                     }
                 });
                 sub.start();
@@ -815,6 +833,39 @@ async fn desktop_node_status(
         })
     })
     .await
+}
+
+#[tauri::command]
+fn desktop_events_ready(
+    window: WebviewWindow,
+    app: AppHandle,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<(), String> {
+    ensure_mvp_window(&window)?;
+    shared.event_bridge.webview_ready(&app)
+}
+
+#[tauri::command]
+fn desktop_event_scope_generation(
+    window: WebviewWindow,
+    shared: State<'_, Arc<Shared>>,
+) -> Result<u64, String> {
+    ensure_mvp_window(&window)?;
+    shared.event_bridge.webview_generation()
+}
+
+#[tauri::command]
+fn desktop_set_active_agent(
+    window: WebviewWindow,
+    shared: State<'_, Arc<Shared>>,
+    agent_id: String,
+    selection_generation: u64,
+    webview_generation: u64,
+) -> Result<bool, String> {
+    ensure_mvp_window(&window)?;
+    shared
+        .event_bridge
+        .set_active_agent(&agent_id, selection_generation, webview_generation)
 }
 
 #[tauri::command]

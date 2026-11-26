@@ -102,6 +102,36 @@ describe("ApprovalBubble", () => {
     expect(wrapper.find(".approval-item__summary").text()).toBe("读取文件");
   });
 
+  it("keeps mixed shell, file, and MCP approvals distinct with right-side selection", async () => {
+    const wrapper = mount(ApprovalBubble, {
+      props: {
+        requestKey: "request-mixed-tools",
+        data: approvalData({ approvalId: "request-mixed-tools", calls: [
+          { id: "shell-call", name: "bash_run", args: { command: "git status", call_purpose: "检查仓库状态" } },
+          { id: "file-call", name: "write_file", args: { path: "reports/summary.md", content: "summary", call_purpose: "保存汇总报告" } },
+          { id: "mcp-call", name: "mcp__qa__publish", args: { target: "release-note", call_purpose: "发布版本说明" } },
+        ] }),
+      },
+    });
+    const rows = wrapper.findAll(".approval-item");
+
+    expect(rows.map((row) => row.find(".approval-item__summary").text())).toEqual([
+      "检查仓库状态",
+      "保存汇总报告",
+      "发布版本说明",
+    ]);
+    for (const row of rows) {
+      expect(Array.from(row.find(".approval-item__summary-row").element.children).map((child) => child.className))
+        .toEqual(["approval-item__toggle", "approval-item__checkbox"]);
+    }
+
+    await rows[0].find("input[type=checkbox]").setValue(true);
+    await rows[2].find("input[type=checkbox]").setValue(true);
+    expect(wrapper.find(".approval-actions__approve").text()).toBe("批准所选 2 项");
+    await wrapper.find(".approval-actions__approve").trigger("click");
+    expect(wrapper.emitted("approve-selection")).toEqual([[ ["shell-call", "mcp-call"] ]]);
+  });
+
   it("shows repeat and approval details and rejects the whole batch once", async () => {
     const wrapper = mount(ApprovalBubble, {
       props: {
